@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>starfire.ai</title>
+  <link rel="icon" href="assets/logo.svg" type="image/svg+xml" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="bg-blobs" aria-hidden="true"><span class="b1"></span><span class="b2"></span><span class="b3"></span></div>
+
+  <header class="topbar">
+    <a href="https://drew-gnr.xyz" class="topbar-link" aria-label="Drew's Realm">
+      <img src="assets/logo.svg" alt="Logo" class="topbar-logo">
+    </a>
+    <span class="topbar-title">starfire.ai</span>
+  </header>
+
+  <div class="page-content">
+  <div class="terminal">
+
+    <div class="titlebar">
+      <span class="brand">starfire.ai</span>
+      <div class="status">
+        <span class="dot" id="dot"></span>
+        <span id="statusText">connecting…</span>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <select id="modelList"></select>
+      <select id="ctxSize" title="context window (tokens)">
+        <option value="512">ctx 512</option>
+        <option value="1024">ctx 1024</option>
+        <option value="2048" selected>ctx 2048</option>
+        <option value="4096">ctx 4096</option>
+        <option value="8192">ctx 8192</option>
+      </select>
+      <div class="spacer"></div>
+      <button class="btn ghost" id="exportBtn">export</button>
+      <button class="btn ghost" id="clearBtn">clear</button>
+    </div>
+
+    <div class="output" id="output">
+      <div class="welcome" id="welcome">
+        <div class="welcome-brand">starfire<span class="dim">.ai</span></div>
+        <p class="info-line">// local AI - powered by Ollama</p>
+        <p class="info-line">// nothing leaves your machine</p>
+        <br />
+        <p class="info-line">// no models? grab one:</p>
+        <p class="info-line">//   ollama pull qwen3:1.7b</p>
+        <p class="info-line">//   ollama pull llama3.2</p>
+        <br />
+        <p class="info-line">&#x2192; select a model above and start typing</p>
+      </div>
+    </div>
+
+    <div class="sysbar">
+      <span class="label">sys&gt;</span>
+      <input id="sysPrompt" type="text" placeholder="optional system prompt…" autocomplete="off" spellcheck="false" />
+    </div>
+
+    <form class="inputbar" id="form">
+      <span class="prompt-glyph">&gt;</span>
+      <textarea id="msgInput" rows="1" placeholder="type a message… (enter to send)" disabled spellcheck="false"></textarea>
+      <button class="btn send" type="submit" id="sendBtn" disabled>send</button>
+    </form>
+
+  </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
