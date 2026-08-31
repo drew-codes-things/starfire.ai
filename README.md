@@ -1,7 +1,8 @@
 # starfire.ai
 
 A terminal-themed AI chat interface. Runs local models through [Ollama](https://ollama.com)
-(auto-detected on startup, or add one manually) and optionally talks to hosted providers
+(auto-detected on startup — and started automatically if it's installed but not already
+running — or add one manually) and optionally talks to hosted providers
 (OpenAI, Anthropic, or any OpenAI-compatible API — Groq, OpenRouter, LM Studio, llama.cpp,
 vLLM, ...) via API keys you add in Settings. Nothing is sent anywhere unless you add a
 hosted provider yourself.
@@ -41,12 +42,17 @@ below.
 ## Chat
 
 Every message has a small hover toolbar: **copy** (assistant replies, your own messages, and
-each individual code block), **edit** (rewrites a past message and resends it, dropping
-everything after it — same "edit forks the conversation" behavior most chat UIs use), and
-**regenerate** (redoes an assistant reply from its preceding user message). A **stop** button
-appears while a reply is streaming. Every conversation autosaves as you go — see Chats below —
-and the history sent to the model is trimmed to an actual token budget based on the context
-size you pick in the header, not a fixed message count.
+each individual code block), **edit**, and **regenerate**. Both edit and regenerate branch the
+conversation — rather than mutating history in place, they create a new chat session pointing
+back at the original up to that point, so you can follow either version afterward (see Chats
+below). A **stop** button appears while a reply is streaming. Every conversation autosaves as
+you go, and the history sent to the model is trimmed to a fixed token budget automatically —
+there's no per-chat context-size control to configure.
+
+If a model likely doesn't support tool-calling (or is small enough — under ~3B parameters —
+to be unreliable about *when* to use a tool rather than just answering directly), a banner
+warns you before you enable tools for it, and the backend withholds the tools list from that
+model's requests either way.
 
 ## Chats
 
@@ -64,9 +70,12 @@ enable their checkbox to use them in a chat. **Filesystem** (read/write within a
 choose) stays a manual "Quick add" since it needs that directory choice first.
 
 Filesystem and MCP Memory need [Node.js](https://nodejs.org) (`npx`) installed locally; Fetch
-needs [uv](https://docs.astral.sh/uv/) (`uvx`). You can also add any other stdio MCP server by
-command + args. Enable a server's checkbox to include its tools in the next chat message —
-supported for Ollama (models with tool-calling support), OpenAI, and Anthropic.
+needs [uv](https://docs.astral.sh/uv/) (`uvx`). Beyond those three, a **server repository**
+dropdown lists other common MCP servers (Git, GitHub, GitLab, SQLite, Brave Search, Slack,
+Puppeteer) with a per-server configure form for whatever it needs (an API key/token, a local
+path, etc.) — or add any other stdio MCP server yourself by command + args. Enable a server's
+checkbox to include its tools in the next chat message — supported for Ollama (models with
+tool-calling support), OpenAI, and Anthropic.
 
 The same Tools tab also has several built-in (non-MCP) tools — see Memory, Documents, Notes,
 Automations, and Email below for most of them, plus:
@@ -111,6 +120,11 @@ phrases is assumed to already be an ISO date and passed through unchanged. Enabl
 & to-dos" in Settings → Tools to let the model add/update/delete/toggle items itself (using the
 same natural-language dates).
 
+**Templates** — save a note/checklist's shape (title, content or checklist items, type, label,
+color, repeat) and instantiate it with one click instead of rebuilding a recurring structure by
+hand. Five starter templates (Meeting notes, Daily to-do, Weekly review, Shopping list, Project
+brainstorm) are seeded on first run.
+
 Two things worth knowing:
 - **Recurring due dates only advance while the Notes tab is open** — a lightweight timer
   checks for overdue repeating notes and pushes their due date forward one period at a time.
@@ -120,6 +134,26 @@ Two things worth knowing:
   large subsystem (four delivery channels, SSRF-guarded webhooks, a background poller, a dedup
   cache). This version shows overdue/due-today notes with a highlighted badge in the list
   instead. If you want to be notified outside the app, that's not built.
+
+## Local generation (image/audio/video)
+
+Settings → Local Gen configures fully local image, audio, and video generation — no API key,
+no hosted service, no content moderation layer other than whatever model you load:
+
+- **Image** — via [ComfyUI](https://github.com/comfyanonymous/ComfyUI), a plain local server
+  (same trust model as Ollama). Point starfire at your ComfyUI base URL and checkpoints
+  directory; a generic URL-based downloader can pull any checkpoint file you give it a link to
+  — starfire doesn't curate or recommend which ones. Low/medium/high quality presets trade off
+  steps and resolution.
+- **Audio** — via [Piper](https://github.com/rhasspy/piper), a one-shot local CLI (not a
+  server) with low/medium/high quality voice variants you download per-voice.
+- **Video** — no fixed built-in workflow (the ecosystem is too fragmented for one); export a
+  working ComfyUI workflow graph as JSON, tell starfire which node/input holds the prompt text,
+  and save it under a name. The `generate_video` tool then queues it by name.
+
+Enable the corresponding tool (Generate image / Generate audio / Generate document) in Settings
+→ Tools. If local generation isn't configured, image/audio generation fall back to OpenAI's API
+(DALL-E/TTS) when a hosted OpenAI endpoint is configured — otherwise they're unavailable.
 
 ## Automations
 
@@ -176,9 +210,34 @@ but enough to see where usage is trending. Ollama/local models always show $0.
 
 ## Hardware
 
-Settings → Hardware detects this machine's RAM (and GPU VRAM, via `nvidia-smi` if present) and
-suggests which common Ollama-pullable models should actually fit and run well, instead of
-guessing and hitting an out-of-memory error or a model that swaps to disk and crawls.
+Settings → Hardware detects this machine's RAM/VRAM (capacity — does a model fit?) and
+CPU/GPU/RAM identity and speed (roughly, will it run well?), then suggests which common
+Ollama-pullable models should actually work — instead of guessing and hitting an
+out-of-memory error or a model that swaps to disk and crawls. Detection works on Linux, macOS,
+and Windows; GPU VRAM/name needs `nvidia-smi` (NVIDIA only), and RAM speed/type needs
+`dmidecode` **and root** on Linux specifically (macOS/Windows can read it as a normal user).
+
+**Ollama status** is also shown here: if it's installed but not running, a **Start Ollama**
+button launches it (no elevated privileges needed — same as running `ollama serve` yourself);
+starfire also tries this automatically on its own startup. If Ollama isn't installed at all,
+the tab shows the right install step for your OS (the official installer command on Linux,
+a download link for macOS/Windows) — starfire won't run that installer for you, since Ollama's
+own Linux installer needs `sudo`.
+
+### Pulling models
+
+Click **pull** next to any suggested model in the Hardware tab (or in Settings → Providers) to
+download it through Ollama with a progress bar, same UX as Ollama's own CLI. To pull a model
+manually instead — useful for scripting, a headless box, or a model not in the suggested
+list — use Ollama's CLI directly:
+
+```bash
+ollama pull llama3.1:8b        # any model from https://ollama.com/library
+ollama pull qwen2.5-coder:7b
+```
+
+A model pulled this way shows up in starfire's model list immediately; no restart needed.
+`ollama list` shows what's already pulled, and `ollama rm <model>` removes one.
 
 ## Backup & restore
 
@@ -221,12 +280,18 @@ Settings UI so they're encrypted at rest rather than sitting in plaintext in `.e
 - `data/memory.json` — your remembered facts.
 - `data/documents.json` — uploaded documents, chunked and indexed for search.
 - `data/tasks.json` / `data/task_runs.json` — scheduled automations and their run history.
-- `data/email_accounts.json` — email account metadata (host/port/username, non-secret); the
-  app password itself is encrypted in `data/api_keys.json` alongside provider API keys.
-- `data/notes.json` — your notes and checklists.
-- `data/chat_sessions.json` — your saved conversations.
+- `data/email_accounts.json` / `data/email_rules.json` — email account metadata and rules
+  (host/port/username, match/action config — all non-secret); the app password itself is
+  encrypted in `data/api_keys.json` alongside provider API keys.
+- `data/notes.json` / `data/note_templates.json` — your notes/checklists and saved templates.
+- `data/chat_sessions.json` — your saved conversations (including branches).
 - `data/presets.json` — saved (model + system prompt + tools) bundles.
 - `data/usage.json` — estimated token/cost history (see Usage above).
+- `data/comfyui_config.json` / `data/piper_config.json` / `data/custom_workflows.json` — local
+  image/audio/video generation config (see Local generation above); non-secret, no API keys
+  involved.
+- `data/generated_files.json` + `data/generated/` — metadata and file bytes for anything
+  generated (images/audio/documents).
 
 Back up or delete the whole `data/` directory to reset the app (or use Settings → Data's
 one-click backup/restore); deleting `data/.key` makes any stored keys unrecoverable.
@@ -235,19 +300,29 @@ one-click backup/restore); deleting `data/.key` makes any stored keys unrecovera
 
 - Multi-provider chat: Ollama (local or Ollama Cloud), OpenAI, Anthropic, and any
   OpenAI-compatible server, over one unified streaming UI
-- Ollama auto-detected on startup; manual add / network-scan for anything else
+- Ollama auto-detected and auto-started on startup; one-click install guidance, manual add,
+  or network-scan for anything else
+- Conversation branching (edit/regenerate fork into a new session rather than overwriting
+  history), autosaved chats with search
 - Encrypted local API-key storage, no plaintext secrets on disk
-- Tool-calling via MCP servers (filesystem, fetch, memory, or any custom stdio server)
+- Tool-calling via MCP servers (filesystem, fetch, memory, a repository of common servers with
+  per-server configure forms, or any custom stdio server), with a warning — and server-side
+  enforcement — when the selected model likely can't use tools reliably
 - Persistent memory (keyword-searchable facts) and document RAG (upload & search .txt/.md/.pdf),
   both usable by the model as tools or managed directly in Settings
 - Scheduled task automation (once/daily/weekly/cron prompts, run history) and email
-  (IMAP/SMTP with an app password: browse/read/send/reply/archive, plus on-demand AI
-  summarize/urgency-check/draft-reply), both usable by the model as tools too
-- Notes and checklists with due dates, repeat, pinning, and labels — usable by the model
-  as a tool too
+  (IMAP/SMTP with an app password: browse/read/send/reply/archive, rules that act on new mail
+  automatically, plus on-demand AI summarize/urgency-check/draft-reply), both usable by the
+  model as tools too
+- Notes and checklists with due dates, repeat, pinning, labels, and reusable templates —
+  usable by the model as a tool too
+- Fully local image/audio/video generation (ComfyUI/Piper, no API key, no hosted moderation)
+  with a hosted-API fallback when configured
+- Hardware detection (RAM/VRAM capacity, CPU/GPU/RAM identity and speed, cross-platform) with
+  model-fit suggestions and one-click pulls with progress bars
 - Incremental markdown rendering while responses stream
 - Light/dark theme toggle
-- Context window selector, optional system prompt (saved in browser), export chat as markdown
+- Optional system prompt (saved in browser), export chat as markdown
 - Runs 100% locally unless you opt in to a hosted provider — no telemetry, no accounts
 
 ## License
