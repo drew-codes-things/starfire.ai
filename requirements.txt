@@ -13,3 +13,11 @@ croniter>=2.0
 # mcp_servers_store.py's REFERENCE_SERVERS). Folding it in here means the
 # server.py bootstrap only needs one install path for every dependency.
 uv>=0.4
+# Document generation (generate_document builtin tool): pure-Python, no
+# system dependencies (no wkhtmltopdf/LibreOffice needed) — chosen for that
+# over a heavier HTML-to-PDF renderer.
+fpdf2>=2.7
+python-docx>=1.1
+# Local speech generation (generate_audio, when a Piper voice is configured
+# instead of/alongside OpenAI TTS) — provides the `piper` CLI, no API key.
+piper-tts>=1.2

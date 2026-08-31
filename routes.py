@@ -21,6 +21,7 @@ import date_parsing
 import email_client
 import file_edit_tool
 import hardware_probe
+import model_capabilities
 import pending_edits_store
 from agent_loop import run_chat_with_tools
 from api_key_manager import APIKeyManager
@@ -29,6 +30,14 @@ from chat_stream import _sse_line, stream_chat
 from config import config
 from context_budget import trim_to_budget
 from documents_store import DocumentStore
+import comfyui_client
+import piper_tts
+from comfyui_config_store import ComfyUIConfigStore
+from custom_workflow_store import CustomWorkflowStore
+from generated_files_store import GeneratedFileStore
+from piper_config_store import PiperConfigStore
+from email_rule_checker import EmailRuleChecker
+from email_rule_store import EmailRuleStore
 from email_store import EmailAccountStore
 from mcp_manager import McpConnectionError, mcp_manager
 from mcp_servers_store import REFERENCE_SERVERS, McpServerStore
@@ -36,6 +45,7 @@ from memory_store import MemoryStore
 from model_discovery import detect_ollama, discover_servers
 from model_endpoints import ModelEndpointStore
 from note_store import NoteStore
+from note_template_store import NoteTemplateStore
 from preset_store import PresetStore
 from providers import build_models_url
 from task_scheduler import TaskScheduler, compute_next_run
@@ -54,9 +64,15 @@ documents = DocumentStore(config.data_dir)
 tasks = TaskStore(config.data_dir)
 task_runs = TaskRunStore(config.data_dir)
 email_accounts = EmailAccountStore(config.data_dir)
+email_rules = EmailRuleStore(config.data_dir)
 presets = PresetStore(config.data_dir)
+generated_files = GeneratedFileStore(config.data_dir)
+comfyui_config = ComfyUIConfigStore(config.data_dir)
+piper_config = PiperConfigStore(config.data_dir)
+custom_workflows = CustomWorkflowStore(config.data_dir)
 usage = UsageStore(config.data_dir)
 notes = NoteStore(config.data_dir)
+note_templates = NoteTemplateStore(config.data_dir)
 chat_sessions = ChatSessionStore(config.data_dir)
 
 
@@ -65,6 +81,8 @@ def _tool_context(base_url: str = "", api_key: str | None = None, model: str = "
     return builtin_tools.ToolContext(
         memory=memory, documents=documents, tasks=tasks, task_runs=task_runs,
         email_accounts=email_accounts, api_keys=api_keys, notes=notes,
+        endpoints=endpoints, generated_files=generated_files,
+        comfyui_config=comfyui_config, piper_config=piper_config, custom_workflows=custom_workflows,
         base_url=base_url, api_key=api_key, model=model,
         require_edit_approval=require_edit_approval,
     )
@@ -424,6 +442,23 @@ def _task_chat_fn(endpoint_id, model, prompt, enabled_mcp_servers, enabled_built
 scheduler = TaskScheduler(tasks, task_runs, _task_chat_fn)
 
 
+def _email_rule_password(account_id: str) -> str | None:
+    return api_keys.load().get(account_id)
+
+
+async def _email_rule_chat_fn(endpoint_id: str, model: str, prompt: str) -> str:
+    from agent_loop import run_chat_collected
+
+    endpoint = endpoints.get(endpoint_id) if endpoint_id else None
+    if not endpoint:
+        raise RuntimeError("this rule's ai_summarize_note action has no valid endpoint configured")
+    api_key = _api_key_for(endpoint.id, endpoint.provider)
+    return await run_chat_collected(endpoint.base_url, api_key, model, [{"role": "user", "content": prompt}])
+
+
+email_rule_checker = EmailRuleChecker(email_rules, email_accounts, _email_rule_password, _email_rule_chat_fn, notes)
+
+
 @router.get("/tasks")
 async def list_tasks():
     return {"tasks": [
@@ -681,6 +716,57 @@ async def email_ai_action(account_id: str, uid: str, action: str, body: AiAction
     return {"result": result}
 
 
+# ── email rules ──────────────────────────────────────────────────────
+
+class EmailRuleBody(BaseModel):
+    account_id: str
+    folder: str = "INBOX"
+    match_field: str = "from"
+    match_value: str
+    action: str = "add_note"
+    endpoint_id: str = ""
+    model: str = ""
+
+
+def _rule_dict(r) -> dict:
+    return {"id": r.id, "account_id": r.account_id, "folder": r.folder, "match_field": r.match_field,
+            "match_value": r.match_value, "action": r.action, "endpoint_id": r.endpoint_id,
+            "model": r.model, "enabled": r.enabled}
+
+
+@router.get("/email/rules")
+async def list_email_rules():
+    return {"rules": [_rule_dict(r) for r in email_rules.list()]}
+
+
+@router.post("/email/rules")
+async def create_email_rule(body: EmailRuleBody):
+    if not body.match_value.strip():
+        raise HTTPException(400, "match_value is required")
+    if body.action == "ai_summarize_note" and not (body.endpoint_id and body.model):
+        raise HTTPException(400, "ai_summarize_note needs an endpoint and model")
+    rule = email_rules.add(account_id=body.account_id, folder=body.folder, match_field=body.match_field,
+                             match_value=body.match_value, action=body.action,
+                             endpoint_id=body.endpoint_id, model=body.model)
+    return _rule_dict(rule)
+
+
+@router.patch("/email/rules/{rule_id}")
+async def update_email_rule(rule_id: str, body: dict):
+    if "enabled" not in body:
+        raise HTTPException(400, "enabled is required")
+    if not email_rules.update(rule_id, enabled=bool(body["enabled"])):
+        raise HTTPException(404, "rule not found")
+    return {"ok": True}
+
+
+@router.delete("/email/rules/{rule_id}")
+async def delete_email_rule(rule_id: str):
+    if not email_rules.delete(rule_id):
+        raise HTTPException(404, "rule not found")
+    return {"ok": True}
+
+
 # ── notes ────────────────────────────────────────────────────────────
 
 class NoteItemBody(BaseModel):
@@ -787,6 +873,62 @@ async def toggle_note_item(note_id: str, index: int):
     return {"ok": True}
 
 
+# ── note templates ───────────────────────────────────────────────────
+
+class NoteTemplateBody(BaseModel):
+    name: str
+    title: str = ""
+    content: str = ""
+    items: list[NoteItemBody] = []
+    note_type: str = "note"
+    label: str = ""
+    color: str = ""
+    repeat: str = "none"
+
+
+def _template_dict(t) -> dict:
+    return {"id": t.id, "name": t.name, "title": t.title, "content": t.content,
+            "items": t.items, "note_type": t.note_type, "label": t.label,
+            "color": t.color, "repeat": t.repeat}
+
+
+@router.get("/note-templates")
+async def list_note_templates():
+    return {"templates": [_template_dict(t) for t in note_templates.list()]}
+
+
+@router.post("/note-templates")
+async def create_note_template(body: NoteTemplateBody):
+    if not body.name.strip():
+        raise HTTPException(400, "name is required")
+    template = note_templates.add(
+        name=body.name, title=body.title, content=body.content,
+        items=[i.model_dump() for i in body.items], note_type=body.note_type,
+        label=body.label, color=body.color, repeat=body.repeat,
+    )
+    return _template_dict(template)
+
+
+@router.delete("/note-templates/{template_id}")
+async def delete_note_template(template_id: str):
+    if not note_templates.delete(template_id):
+        raise HTTPException(404, "template not found")
+    return {"ok": True}
+
+
+@router.post("/note-templates/{template_id}/use")
+async def use_note_template(template_id: str):
+    template = note_templates.get(template_id)
+    if not template:
+        raise HTTPException(404, "template not found")
+    note = notes.add(
+        title=template.title, content=template.content,
+        items=[dict(i) for i in template.items], note_type=template.note_type,
+        label=template.label, color=template.color, repeat=template.repeat,
+    )
+    return _note_dict(note)
+
+
 # ── chat ──────────────────────────────────────────────────────────────
 
 class ChatBody(BaseModel):
@@ -843,11 +985,17 @@ async def chat_stream_endpoint(body: ChatBody):
         raise HTTPException(404, "endpoint not found")
     api_key = _api_key_for(endpoint.id, endpoint.provider)
 
-    # The frontend now sends the session's full message list rather than
+    # The frontend sends the session's full message list rather than
     # pre-slicing to a fixed count — trimming to an actual token budget
-    # (based on the context size the user picked) happens once, here, so it
-    # applies identically whether or not tools are enabled below.
-    num_ctx = (body.options or {}).get("num_ctx", 2048)
+    # happens once, here, so it applies identically whether or not tools
+    # are enabled below. No per-chat control over this budget anymore (the
+    # header's ctx-size selector was removed — it only ever affected Ollama
+    # requests directly, and confusingly meant something different, or
+    # nothing at all, for every other provider), so this fixed default has
+    # to be generous enough on its own: most current models comfortably
+    # support context windows far larger than the old default of 2048.
+    DEFAULT_CONTEXT_BUDGET_TOKENS = 8192
+    num_ctx = (body.options or {}).get("num_ctx", DEFAULT_CONTEXT_BUDGET_TOKENS)
     messages = trim_to_budget(body.messages, num_ctx)
 
     if body.enabled_mcp_servers or body.enabled_builtin_tools:
@@ -887,6 +1035,9 @@ async def chat_stream_endpoint(body: ChatBody):
 
 class CreateChatSessionBody(BaseModel):
     title: str = "New chat"
+    messages: list[dict] = []
+    parent_session_id: str = ""
+    branch_point: int = -1
 
 
 class UpdateChatSessionBody(BaseModel):
@@ -899,7 +1050,8 @@ class UpdateChatSessionBody(BaseModel):
 
 def _session_summary(s) -> dict:
     return {"id": s.id, "title": s.title, "endpoint_id": s.endpoint_id, "model": s.model,
-            "pinned": s.pinned, "created": s.created, "updated": s.updated, "message_count": len(s.messages)}
+            "pinned": s.pinned, "parent_session_id": s.parent_session_id, "branch_point": s.branch_point,
+            "created": s.created, "updated": s.updated, "message_count": len(s.messages)}
 
 
 @router.get("/chat/sessions")
@@ -909,8 +1061,14 @@ async def list_chat_sessions(q: str = ""):
 
 @router.post("/chat/sessions")
 async def create_chat_session(body: CreateChatSessionBody):
-    session = chat_sessions.add(title=body.title)
+    session = chat_sessions.add(title=body.title, messages=body.messages,
+                                  parent_session_id=body.parent_session_id, branch_point=body.branch_point)
     return {**_session_summary(session), "messages": session.messages}
+
+
+@router.get("/chat/sessions/{session_id}/branches")
+async def list_session_branches(session_id: str):
+    return {"branches": [_session_summary(s) for s in chat_sessions.branches_of(session_id)]}
 
 
 @router.get("/chat/sessions/{session_id}")
@@ -971,6 +1129,11 @@ async def get_usage():
 
 
 # ── hardware-aware model suggestions ────────────────────────────────
+
+@router.get("/model-capabilities")
+async def get_model_capabilities(provider: str, model: str):
+    return {"supports_tools": model_capabilities.supports_tools(provider, model)}
+
 
 @router.get("/hardware")
 async def get_hardware():
@@ -1046,6 +1209,173 @@ class PresetBody(BaseModel):
     model: str = ""
     enabled_mcp_servers: list[str] = []
     enabled_builtin_tools: list[str] = []
+
+
+# ── local image generation (ComfyUI) ────────────────────────────────
+
+class ComfyUIConfigBody(BaseModel):
+    base_url: str | None = None
+    checkpoints_dir: str | None = None
+    default_checkpoint: str | None = None
+    default_negative_prompt: str | None = None
+
+
+@router.get("/comfyui/config")
+async def get_comfyui_config():
+    return asdict_comfyui(comfyui_config.get())
+
+
+@router.put("/comfyui/config")
+async def update_comfyui_config(body: ComfyUIConfigBody):
+    return asdict_comfyui(comfyui_config.update(**body.model_dump(exclude_unset=True)))
+
+
+def asdict_comfyui(cfg) -> dict:
+    return {"base_url": cfg.base_url, "checkpoints_dir": cfg.checkpoints_dir,
+            "default_checkpoint": cfg.default_checkpoint, "default_negative_prompt": cfg.default_negative_prompt}
+
+
+@router.get("/comfyui/status")
+async def comfyui_status():
+    cfg = comfyui_config.get()
+    connected = await comfyui_client.detect(cfg.base_url)
+    checkpoints = await comfyui_client.list_checkpoints(cfg.base_url) if connected else []
+    return {"connected": connected, "checkpoints": checkpoints}
+
+
+@router.post("/comfyui/pull-checkpoint")
+async def pull_comfyui_checkpoint(body: dict):
+    url = body.get("url")
+    filename = body.get("filename")
+    if not url or not filename:
+        raise HTTPException(400, "url and filename are required")
+    cfg = comfyui_config.get()
+    if not cfg.checkpoints_dir:
+        raise HTTPException(400, "set a checkpoints directory in ComfyUI settings first")
+
+    async def stream():
+        try:
+            async for downloaded, total in comfyui_client.pull_checkpoint(url, cfg.checkpoints_dir, filename):
+                yield _sse_line({"downloaded": downloaded, "total": total})
+            yield _sse_line({"done": True})
+        except (httpx.HTTPError, RuntimeError, OSError) as e:
+            yield _sse_line({"error": str(e)})
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                              headers={"Cache-Control": "no-cache", "Connection": "keep-alive"})
+
+
+# ── local audio generation (Piper) ──────────────────────────────────
+
+class PiperConfigBody(BaseModel):
+    voice_model_path: str | None = None
+    voices_dir: str | None = None
+
+
+@router.get("/piper/config")
+async def get_piper_config():
+    cfg = piper_config.get()
+    return {"voice_model_path": cfg.voice_model_path, "voices_dir": cfg.voices_dir,
+            "installed": piper_tts.is_installed()}
+
+
+@router.put("/piper/config")
+async def update_piper_config(body: PiperConfigBody):
+    cfg = piper_config.update(**body.model_dump(exclude_unset=True))
+    return {"voice_model_path": cfg.voice_model_path, "voices_dir": cfg.voices_dir}
+
+
+@router.post("/piper/pull-voice")
+async def pull_piper_voice(body: dict):
+    voice_name = body.get("voice_name")
+    quality = body.get("quality", "medium")
+    if not voice_name:
+        raise HTTPException(400, "voice_name is required, e.g. 'en_US-lessac'")
+    cfg = piper_config.get()
+    if not cfg.voices_dir:
+        raise HTTPException(400, "set a voices directory in Piper settings first")
+
+    async def stream():
+        try:
+            async for downloaded, total in piper_tts.pull_voice(voice_name, quality, cfg.voices_dir):
+                yield _sse_line({"downloaded": downloaded, "total": total})
+            onnx_path = piper_tts.voice_url(voice_name, quality)[0]
+            filename = onnx_path.rsplit("/", 1)[-1]
+            yield _sse_line({"done": True, "path": os.path.join(cfg.voices_dir, filename)})
+        except (httpx.HTTPError, RuntimeError, OSError, ValueError) as e:
+            yield _sse_line({"error": str(e)})
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                              headers={"Cache-Control": "no-cache", "Connection": "keep-alive"})
+
+
+# ── custom ComfyUI workflows (video generation) ─────────────────────
+
+class CustomWorkflowBody(BaseModel):
+    name: str
+    workflow: dict
+    prompt_node_id: str
+    prompt_input_key: str = "text"
+
+
+@router.get("/custom-workflows")
+async def list_custom_workflows():
+    return {"workflows": [
+        {"id": w.id, "name": w.name, "prompt_node_id": w.prompt_node_id, "prompt_input_key": w.prompt_input_key}
+        for w in custom_workflows.list()
+    ]}
+
+
+@router.post("/custom-workflows")
+async def create_custom_workflow(body: CustomWorkflowBody):
+    if not body.name.strip():
+        raise HTTPException(400, "name is required")
+    if body.prompt_node_id not in body.workflow:
+        raise HTTPException(400, f"workflow has no node id '{body.prompt_node_id}'")
+    w = custom_workflows.add(name=body.name, workflow=body.workflow,
+                               prompt_node_id=body.prompt_node_id, prompt_input_key=body.prompt_input_key)
+    return {"id": w.id, "name": w.name}
+
+
+@router.delete("/custom-workflows/{workflow_id}")
+async def delete_custom_workflow(workflow_id: str):
+    if not custom_workflows.delete(workflow_id):
+        raise HTTPException(404, "workflow not found")
+    return {"ok": True}
+
+
+# ── generated files (image / audio / document generation) ──────────
+
+@router.get("/generated")
+async def list_generated_files():
+    return {"files": [
+        {"id": f.id, "kind": f.kind, "filename": f.filename, "content_type": f.content_type,
+         "source": f.source, "created": f.created}
+        for f in generated_files.list()
+    ]}
+
+
+@router.get("/generated/{file_id}")
+async def get_generated_file(file_id: str):
+    entry = generated_files.get(file_id)
+    if not entry:
+        raise HTTPException(404, "file not found")
+    path = generated_files.path_for(entry)
+    if not os.path.exists(path):
+        raise HTTPException(404, "file data missing on disk")
+    with open(path, "rb") as f:
+        data = f.read()
+    return StreamingResponse(
+        iter([data]), media_type=entry.content_type,
+        headers={"Content-Disposition": f'inline; filename="{entry.filename}"'},
+    )
+
+
+@router.delete("/generated/{file_id}")
+async def delete_generated_file(file_id: str):
+    if not generated_files.delete(file_id):
+        raise HTTPException(404, "file not found")
+    return {"ok": True}
 
 
 @router.get("/presets")

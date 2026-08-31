@@ -25,8 +25,8 @@ const els = {
   sendBtn:     $('sendBtn'),
   stopBtn:     $('stopBtn'),
   micBtn:      $('micBtn'),
+  capabilityWarning: $('capabilityWarning'),
   modelList:   $('modelList'),
-  ctxSize:     $('ctxSize'),
   exportBtn:   $('exportBtn'),
   clearBtn:    $('clearBtn'),
   settingsBtn: $('settingsBtn'),
@@ -105,6 +105,16 @@ const settingsEls = {
   emailAddResult: $('emailAddResult'),
   emailAccountList: $('emailAccountList'),
   emailInboxCard: $('emailInboxCard'),
+  ruleAccountSelect: $('ruleAccountSelect'),
+  ruleFolder:      $('ruleFolder'),
+  ruleMatchField:  $('ruleMatchField'),
+  ruleMatchValue:  $('ruleMatchValue'),
+  ruleAction:      $('ruleAction'),
+  ruleModelRow:    $('ruleModelRow'),
+  ruleModelSelect: $('ruleModelSelect'),
+  createRuleBtn:   $('createRuleBtn'),
+  ruleCreateResult: $('ruleCreateResult'),
+  ruleList:        $('ruleList'),
   emailFolderSelect: $('emailFolderSelect'),
   emailRefreshBtn: $('emailRefreshBtn'),
   emailMessageList: $('emailMessageList'),
@@ -113,6 +123,9 @@ const settingsEls = {
   toggleSearchWeb: $('toggleSearchWeb'),
   toggleGithubCli: $('toggleGithubCli'),
   toggleDeepResearch: $('toggleDeepResearch'),
+  toggleGenerateImage: $('toggleGenerateImage'),
+  toggleGenerateAudio: $('toggleGenerateAudio'),
+  toggleGenerateDocument: $('toggleGenerateDocument'),
   toggleEditFile: $('toggleEditFile'),
   editApprovalRow: $('editApprovalRow'),
   toggleEditApproval: $('toggleEditApproval'),
@@ -125,9 +138,46 @@ const settingsEls = {
   hardwareInfo: $('hardwareInfo'),
   hardwareModelList: $('hardwareModelList'),
   downloadBackupBtn: $('downloadBackupBtn'),
+  toggleGenerateVideo: $('toggleGenerateVideo'),
+  comfyBaseUrl: $('comfyBaseUrl'),
+  comfyDetectBtn: $('comfyDetectBtn'),
+  comfyStatus: $('comfyStatus'),
+  comfyCheckpointsDir: $('comfyCheckpointsDir'),
+  comfyBrowseBtn: $('comfyBrowseBtn'),
+  comfyDirBrowserBox: $('comfyDirBrowserBox'),
+  comfyDirBrowserPath: $('comfyDirBrowserPath'),
+  comfyDirBrowserList: $('comfyDirBrowserList'),
+  comfyDirBrowserSelectBtn: $('comfyDirBrowserSelectBtn'),
+  comfyCheckpointSelect: $('comfyCheckpointSelect'),
+  comfyNegativePrompt: $('comfyNegativePrompt'),
+  comfySaveBtn: $('comfySaveBtn'),
+  comfySaveResult: $('comfySaveResult'),
+  comfyPullUrl: $('comfyPullUrl'),
+  comfyPullFilename: $('comfyPullFilename'),
+  comfyPullBtn: $('comfyPullBtn'),
+  comfyPullStatus: $('comfyPullStatus'),
+  piperVoicePath: $('piperVoicePath'),
+  piperSaveBtn: $('piperSaveBtn'),
+  piperSaveResult: $('piperSaveResult'),
+  piperVoiceName: $('piperVoiceName'),
+  piperVoiceQuality: $('piperVoiceQuality'),
+  piperVoicesDirForPull: $('piperVoicesDirForPull'),
+  piperPullBtn: $('piperPullBtn'),
+  piperPullStatus: $('piperPullStatus'),
+  workflowName: $('workflowName'),
+  workflowJson: $('workflowJson'),
+  workflowPromptNode: $('workflowPromptNode'),
+  workflowPromptKey: $('workflowPromptKey'),
+  saveWorkflowBtn: $('saveWorkflowBtn'),
+  workflowSaveResult: $('workflowSaveResult'),
+  workflowList: $('workflowList'),
   restoreFile: $('restoreFile'),
   restoreBackupBtn: $('restoreBackupBtn'),
   restoreResult: $('restoreResult'),
+  noteTemplateSelect: $('noteTemplateSelect'),
+  useTemplateBtn:  $('useTemplateBtn'),
+  saveAsTemplateBtn: $('saveAsTemplateBtn'),
+  noteTemplateList: $('noteTemplateList'),
   noteTitle:       $('noteTitle'),
   noteType:        $('noteType'),
   noteContentRow:  $('noteContentRow'),
@@ -157,12 +207,14 @@ let enabledMcpServers = new Set();
 try { enabledMcpServers = new Set(JSON.parse(localStorage.getItem('sf_mcp_enabled') || '[]')); } catch (_) {}
 function saveEnabledMcpServers() {
   try { localStorage.setItem('sf_mcp_enabled', JSON.stringify([...enabledMcpServers])); } catch (_) {}
+  checkModelToolCapability();
 }
 
 let enabledBuiltinTools = new Set();
 try { enabledBuiltinTools = new Set(JSON.parse(localStorage.getItem('sf_builtin_tools_enabled') || '[]')); } catch (_) {}
 function saveEnabledBuiltinTools() {
   try { localStorage.setItem('sf_builtin_tools_enabled', JSON.stringify([...enabledBuiltinTools])); } catch (_) {}
+  checkModelToolCapability();
 }
 
 function setStatus(state, text) {
@@ -293,14 +345,14 @@ function addRegenerateButton(actions, idx) {
   btn.type = 'button';
   btn.className = 'line-action-btn';
   btn.textContent = 'regenerate';
-  btn.onclick = () => {
+  btn.onclick = async () => {
     let userIdx = idx - 1;
     while (userIdx >= 0 && messages[userIdx].role !== 'user') userIdx--;
     if (userIdx < 0 || busy) return;
     const text = messages[userIdx].content;
     const opt = select.selectedOptions[0];
     const overrideModel = opt ? { id: opt.value, endpoint_id: opt.dataset.endpointId } : null;
-    messages = messages.slice(0, userIdx);
+    await forkSession(userIdx);
     rerenderAll();
     send(text, overrideModel);
   };
@@ -378,6 +430,54 @@ function renderDiffCard(resultJson) {
   els.output.scrollTop = els.output.scrollHeight;
 }
 
+function renderGeneratedFileCard(toolName, resultJson) {
+  let data;
+  try { data = JSON.parse(resultJson); }
+  catch (_) { printLine('» ' + toolName + ': ' + resultJson, resultJson.startsWith('error') ? 'err' : 'info'); return; }
+  if (!data.url) { printLine('» ' + toolName + ': ' + resultJson, 'err'); return; }
+
+  const w = $('welcome');
+  if (w) w.remove();
+
+  const card = document.createElement('div');
+  card.className = 'diff-card'; // reuses the same bordered-card look, not diff-specific styling
+
+  if (data.kind === 'image') {
+    card.innerHTML = `<img src="${data.url}" alt="${escapeHtml(data.prompt || 'generated image')}" style="max-width:100%;display:block;" />`;
+  } else if (data.kind === 'audio') {
+    card.innerHTML = `<div class="diff-card-header">generated audio</div><audio controls src="${data.url}" style="width:100%"></audio>`;
+  } else if (data.kind === 'document') {
+    card.innerHTML =
+      `<div class="diff-card-header">generated document</div>` +
+      `<div class="diff-card-actions"><a class="btn send" href="${data.url}" download="${escapeHtml(data.filename || 'document')}">download ${escapeHtml(data.filename || '')}</a></div>`;
+  }
+  els.output.appendChild(card);
+  els.output.scrollTop = els.output.scrollHeight;
+}
+
+function renderGeneratedVideoCard(resultJson) {
+  let data;
+  try { data = JSON.parse(resultJson); }
+  catch (_) { printLine('» generate_video: ' + resultJson, resultJson.startsWith('error') ? 'err' : 'info'); return; }
+  const files = data.files || [];
+  if (!files.length) { printLine('» generate_video: no output files', 'err'); return; }
+
+  const w = $('welcome');
+  if (w) w.remove();
+
+  for (const file of files) {
+    const card = document.createElement('div');
+    card.className = 'diff-card';
+    if (file.kind === 'video') {
+      card.innerHTML = `<video controls src="${file.url}" style="width:100%;display:block;"></video>`;
+    } else {
+      card.innerHTML = `<img src="${file.url}" alt="${escapeHtml(file.filename || 'generated frame')}" style="max-width:100%;display:block;" />`;
+    }
+    els.output.appendChild(card);
+  }
+  els.output.scrollTop = els.output.scrollHeight;
+}
+
 function startEdit(idx) {
   if (busy) return;
   const original = messages[idx].content;
@@ -402,16 +502,45 @@ function startEdit(idx) {
   ta.focus();
 
   cancelBtn.onclick = () => rerenderAll();
-  saveBtn.onclick = () => {
+  saveBtn.onclick = async () => {
     const newText = ta.value.trim();
     if (!newText) return;
-    // Editing a message discards it and everything after it, then resends
-    // the edited text as a new turn — same "edit forks the conversation"
-    // behavior most chat UIs use, rather than trying to keep the old branch.
-    messages = messages.slice(0, idx);
+    await forkSession(idx);
     rerenderAll();
     send(newText);
   };
+}
+
+// Editing a message or regenerating with a different model used to
+// truncate `messages` in place and overwrite the current session,
+// discarding everything after the fork point. This instead saves the
+// truncated prefix as a brand-new sibling session (parent_session_id set)
+// and switches to it — the original session is untouched and still
+// reachable from the Chats tab, so no branch is ever thrown away.
+async function forkSession(uptoIdx) {
+  const forkedMessages = messages.slice(0, uptoIdx);
+  const parentId = currentSessionId;
+  try {
+    const r = await fetch('/api/chat/sessions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: (forkedMessages[0]?.content || 'New chat').slice(0, 60),
+        messages: forkedMessages,
+        parent_session_id: parentId || '',
+        branch_point: uptoIdx,
+      }),
+    });
+    if (r.ok) {
+      const session = await r.json();
+      currentSessionId = session.id;
+      try { localStorage.setItem('sf_current_session', currentSessionId); } catch (_) {}
+    }
+  } catch (_) {
+    // Fork request failed (offline/server hiccup) — fall through and edit
+    // in place against whatever session was already current rather than
+    // losing the edit entirely.
+  }
+  messages = forkedMessages;
 }
 
 function renderStaticMessage(role, text, idx) {
@@ -592,9 +721,9 @@ async function send(text, overrideModel) {
   setStatus('loading', 'waiting...');
 
   try {
-    // Sends the full session — context_budget.py on the backend trims to
-    // the model's actual context window (from the ctx-size selector below)
-    // rather than the frontend guessing a fixed message count.
+    // Sends the full session — context_budget.py on the backend trims to a
+    // default token budget rather than the frontend guessing a fixed
+    // message count.
     const r = await fetch('/api/chat_stream', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -604,7 +733,6 @@ async function send(text, overrideModel) {
         model:       model.id,
         messages:    messages.slice(),
         system:      els.sysPrompt.value.trim() || undefined,
-        options:     { num_ctx: parseInt(els.ctxSize?.value || '2048', 10) },
         enabled_mcp_servers: [...enabledMcpServers],
         enabled_builtin_tools: [...enabledBuiltinTools],
         require_edit_approval: requireEditApproval,
@@ -646,10 +774,15 @@ async function send(text, overrideModel) {
           } else if (obj.tool_start) {
             printLine('» calling ' + obj.tool_start.replace(/^mcp__[^_]+__/, '') + '…', 'info');
           } else if (obj.tool_result) {
-            if (obj.tool_result.name === 'edit_file') {
+            const toolName = obj.tool_result.name;
+            if (toolName === 'edit_file') {
               renderDiffCard(obj.tool_result.result);
+            } else if (toolName === 'generate_image' || toolName === 'generate_audio' || toolName === 'generate_document') {
+              renderGeneratedFileCard(toolName, obj.tool_result.result);
+            } else if (toolName === 'generate_video') {
+              renderGeneratedVideoCard(obj.tool_result.result);
             } else {
-              printLine('» ' + obj.tool_result.name.replace(/^mcp__[^_]+__/, '') + ' done', 'info');
+              printLine('» ' + toolName.replace(/^mcp__[^_]+__/, '') + ' done', 'info');
             }
           } else if (obj.error) {
             streamError = obj.error;
@@ -740,7 +873,33 @@ els.modelList.addEventListener('change', () => {
   clearChat();
   warmModel(currentModel());
   setStatus('ready', els.modelList.value);
+  checkModelToolCapability();
 });
+
+// Warns (doesn't block — the toggle stays whatever you set it to) when the
+// selected model is one we know doesn't support tool-calling but at least
+// one tool is currently enabled, since the tools would silently do nothing.
+async function checkModelToolCapability() {
+  const model = currentModel();
+  const anyToolsEnabled = enabledMcpServers.size > 0 || enabledBuiltinTools.size > 0;
+  if (!model || !anyToolsEnabled) {
+    els.capabilityWarning.hidden = true;
+    return;
+  }
+  try {
+    const r = await fetch(`/api/model-capabilities?provider=${encodeURIComponent(model.provider)}&model=${encodeURIComponent(model.id)}`);
+    const { supports_tools } = await r.json();
+    if (supports_tools === false) {
+      els.capabilityWarning.textContent =
+        `⚠️ ${model.id} likely doesn't support tool-calling — enabled tools may be silently ignored.`;
+      els.capabilityWarning.hidden = false;
+    } else {
+      els.capabilityWarning.hidden = true;
+    }
+  } catch (_) {
+    els.capabilityWarning.hidden = true;
+  }
+}
 
 els.exportBtn.onclick = exportChat;
 els.clearBtn.onclick  = clearChat;
@@ -781,11 +940,14 @@ function openSettings() {
   refreshTaskList();
   refreshTaskRunList();
   refreshEmailAccountList();
+  refreshEmailRules();
   refreshNoteList();
+  refreshNoteTemplateList();
   startNoteReminderTimer();
   refreshPresetList();
   refreshUsage();
   refreshHardware();
+  refreshLocalGen();
 }
 function closeSettings() {
   settingsEls.modal.hidden = true;
@@ -1039,52 +1201,67 @@ async function addMcpPreset(preset, resultEl, path) {
 settingsEls.addFilesystemBtn.onclick = () =>
   addMcpPreset('filesystem', settingsEls.mcpQuickAddResult, settingsEls.filesystemPath.value.trim());
 
-// ── directory browser (pick the filesystem MCP server's folder by
-// clicking, rather than typing an absolute path from memory) ──────────
+// ── directory browser (pick a folder by clicking, rather than typing an
+// absolute path from memory) — one factory, instantiated per field that
+// needs it (the filesystem MCP path, ComfyUI's checkpoints folder, Piper's
+// voices folder), each with its own independent browse state. ────────
 
-let dirBrowserCurrent = '';
+function setupDirBrowser({ browseBtn, box, pathLabel, list, selectBtn, targetInput }) {
+  let current = '';
 
-async function loadDirBrowser(path) {
-  try {
-    const url = '/api/browse-dir' + (path ? '?path=' + encodeURIComponent(path) : '');
-    const r = await fetch(url);
-    if (!r.ok) return;
-    const data = await r.json();
-    dirBrowserCurrent = data.path;
-    settingsEls.dirBrowserPath.textContent = data.path;
-    settingsEls.dirBrowserList.innerHTML = '';
-    if (data.parent) {
-      const up = document.createElement('li');
-      up.className = 'endpoint-row';
-      up.innerHTML = '<span class="endpoint-label">.. (up one level)</span>';
-      up.onclick = () => loadDirBrowser(data.parent);
-      settingsEls.dirBrowserList.appendChild(up);
+  async function load(path) {
+    try {
+      const url = '/api/browse-dir' + (path ? '?path=' + encodeURIComponent(path) : '');
+      const r = await fetch(url);
+      if (!r.ok) return;
+      const data = await r.json();
+      current = data.path;
+      pathLabel.textContent = data.path;
+      list.innerHTML = '';
+      if (data.parent) {
+        const up = document.createElement('li');
+        up.className = 'endpoint-row';
+        up.innerHTML = '<span class="endpoint-label">.. (up one level)</span>';
+        up.onclick = () => load(data.parent);
+        list.appendChild(up);
+      }
+      if (!data.entries.length && !data.parent) {
+        list.innerHTML += '<li class="settings-hint">no subfolders here</li>';
+      }
+      for (const entry of data.entries) {
+        const li = document.createElement('li');
+        li.className = 'endpoint-row';
+        li.innerHTML = `<span class="endpoint-label">📁 ${escapeHtml(entry.name)}</span>`;
+        li.onclick = () => load(entry.path);
+        list.appendChild(li);
+      }
+    } catch (_) {
+      list.innerHTML = '<li class="settings-hint error">failed to browse</li>';
     }
-    if (!data.entries.length && !data.parent) {
-      settingsEls.dirBrowserList.innerHTML += '<li class="settings-hint">no subfolders here</li>';
-    }
-    for (const entry of data.entries) {
-      const li = document.createElement('li');
-      li.className = 'endpoint-row';
-      li.innerHTML = `<span class="endpoint-label">📁 ${escapeHtml(entry.name)}</span>`;
-      li.onclick = () => loadDirBrowser(entry.path);
-      settingsEls.dirBrowserList.appendChild(li);
-    }
-  } catch (_) {
-    settingsEls.dirBrowserList.innerHTML = '<li class="settings-hint error">failed to browse</li>';
   }
+
+  browseBtn.onclick = () => {
+    const wasHidden = box.hidden;
+    box.hidden = !wasHidden;
+    if (wasHidden) load(targetInput.value.trim());
+  };
+  selectBtn.onclick = () => {
+    targetInput.value = current;
+    box.hidden = true;
+  };
 }
 
-settingsEls.browseDirBtn.onclick = () => {
-  const wasHidden = settingsEls.dirBrowserBox.hidden;
-  settingsEls.dirBrowserBox.hidden = !wasHidden;
-  if (wasHidden) loadDirBrowser(settingsEls.filesystemPath.value.trim());
-};
+setupDirBrowser({
+  browseBtn: settingsEls.browseDirBtn, box: settingsEls.dirBrowserBox,
+  pathLabel: settingsEls.dirBrowserPath, list: settingsEls.dirBrowserList,
+  selectBtn: settingsEls.dirBrowserSelectBtn, targetInput: settingsEls.filesystemPath,
+});
 
-settingsEls.dirBrowserSelectBtn.onclick = () => {
-  settingsEls.filesystemPath.value = dirBrowserCurrent;
-  settingsEls.dirBrowserBox.hidden = true;
-};
+setupDirBrowser({
+  browseBtn: settingsEls.comfyBrowseBtn, box: settingsEls.comfyDirBrowserBox,
+  pathLabel: settingsEls.comfyDirBrowserPath, list: settingsEls.comfyDirBrowserList,
+  selectBtn: settingsEls.comfyDirBrowserSelectBtn, targetInput: settingsEls.comfyCheckpointsDir,
+});
 
 settingsEls.addMcpCustomBtn.onclick = async () => {
   const name = settingsEls.mcpName.value.trim();
@@ -1176,6 +1353,34 @@ settingsEls.toggleDeepResearch.addEventListener('change', () => {
   saveEnabledBuiltinTools();
 });
 
+settingsEls.toggleGenerateImage.checked = enabledBuiltinTools.has('generate_image');
+settingsEls.toggleGenerateImage.addEventListener('change', () => {
+  if (settingsEls.toggleGenerateImage.checked) enabledBuiltinTools.add('generate_image');
+  else enabledBuiltinTools.delete('generate_image');
+  saveEnabledBuiltinTools();
+});
+
+settingsEls.toggleGenerateAudio.checked = enabledBuiltinTools.has('generate_audio');
+settingsEls.toggleGenerateAudio.addEventListener('change', () => {
+  if (settingsEls.toggleGenerateAudio.checked) enabledBuiltinTools.add('generate_audio');
+  else enabledBuiltinTools.delete('generate_audio');
+  saveEnabledBuiltinTools();
+});
+
+settingsEls.toggleGenerateVideo.checked = enabledBuiltinTools.has('generate_video');
+settingsEls.toggleGenerateVideo.addEventListener('change', () => {
+  if (settingsEls.toggleGenerateVideo.checked) enabledBuiltinTools.add('generate_video');
+  else enabledBuiltinTools.delete('generate_video');
+  saveEnabledBuiltinTools();
+});
+
+settingsEls.toggleGenerateDocument.checked = enabledBuiltinTools.has('generate_document');
+settingsEls.toggleGenerateDocument.addEventListener('change', () => {
+  if (settingsEls.toggleGenerateDocument.checked) enabledBuiltinTools.add('generate_document');
+  else enabledBuiltinTools.delete('generate_document');
+  saveEnabledBuiltinTools();
+});
+
 settingsEls.toggleEditFile.checked = enabledBuiltinTools.has('edit_file');
 settingsEls.editApprovalRow.hidden = !settingsEls.toggleEditFile.checked;
 settingsEls.toggleEditFile.addEventListener('change', () => {
@@ -1213,16 +1418,23 @@ async function refreshSessionList() {
       settingsEls.chatSessionList.innerHTML = `<li class="settings-hint">${q ? 'no matching chats' : 'no saved chats yet'}</li>`;
       return;
     }
+    const byId = Object.fromEntries(sessions.map(s => [s.id, s]));
     for (const s of sessions) {
       const li = document.createElement('li');
       li.className = 'endpoint-row' + (s.id === currentSessionId ? ' active-session' : '');
       const pinIcon = s.pinned ? '📌 ' : '';
+      const parent = s.parent_session_id ? byId[s.parent_session_id] : null;
+      const branchLine = parent
+        ? `<button class="btn ghost branch-link" data-act="parent">&#8618; forked from "${escapeHtml(parent.title || '(untitled)')}"</button>`
+        : '';
       li.innerHTML =
         `<span class="endpoint-label">${pinIcon}${escapeHtml(s.title || '(untitled)')}</span>` +
         `<span class="endpoint-meta">${s.message_count} msg &middot; ${new Date(s.updated).toLocaleString()}</span>` +
+        branchLine +
         `<button class="btn ghost" data-act="pin">${s.pinned ? 'unpin' : 'pin'}</button>` +
         `<button class="btn ghost" data-act="open">open</button>` +
         `<button class="endpoint-remove" title="Remove">×</button>`;
+      if (parent) li.querySelector('[data-act="parent"]').onclick = () => openSession(parent.id);
       li.querySelector('[data-act="pin"]').onclick = async () => {
         await fetch('/api/chat/sessions/' + s.id, {
           method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -1259,13 +1471,16 @@ async function openSession(id) {
 
 // ── memory ───────────────────────────────────────────────────────────
 
+let memoryCategoryFilter = '';
+
 async function refreshMemoryList() {
   try {
     const r = await fetch('/api/memory');
-    const { memories = [] } = await r.json();
+    const { memories: allMemories = [] } = await r.json();
+    const memories = memoryCategoryFilter ? allMemories.filter(m => m.category === memoryCategoryFilter) : allMemories;
     settingsEls.memoryList.innerHTML = '';
     if (!memories.length) {
-      settingsEls.memoryList.innerHTML = '<li class="settings-hint">nothing remembered yet</li>';
+      settingsEls.memoryList.innerHTML = `<li class="settings-hint">${allMemories.length ? 'nothing in this category' : 'nothing remembered yet'}</li>`;
       return;
     }
     for (const m of memories) {
@@ -1293,6 +1508,14 @@ async function refreshMemoryList() {
     settingsEls.memoryList.innerHTML = '<li class="settings-hint error">failed to load memory</li>';
   }
 }
+
+document.querySelectorAll('#memoryCategoryTabs button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    memoryCategoryFilter = btn.dataset.category;
+    document.querySelectorAll('#memoryCategoryTabs button').forEach(b => b.classList.toggle('active', b === btn));
+    refreshMemoryList();
+  });
+});
 
 settingsEls.addMemoryEntryBtn.onclick = async () => {
   const text = settingsEls.newMemoryText.value.trim();
@@ -1556,6 +1779,7 @@ settingsEls.addEmailAccountBtn.onclick = async () => {
     settingsEls.emailAddResult.className = 'settings-hint ok';
     settingsEls.emailPassword.value = '';
     await refreshEmailAccountList();
+    await refreshEmailRules();
   } catch (e) {
     settingsEls.emailAddResult.textContent = e.message;
     settingsEls.emailAddResult.className = 'settings-hint error';
@@ -1689,6 +1913,102 @@ async function runEmailAi(action, folder, uid, onResult) {
 // escapeHtml is already defined globally by streamingRenderer.js (loaded
 // before this script) — reused here rather than duplicated.
 
+// ── email rules ──────────────────────────────────────────────────────
+
+async function refreshEmailRules() {
+  try {
+    const accountsRes = await fetch('/api/email/accounts');
+    const { accounts = [] } = await accountsRes.json();
+    settingsEls.ruleAccountSelect.innerHTML = '';
+    for (const a of accounts) {
+      const opt = document.createElement('option');
+      opt.value = a.id;
+      opt.textContent = a.label;
+      settingsEls.ruleAccountSelect.appendChild(opt);
+    }
+
+    settingsEls.ruleModelSelect.innerHTML = '';
+    for (const m of models) {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.dataset.endpointId = m.endpoint_id;
+      opt.textContent = m.id;
+      settingsEls.ruleModelSelect.appendChild(opt);
+    }
+
+    const rulesRes = await fetch('/api/email/rules');
+    const { rules = [] } = await rulesRes.json();
+    settingsEls.ruleList.innerHTML = '';
+    if (!rules.length) {
+      settingsEls.ruleList.innerHTML = '<li class="settings-hint">no rules yet</li>';
+      return;
+    }
+    const accountById = Object.fromEntries(accounts.map(a => [a.id, a]));
+    for (const rule of rules) {
+      const li = document.createElement('li');
+      li.className = 'endpoint-row';
+      const accountLabel = accountById[rule.account_id]?.label || '(deleted account)';
+      li.innerHTML =
+        `<span class="endpoint-label">${escapeHtml(rule.match_field)} contains "${escapeHtml(rule.match_value)}"</span>` +
+        `<span class="endpoint-meta">${escapeHtml(accountLabel)}/${escapeHtml(rule.folder)} &rarr; ${escapeHtml(rule.action)}</span>` +
+        `<label class="theme-toggle"><input type="checkbox" ${rule.enabled ? 'checked' : ''} /><span>on</span></label>` +
+        `<button class="endpoint-remove" title="Remove">×</button>`;
+      li.querySelector('input[type="checkbox"]').onchange = async e => {
+        await fetch(`/api/email/rules/${rule.id}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ enabled: e.target.checked }),
+        });
+      };
+      li.querySelector('.endpoint-remove').onclick = async () => {
+        await fetch('/api/email/rules/' + rule.id, { method: 'DELETE' });
+        await refreshEmailRules();
+      };
+      settingsEls.ruleList.appendChild(li);
+    }
+  } catch (_) {
+    settingsEls.ruleList.innerHTML = '<li class="settings-hint error">failed to load rules</li>';
+  }
+}
+
+settingsEls.ruleAction.addEventListener('change', () => {
+  settingsEls.ruleModelRow.hidden = settingsEls.ruleAction.value !== 'ai_summarize_note';
+});
+
+settingsEls.createRuleBtn.onclick = async () => {
+  const matchValue = settingsEls.ruleMatchValue.value.trim();
+  if (!matchValue) return;
+  const accountId = settingsEls.ruleAccountSelect.value;
+  if (!accountId) {
+    settingsEls.ruleCreateResult.textContent = 'add an email account first';
+    settingsEls.ruleCreateResult.className = 'settings-hint error';
+    return;
+  }
+  const modelOpt = settingsEls.ruleModelSelect.selectedOptions[0];
+  try {
+    const r = await fetch('/api/email/rules', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        account_id: accountId, folder: settingsEls.ruleFolder.value || 'INBOX',
+        match_field: settingsEls.ruleMatchField.value, match_value: matchValue,
+        action: settingsEls.ruleAction.value,
+        endpoint_id: modelOpt ? modelOpt.dataset.endpointId : '',
+        model: modelOpt ? modelOpt.value : '',
+      }),
+    });
+    if (!r.ok) {
+      const { detail } = await r.json().catch(() => ({}));
+      throw new Error(detail || 'create failed');
+    }
+    settingsEls.ruleCreateResult.textContent = 'added';
+    settingsEls.ruleCreateResult.className = 'settings-hint ok';
+    settingsEls.ruleMatchValue.value = '';
+    await refreshEmailRules();
+  } catch (e) {
+    settingsEls.ruleCreateResult.textContent = e.message;
+    settingsEls.ruleCreateResult.className = 'settings-hint error';
+  }
+};
+
 // ── notes (to-do list / checklists) ─────────────────────────────────
 
 let pendingNoteItems = [];
@@ -1719,6 +2039,85 @@ settingsEls.noteAddItemBtn.onclick = () => {
   pendingNoteItems.push({ text, done: false });
   settingsEls.noteNewItem.value = '';
   renderPendingNoteItems();
+};
+
+// ── note templates ───────────────────────────────────────────────────
+
+async function refreshNoteTemplateList() {
+  try {
+    const r = await fetch('/api/note-templates');
+    const { templates = [] } = await r.json();
+
+    settingsEls.noteTemplateSelect.innerHTML = '<option value="">— start from a template —</option>';
+    for (const t of templates) {
+      const opt = document.createElement('option');
+      opt.value = t.id;
+      opt.textContent = t.name;
+      settingsEls.noteTemplateSelect.appendChild(opt);
+    }
+
+    settingsEls.noteTemplateList.innerHTML = '';
+    if (!templates.length) {
+      settingsEls.noteTemplateList.innerHTML = '<li class="settings-hint">none saved yet</li>';
+      return;
+    }
+    for (const t of templates) {
+      const li = document.createElement('li');
+      li.className = 'endpoint-row';
+      li.innerHTML =
+        `<span class="endpoint-label">${escapeHtml(t.name)}</span>` +
+        `<span class="endpoint-meta">${escapeHtml(t.note_type)}</span>` +
+        `<button class="endpoint-remove" title="Remove">×</button>`;
+      li.querySelector('.endpoint-remove').onclick = async () => {
+        await fetch('/api/note-templates/' + t.id, { method: 'DELETE' });
+        await refreshNoteTemplateList();
+      };
+      settingsEls.noteTemplateList.appendChild(li);
+    }
+  } catch (_) {
+    settingsEls.noteTemplateList.innerHTML = '<li class="settings-hint error">failed to load templates</li>';
+  }
+}
+
+settingsEls.useTemplateBtn.onclick = async () => {
+  const templateId = settingsEls.noteTemplateSelect.value;
+  if (!templateId) return;
+  try {
+    const r = await fetch('/api/note-templates');
+    const { templates = [] } = await r.json();
+    const t = templates.find(x => x.id === templateId);
+    if (!t) return;
+    settingsEls.noteTitle.value = t.title || '';
+    settingsEls.noteContent.value = t.content || '';
+    settingsEls.noteType.value = t.note_type || 'note';
+    settingsEls.noteType.dispatchEvent(new Event('change'));
+    settingsEls.noteLabel.value = t.label || '';
+    settingsEls.noteColor.value = t.color || '';
+    settingsEls.noteRepeat.value = t.repeat || 'none';
+    pendingNoteItems = (t.items || []).map(i => ({ text: i.text, done: false }));
+    renderPendingNoteItems();
+  } catch (_) {}
+};
+
+settingsEls.saveAsTemplateBtn.onclick = async () => {
+  const name = prompt('Template name?', settingsEls.noteTitle.value.trim() || 'Untitled template');
+  if (!name) return;
+  try {
+    const r = await fetch('/api/note-templates', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name, title: settingsEls.noteTitle.value.trim(), content: settingsEls.noteContent.value.trim(),
+        items: pendingNoteItems, note_type: settingsEls.noteType.value,
+        label: settingsEls.noteLabel.value.trim(), color: settingsEls.noteColor.value.trim(),
+        repeat: settingsEls.noteRepeat.value,
+      }),
+    });
+    if (!r.ok) throw new Error('save failed');
+    await refreshNoteTemplateList();
+  } catch (_) {
+    settingsEls.noteCreateResult.textContent = 'failed to save template';
+    settingsEls.noteCreateResult.className = 'settings-hint error';
+  }
 };
 
 settingsEls.createNoteBtn.onclick = async () => {
@@ -2007,6 +2406,10 @@ function applyPreset(p) {
   settingsEls.toggleSearchWeb.checked = enabledBuiltinTools.has('search_web');
   settingsEls.toggleGithubCli.checked = enabledBuiltinTools.has('github_cli');
   settingsEls.toggleDeepResearch.checked = enabledBuiltinTools.has('deep_research');
+  settingsEls.toggleGenerateImage.checked = enabledBuiltinTools.has('generate_image');
+  settingsEls.toggleGenerateAudio.checked = enabledBuiltinTools.has('generate_audio');
+  settingsEls.toggleGenerateVideo.checked = enabledBuiltinTools.has('generate_video');
+  settingsEls.toggleGenerateDocument.checked = enabledBuiltinTools.has('generate_document');
   settingsEls.toggleEditFile.checked = enabledBuiltinTools.has('edit_file');
   settingsEls.editApprovalRow.hidden = !settingsEls.toggleEditFile.checked;
   settingsEls.toggleRunShell.checked = enabledBuiltinTools.has('run_shell');
@@ -2064,6 +2467,243 @@ async function refreshHardware() {
   } catch (_) {
     settingsEls.hardwareInfo.innerHTML = '<p class="settings-hint error">failed to detect hardware</p>';
   }
+}
+
+// ── local generation: ComfyUI (image) ───────────────────────────────
+
+async function refreshComfyUI() {
+  try {
+    const cfgRes = await fetch('/api/comfyui/config');
+    const cfg = await cfgRes.json();
+    settingsEls.comfyBaseUrl.value = cfg.base_url || '';
+    settingsEls.comfyCheckpointsDir.value = cfg.checkpoints_dir || '';
+    settingsEls.comfyNegativePrompt.value = cfg.default_negative_prompt || '';
+
+    const statusRes = await fetch('/api/comfyui/status');
+    const status = await statusRes.json();
+    settingsEls.comfyStatus.textContent = status.connected
+      ? `connected — ${status.checkpoints.length} checkpoint(s) available`
+      : 'not connected';
+    settingsEls.comfyStatus.className = 'settings-hint ' + (status.connected ? 'ok' : '');
+
+    settingsEls.comfyCheckpointSelect.innerHTML = '<option value="">— default checkpoint —</option>';
+    for (const name of status.checkpoints) {
+      const opt = document.createElement('option');
+      opt.value = name; opt.textContent = name;
+      if (name === cfg.default_checkpoint) opt.selected = true;
+      settingsEls.comfyCheckpointSelect.appendChild(opt);
+    }
+  } catch (_) {
+    settingsEls.comfyStatus.textContent = 'failed to load ComfyUI status';
+    settingsEls.comfyStatus.className = 'settings-hint error';
+  }
+}
+
+settingsEls.comfyDetectBtn.onclick = refreshComfyUI;
+
+settingsEls.comfySaveBtn.onclick = async () => {
+  try {
+    await fetch('/api/comfyui/config', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        base_url: settingsEls.comfyBaseUrl.value.trim(),
+        checkpoints_dir: settingsEls.comfyCheckpointsDir.value.trim(),
+        default_checkpoint: settingsEls.comfyCheckpointSelect.value,
+        default_negative_prompt: settingsEls.comfyNegativePrompt.value.trim(),
+      }),
+    });
+    settingsEls.comfySaveResult.textContent = 'saved';
+    settingsEls.comfySaveResult.className = 'settings-hint ok';
+    await refreshComfyUI();
+  } catch (e) {
+    settingsEls.comfySaveResult.textContent = 'failed to save';
+    settingsEls.comfySaveResult.className = 'settings-hint error';
+  }
+};
+
+settingsEls.comfyPullBtn.onclick = async () => {
+  const url = settingsEls.comfyPullUrl.value.trim();
+  const filename = settingsEls.comfyPullFilename.value.trim();
+  if (!url || !filename) return;
+  settingsEls.comfyPullBtn.disabled = true;
+  settingsEls.comfyPullStatus.textContent = 'starting…';
+  try {
+    const r = await fetch('/api/comfyui/pull-checkpoint', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, filename }),
+    });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || 'failed to start'); }
+    await readProgressStream(r, (obj) => {
+      if (obj.error) { settingsEls.comfyPullStatus.textContent = 'error: ' + obj.error; return; }
+      if (obj.done) { settingsEls.comfyPullStatus.textContent = 'done'; return; }
+      const pct = obj.total ? Math.round(100 * obj.downloaded / obj.total) + '%' : (obj.downloaded / 1e6).toFixed(1) + ' MB';
+      settingsEls.comfyPullStatus.textContent = 'downloading… ' + pct;
+    });
+    await refreshComfyUI();
+  } catch (e) {
+    settingsEls.comfyPullStatus.textContent = 'error: ' + e.message;
+  } finally {
+    settingsEls.comfyPullBtn.disabled = false;
+  }
+};
+
+// Shared SSE-stream reader for the various "download with progress" endpoints
+// (Ollama model pull, ComfyUI checkpoint pull, Piper voice pull) — same
+// frame parsing as everywhere else that reads an SSE stream, factored out
+// since three separate features now need exactly this.
+async function readProgressStream(response, onEvent) {
+  const reader = response.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let sep;
+    while ((sep = buf.indexOf('\n\n')) >= 0) {
+      const frame = buf.slice(0, sep);
+      buf = buf.slice(sep + 2);
+      const line = frame.trim();
+      if (!line.startsWith('data:')) continue;
+      try { onEvent(JSON.parse(line.slice(5).trim())); } catch (_) {}
+    }
+  }
+}
+
+// ── local generation: Piper (audio) ─────────────────────────────────
+
+async function refreshPiper() {
+  try {
+    const r = await fetch('/api/piper/config');
+    const cfg = await r.json();
+    settingsEls.piperVoicePath.value = cfg.voice_model_path || '';
+    if (!cfg.installed) {
+      settingsEls.piperSaveResult.textContent = 'piper not installed yet — restart starfire.ai to trigger auto-install';
+      settingsEls.piperSaveResult.className = 'settings-hint error';
+    }
+  } catch (_) {}
+}
+
+settingsEls.piperSaveBtn.onclick = async () => {
+  try {
+    await fetch('/api/piper/config', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voice_model_path: settingsEls.piperVoicePath.value.trim() }),
+    });
+    settingsEls.piperSaveResult.textContent = 'saved';
+    settingsEls.piperSaveResult.className = 'settings-hint ok';
+  } catch (_) {
+    settingsEls.piperSaveResult.textContent = 'failed to save';
+    settingsEls.piperSaveResult.className = 'settings-hint error';
+  }
+};
+
+settingsEls.piperPullBtn.onclick = async () => {
+  const voiceName = settingsEls.piperVoiceName.value.trim();
+  const quality = settingsEls.piperVoiceQuality.value;
+  const voicesDir = settingsEls.piperVoicesDirForPull.value.trim();
+  if (!voiceName || !voicesDir) return;
+  settingsEls.piperPullBtn.disabled = true;
+  settingsEls.piperPullStatus.textContent = 'starting…';
+  try {
+    await fetch('/api/piper/config', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voices_dir: voicesDir }),
+    });
+    const r = await fetch('/api/piper/pull-voice', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voice_name: voiceName, quality }),
+    });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || 'failed to start'); }
+    let finalPath = '';
+    await readProgressStream(r, (obj) => {
+      if (obj.error) { settingsEls.piperPullStatus.textContent = 'error: ' + obj.error; return; }
+      if (obj.done) { settingsEls.piperPullStatus.textContent = 'done'; finalPath = obj.path; return; }
+      const pct = obj.total ? Math.round(100 * obj.downloaded / obj.total) + '%' : (obj.downloaded / 1e6).toFixed(1) + ' MB';
+      settingsEls.piperPullStatus.textContent = 'downloading… ' + pct;
+    });
+    if (finalPath) {
+      settingsEls.piperVoicePath.value = finalPath;
+      await fetch('/api/piper/config', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ voice_model_path: finalPath }),
+      });
+    }
+  } catch (e) {
+    settingsEls.piperPullStatus.textContent = 'error: ' + e.message;
+  } finally {
+    settingsEls.piperPullBtn.disabled = false;
+  }
+};
+
+// ── local generation: custom ComfyUI workflows (video) ──────────────
+
+async function refreshWorkflowList() {
+  try {
+    const r = await fetch('/api/custom-workflows');
+    const { workflows = [] } = await r.json();
+    settingsEls.workflowList.innerHTML = '';
+    if (!workflows.length) {
+      settingsEls.workflowList.innerHTML = '<li class="settings-hint">none saved yet</li>';
+      return;
+    }
+    for (const w of workflows) {
+      const li = document.createElement('li');
+      li.className = 'endpoint-row';
+      li.innerHTML =
+        `<span class="endpoint-label">${escapeHtml(w.name)}</span>` +
+        `<span class="endpoint-meta">node ${escapeHtml(w.prompt_node_id)} / ${escapeHtml(w.prompt_input_key)}</span>` +
+        `<button class="endpoint-remove" title="Remove">×</button>`;
+      li.querySelector('.endpoint-remove').onclick = async () => {
+        await fetch('/api/custom-workflows/' + w.id, { method: 'DELETE' });
+        await refreshWorkflowList();
+      };
+      settingsEls.workflowList.appendChild(li);
+    }
+  } catch (_) {
+    settingsEls.workflowList.innerHTML = '<li class="settings-hint error">failed to load workflows</li>';
+  }
+}
+
+settingsEls.saveWorkflowBtn.onclick = async () => {
+  const name = settingsEls.workflowName.value.trim();
+  const promptNodeId = settingsEls.workflowPromptNode.value.trim();
+  const promptInputKey = settingsEls.workflowPromptKey.value.trim() || 'text';
+  if (!name || !promptNodeId) {
+    settingsEls.workflowSaveResult.textContent = 'name and prompt node id are required';
+    settingsEls.workflowSaveResult.className = 'settings-hint error';
+    return;
+  }
+  let workflow;
+  try {
+    workflow = JSON.parse(settingsEls.workflowJson.value);
+  } catch (e) {
+    settingsEls.workflowSaveResult.textContent = 'invalid JSON: ' + e.message;
+    settingsEls.workflowSaveResult.className = 'settings-hint error';
+    return;
+  }
+  try {
+    const r = await fetch('/api/custom-workflows', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, workflow, prompt_node_id: promptNodeId, prompt_input_key: promptInputKey }),
+    });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || 'save failed'); }
+    settingsEls.workflowSaveResult.textContent = 'saved';
+    settingsEls.workflowSaveResult.className = 'settings-hint ok';
+    settingsEls.workflowName.value = '';
+    settingsEls.workflowJson.value = '';
+    settingsEls.workflowPromptNode.value = '';
+    await refreshWorkflowList();
+  } catch (e) {
+    settingsEls.workflowSaveResult.textContent = e.message;
+    settingsEls.workflowSaveResult.className = 'settings-hint error';
+  }
+};
+
+function refreshLocalGen() {
+  refreshComfyUI();
+  refreshPiper();
+  refreshWorkflowList();
 }
 
 // ── backup / restore ─────────────────────────────────────────────────
@@ -2313,31 +2953,15 @@ async function pullModel(name, btn, statusEl) {
       const d = await r.json().catch(() => ({}));
       throw new Error(d.detail || 'failed to start pull');
     }
-    const reader = r.body.getReader();
-    const dec = new TextDecoder();
-    let buf = '';
     let sawError = null;
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      let sep;
-      while ((sep = buf.indexOf('\n\n')) >= 0) {
-        const frame = buf.slice(0, sep);
-        buf = buf.slice(sep + 2);
-        const line = frame.trim();
-        if (!line.startsWith('data:')) continue;
-        try {
-          const obj = JSON.parse(line.slice(5).trim());
-          if (obj.error) { sawError = obj.error; }
-          else if (obj.status) {
-            let text = obj.status;
-            if (obj.total && obj.completed) text += ' ' + Math.round(100 * obj.completed / obj.total) + '%';
-            statusEl.textContent = text;
-          }
-        } catch (_) {}
+    await readProgressStream(r, (obj) => {
+      if (obj.error) { sawError = obj.error; }
+      else if (obj.status) {
+        let text = obj.status;
+        if (obj.total && obj.completed) text += ' ' + Math.round(100 * obj.completed / obj.total) + '%';
+        statusEl.textContent = text;
       }
-    }
+    });
     if (sawError) throw new Error(sawError);
     statusEl.textContent = 'done';
     btn.textContent = 'pulled';
@@ -2402,4 +3026,4 @@ settingsEls.lightModeToggle.addEventListener('change', () => {
 // `models` array, so it must run after loadModels() has actually populated
 // it — chained rather than fired in parallel, or a page-load restore would
 // build those dropdowns empty (loadModels()'s fetch hadn't resolved yet).
-loadModels().then(restoreSession);
+loadModels().then(() => { restoreSession(); checkModelToolCapability(); });

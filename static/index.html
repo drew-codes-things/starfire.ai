@@ -34,19 +34,14 @@
 
     <div class="toolbar">
       <select id="modelList"></select>
-      <select id="ctxSize" title="context window (tokens)">
-        <option value="512">ctx 512</option>
-        <option value="1024">ctx 1024</option>
-        <option value="2048" selected>ctx 2048</option>
-        <option value="4096">ctx 4096</option>
-        <option value="8192">ctx 8192</option>
-      </select>
       <div class="spacer"></div>
       <button class="btn ghost" id="compareBtn" title="Compare models side by side">compare</button>
       <button class="btn ghost" id="settingsBtn" title="Providers &amp; appearance">settings</button>
       <button class="btn ghost" id="exportBtn">export</button>
       <button class="btn ghost" id="clearBtn" title="Start a new saved conversation">new chat</button>
     </div>
+
+    <div class="capability-warning" id="capabilityWarning" hidden></div>
 
     <div class="output" id="output">
       <div class="welcome" id="welcome">
@@ -96,6 +91,7 @@
           <button class="settings-tab" data-tab="presets">Presets</button>
           <button class="settings-tab" data-tab="usage">Usage</button>
           <button class="settings-tab" data-tab="hardware">Hardware</button>
+          <button class="settings-tab" data-tab="localgen">Local Gen</button>
           <button class="settings-tab" data-tab="data">Data</button>
           <button class="settings-tab" data-tab="appearance">Appearance</button>
         </nav>
@@ -207,6 +203,30 @@
                 </label>
               </div>
               <div class="settings-row">
+                <label class="theme-toggle">
+                  <input type="checkbox" id="toggleGenerateImage" />
+                  <span>Generate images (local ComfyUI if set up in Local Gen, else OpenAI)</span>
+                </label>
+              </div>
+              <div class="settings-row">
+                <label class="theme-toggle">
+                  <input type="checkbox" id="toggleGenerateAudio" />
+                  <span>Generate speech audio (local Piper if set up in Local Gen, else OpenAI)</span>
+                </label>
+              </div>
+              <div class="settings-row">
+                <label class="theme-toggle">
+                  <input type="checkbox" id="toggleGenerateVideo" />
+                  <span>Generate video (needs a custom ComfyUI workflow saved in Local Gen)</span>
+                </label>
+              </div>
+              <div class="settings-row">
+                <label class="theme-toggle">
+                  <input type="checkbox" id="toggleGenerateDocument" />
+                  <span>Generate documents (.md/.txt/.pdf/.docx)</span>
+                </label>
+              </div>
+              <div class="settings-row">
                 <label class="theme-toggle warning">
                   <input type="checkbox" id="toggleEditFile" />
                   <span>&#9888;&#65039; Edit files (writes to disk, with a diff shown in chat)</span>
@@ -286,6 +306,14 @@
             </div>
             <div class="settings-card">
               <h3>Remembered facts</h3>
+              <div class="settings-row" id="memoryCategoryTabs">
+                <button class="btn ghost active" data-category="">all</button>
+                <button class="btn ghost" data-category="fact">fact</button>
+                <button class="btn ghost" data-category="identity">identity</button>
+                <button class="btn ghost" data-category="preference">preference</button>
+                <button class="btn ghost" data-category="contact">contact</button>
+                <button class="btn ghost" data-category="task">task</button>
+              </div>
               <ul class="endpoint-list" id="memoryList"></ul>
             </div>
           </div>
@@ -308,6 +336,12 @@
           <div class="settings-panel" data-panel="notes" hidden>
             <div class="settings-card">
               <h3>New note</h3>
+              <div class="settings-row">
+                <select id="noteTemplateSelect">
+                  <option value="">— start from a template —</option>
+                </select>
+                <button class="btn ghost" id="useTemplateBtn" type="button">use</button>
+              </div>
               <div class="settings-row">
                 <input id="noteTitle" type="text" placeholder="title" autocomplete="off" spellcheck="false" />
                 <select id="noteType">
@@ -343,8 +377,13 @@
               </div>
               <div class="settings-row">
                 <button class="btn send" id="createNoteBtn">add note</button>
+                <button class="btn ghost" id="saveAsTemplateBtn" type="button" title="Save the fields above as a reusable template">save as template</button>
               </div>
               <p class="settings-hint" id="noteCreateResult"></p>
+            </div>
+            <div class="settings-card">
+              <h3>Templates</h3>
+              <ul class="endpoint-list" id="noteTemplateList"></ul>
             </div>
             <div class="settings-card">
               <h3>Notes</h3>
@@ -435,6 +474,41 @@
                 </div>
               </div>
             </div>
+            <div class="settings-card">
+              <h3>Rules</h3>
+              <p class="settings-hint">Checked automatically in the background every couple of minutes for accounts with
+                at least one enabled rule — not just when you open the inbox.</p>
+              <div class="settings-row">
+                <select id="ruleAccountSelect"></select>
+                <select id="ruleFolder">
+                  <option value="INBOX">INBOX</option>
+                </select>
+              </div>
+              <div class="settings-row">
+                <select id="ruleMatchField">
+                  <option value="from">from</option>
+                  <option value="subject">subject</option>
+                </select>
+                <input id="ruleMatchValue" type="text" placeholder="contains…" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="settings-row">
+                <select id="ruleAction">
+                  <option value="add_note">add a note</option>
+                  <option value="ai_summarize_note">AI-summarize into a note</option>
+                  <option value="mark_read">mark read</option>
+                  <option value="archive">archive</option>
+                  <option value="delete">delete</option>
+                </select>
+              </div>
+              <div class="settings-row" id="ruleModelRow" hidden>
+                <select id="ruleModelSelect"></select>
+              </div>
+              <div class="settings-row">
+                <button class="btn send" id="createRuleBtn">add rule</button>
+              </div>
+              <p class="settings-hint" id="ruleCreateResult"></p>
+              <ul class="endpoint-list" id="ruleList"></ul>
+            </div>
           </div>
 
           <div class="settings-panel" data-panel="presets" hidden>
@@ -472,6 +546,105 @@
             <div class="settings-card">
               <h3>Suggested Ollama models</h3>
               <ul class="endpoint-list" id="hardwareModelList"></ul>
+            </div>
+          </div>
+
+          <div class="settings-panel" data-panel="localgen" hidden>
+            <div class="settings-card">
+              <h3>Local image generation (ComfyUI)</h3>
+              <p class="settings-hint">No API key — ComfyUI is a plain local server, same trust model as Ollama.
+                Content is entirely up to whatever checkpoint you load; nothing here filters it.</p>
+              <div class="settings-row">
+                <input id="comfyBaseUrl" type="text" placeholder="http://127.0.0.1:8188" autocomplete="off" spellcheck="false" />
+                <button class="btn ghost" id="comfyDetectBtn" type="button">detect</button>
+              </div>
+              <p class="settings-hint" id="comfyStatus"></p>
+              <div class="settings-row">
+                <input id="comfyCheckpointsDir" type="text" placeholder="path to ComfyUI/models/checkpoints" autocomplete="off" spellcheck="false" />
+                <button class="btn ghost" id="comfyBrowseBtn" type="button">browse…</button>
+              </div>
+              <div class="dir-browser" id="comfyDirBrowserBox" hidden>
+                <div class="dir-browser-path" id="comfyDirBrowserPath"></div>
+                <ul class="endpoint-list" id="comfyDirBrowserList"></ul>
+                <button class="btn send" id="comfyDirBrowserSelectBtn" type="button">use this folder</button>
+              </div>
+              <div class="settings-row">
+                <select id="comfyCheckpointSelect"><option value="">— default checkpoint —</option></select>
+              </div>
+              <div class="settings-row">
+                <input id="comfyNegativePrompt" type="text" placeholder="default negative prompt (optional)" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="settings-row">
+                <button class="btn send" id="comfySaveBtn" type="button">save</button>
+              </div>
+              <p class="settings-hint" id="comfySaveResult"></p>
+            </div>
+            <div class="settings-card">
+              <h3>Pull a checkpoint</h3>
+              <p class="settings-hint">Generic download by URL into your checkpoints folder above — works for any
+                checkpoint file (Hugging Face, Civitai, anywhere); nothing here curates or suggests specific ones.</p>
+              <div class="settings-row">
+                <input id="comfyPullUrl" type="text" placeholder="direct download URL" autocomplete="off" spellcheck="false" />
+                <input id="comfyPullFilename" type="text" placeholder="filename.safetensors" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="settings-row">
+                <button class="btn send" id="comfyPullBtn" type="button">pull</button>
+              </div>
+              <p class="settings-hint" id="comfyPullStatus"></p>
+            </div>
+
+            <div class="settings-card">
+              <h3>Local speech generation (Piper)</h3>
+              <p class="settings-hint">No API key — runs as a local process, not a server.</p>
+              <div class="settings-row">
+                <input id="piperVoicePath" type="text" placeholder="path to voice .onnx file — filled in automatically after a pull below" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="settings-row">
+                <button class="btn send" id="piperSaveBtn" type="button">save</button>
+              </div>
+              <p class="settings-hint" id="piperSaveResult"></p>
+            </div>
+            <div class="settings-card">
+              <h3>Pull a voice</h3>
+              <p class="settings-hint">Downloads from Piper's official voice repository (Hugging Face,
+                rhasspy/piper-voices) into the folder above — e.g. name "en_US-lessac", quality "medium".</p>
+              <div class="settings-row">
+                <input id="piperVoiceName" type="text" placeholder="voice name, e.g. en_US-lessac" autocomplete="off" spellcheck="false" />
+                <select id="piperVoiceQuality">
+                  <option value="low">low</option>
+                  <option value="medium" selected>medium</option>
+                  <option value="high">high</option>
+                </select>
+              </div>
+              <div class="settings-row">
+                <input id="piperVoicesDirForPull" type="text" placeholder="voices directory to download into" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="settings-row">
+                <button class="btn send" id="piperPullBtn" type="button">pull voice</button>
+              </div>
+              <p class="settings-hint" id="piperPullStatus"></p>
+            </div>
+
+            <div class="settings-card">
+              <h3>Video generation (custom ComfyUI workflows)</h3>
+              <p class="settings-hint">No built-in default — export a working workflow from ComfyUI's own UI as JSON,
+                tell starfire which node/input holds the prompt text, and save it here. Runs against the ComfyUI
+                server configured above.</p>
+              <div class="settings-row">
+                <input id="workflowName" type="text" placeholder="name, e.g. \"svd-video\"" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="settings-row">
+                <textarea id="workflowJson" placeholder="paste exported workflow JSON here" rows="4" style="width:100%;font-family:var(--mono);background:var(--panel);color:var(--fg);border:1px solid var(--border);padding:6px 8px;"></textarea>
+              </div>
+              <div class="settings-row">
+                <input id="workflowPromptNode" type="text" placeholder="prompt node id, e.g. 6" style="max-width:140px" autocomplete="off" spellcheck="false" />
+                <input id="workflowPromptKey" type="text" placeholder="input key, e.g. text" value="text" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="settings-row">
+                <button class="btn send" id="saveWorkflowBtn" type="button">save workflow</button>
+              </div>
+              <p class="settings-hint" id="workflowSaveResult"></p>
+              <ul class="endpoint-list" id="workflowList"></ul>
             </div>
           </div>
 

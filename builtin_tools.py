@@ -17,17 +17,28 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
+import audio_generation
+import comfyui_client
 import date_parsing
 import deep_research
+import document_generation
 import email_client
 import file_edit_tool
 import github_tool
+import image_generation
 import pending_edits_store
+import piper_tts
 import shell_tool
 import web_search
 from api_key_manager import APIKeyManager
+from comfyui_config_store import DEFAULT_BASE_URL as COMFYUI_DEFAULT_BASE_URL
+from comfyui_config_store import ComfyUIConfigStore
+from custom_workflow_store import CustomWorkflowStore
 from documents_store import DocumentStore
 from email_store import EmailAccountStore
+from generated_files_store import GeneratedFileStore
+from model_endpoints import ModelEndpointStore
+from piper_config_store import PiperConfigStore
 from memory_store import VALID_CATEGORIES, MemoryStore
 from note_store import VALID_NOTE_TYPES, VALID_REPEATS, NoteStore
 from task_store import ScheduledTask, TaskRunStore, TaskStore
@@ -179,6 +190,80 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "generate_image",
+            "description": "Generate an image from a text prompt and show it in the chat. Uses local "
+                            "ComfyUI if configured (no API key, no content restrictions beyond whatever "
+                            "checkpoint is loaded); otherwise falls back to OpenAI/DALL-E, which does "
+                            "enforce its own content policy.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {"type": "string"},
+                    "negative_prompt": {"type": "string", "description": "ComfyUI only — what to avoid"},
+                    "quality": {"type": "string", "enum": sorted(comfyui_client.QUALITY_PRESETS),
+                                 "description": "ComfyUI only — trades speed for resolution/steps"},
+                    "size": {"type": "string", "enum": ["1024x1024", "1792x1024", "1024x1792"],
+                              "description": "OpenAI fallback only"},
+                },
+                "required": ["prompt"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_audio",
+            "description": "Generate spoken audio from text and show a player in the chat. Uses local "
+                            "Piper if a voice is configured (no API key); otherwise falls back to OpenAI TTS.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string"},
+                    "voice": {"type": "string", "enum": sorted(audio_generation.VALID_VOICES),
+                               "description": "OpenAI fallback only"},
+                },
+                "required": ["text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_video",
+            "description": "Generate a video (or video+audio) using a custom ComfyUI workflow you've "
+                            "saved in Settings. Requires at least one saved workflow — there's no "
+                            "built-in default the way images have, since video workflows vary by which "
+                            "model/nodes you have installed.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "workflow_name": {"type": "string"},
+                    "prompt": {"type": "string"},
+                },
+                "required": ["workflow_name", "prompt"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_document",
+            "description": "Turn text/markdown content into a downloadable file (.md, .txt, .pdf, "
+                            "or .docx) and show a download link in the chat.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string"},
+                    "format": {"type": "string", "enum": sorted(document_generation.VALID_FORMATS)},
+                    "filename": {"type": "string", "description": "without extension, optional"},
+                },
+                "required": ["content", "format"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "edit_file",
             "description": "Write a file's full new content and get a diff of the change. If the "
                             "user has approval mode on, the edit is staged for the user to "
@@ -231,6 +316,11 @@ class ToolContext:
     email_accounts: EmailAccountStore
     api_keys: APIKeyManager
     notes: NoteStore
+    endpoints: ModelEndpointStore = None
+    generated_files: GeneratedFileStore = None
+    comfyui_config: ComfyUIConfigStore = None
+    piper_config: PiperConfigStore = None
+    custom_workflows: CustomWorkflowStore = None
     base_url: str = ""
     api_key: str | None = None
     model: str = ""
@@ -262,11 +352,150 @@ async def call_builtin_tool(name: str, arguments: dict, ctx: ToolContext) -> str
         return await github_tool.run_gh(arguments.get("args") or [])
     if name == "deep_research":
         return await _deep_research(arguments, ctx)
+    if name == "generate_image":
+        return await _generate_image(arguments, ctx)
+    if name == "generate_audio":
+        return await _generate_audio(arguments, ctx)
+    if name == "generate_video":
+        return await _generate_video(arguments, ctx)
+    if name == "generate_document":
+        return _generate_document(arguments, ctx)
     if name == "edit_file":
         return _edit_file(arguments, ctx)
     if name == "run_shell":
         return await shell_tool.run_shell(arguments.get("command", ""), arguments.get("cwd"))
     raise ValueError(f"unknown builtin tool: {name}")
+
+
+def _find_openai_endpoint(ctx: ToolContext) -> tuple[str, str] | None:
+    """Image/audio generation need the real OpenAI API specifically (DALL-E
+    and TTS are OpenAI-proprietary endpoints, not something generic
+    OpenAI-compatible servers usually implement) — checked by hostname
+    rather than trusting providers.py's "openai" provider label, since that
+    label is also the catch-all for Groq/OpenRouter/local OpenAI-compatible
+    servers, none of which serve these two endpoints."""
+    if not ctx.endpoints:
+        return None
+    keys = ctx.api_keys.load()
+    for endpoint in ctx.endpoints.list():
+        if "api.openai.com" in endpoint.base_url:
+            api_key = keys.get(endpoint.id) or keys.get("openai")
+            if api_key:
+                return endpoint.base_url.rstrip("/"), api_key
+    return None
+
+
+async def _generate_image(args: dict, ctx: ToolContext) -> str:
+    prompt = args.get("prompt", "")
+    if not prompt:
+        return "error: prompt is required"
+
+    comfy_cfg = ctx.comfyui_config.get() if ctx.comfyui_config else None
+    if comfy_cfg and comfy_cfg.default_checkpoint and await comfyui_client.detect(comfy_cfg.base_url):
+        preset = comfyui_client.QUALITY_PRESETS.get(args.get("quality", "medium"), comfyui_client.QUALITY_PRESETS["medium"])
+        try:
+            data = await comfyui_client.generate(
+                prompt, comfy_cfg.base_url, comfy_cfg.default_checkpoint,
+                negative_prompt=args.get("negative_prompt", comfy_cfg.default_negative_prompt), **preset,
+            )
+        except RuntimeError as e:
+            return f"error: {e}"
+        entry = ctx.generated_files.add("image", "generated.png", "image/png", data, source=prompt)
+        return json.dumps({"kind": "image", "id": entry.id, "url": f"/api/generated/{entry.id}", "prompt": prompt})
+
+    found = _find_openai_endpoint(ctx)
+    if not found:
+        return ("error: no local ComfyUI configured (Settings → Local Generation) and no OpenAI endpoint "
+                "with an API key configured either — set up at least one")
+    base_url, api_key = found
+    try:
+        data = await image_generation.generate(prompt, base_url, api_key, args.get("size", "1024x1024"))
+    except RuntimeError as e:
+        return f"error: {e}"
+    entry = ctx.generated_files.add("image", "generated.png", "image/png", data, source=prompt)
+    return json.dumps({"kind": "image", "id": entry.id, "url": f"/api/generated/{entry.id}", "prompt": prompt})
+
+
+async def _generate_audio(args: dict, ctx: ToolContext) -> str:
+    text = args.get("text", "")
+    if not text:
+        return "error: text is required"
+
+    piper_cfg = ctx.piper_config.get() if ctx.piper_config else None
+    if piper_cfg and piper_cfg.voice_model_path and piper_tts.is_installed():
+        try:
+            data = await piper_tts.generate(text, piper_cfg.voice_model_path)
+        except RuntimeError as e:
+            return f"error: {e}"
+        entry = ctx.generated_files.add("audio", "generated.wav", "audio/wav", data, source=text[:200])
+        return json.dumps({"kind": "audio", "id": entry.id, "url": f"/api/generated/{entry.id}"})
+
+    found = _find_openai_endpoint(ctx)
+    if not found:
+        return ("error: no local Piper voice configured (Settings → Local Generation) and no OpenAI "
+                "endpoint with an API key configured either — set up at least one")
+    base_url, api_key = found
+    try:
+        data = await audio_generation.generate(text, base_url, api_key, args.get("voice", "alloy"))
+    except RuntimeError as e:
+        return f"error: {e}"
+    entry = ctx.generated_files.add("audio", "generated.mp3", "audio/mpeg", data, source=text[:200])
+    return json.dumps({"kind": "audio", "id": entry.id, "url": f"/api/generated/{entry.id}"})
+
+
+_VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".gif", ".mkv"}
+
+
+async def _generate_video(args: dict, ctx: ToolContext) -> str:
+    workflow_name = args.get("workflow_name", "")
+    prompt = args.get("prompt", "")
+    if not workflow_name or not prompt:
+        return "error: workflow_name and prompt are required"
+    if not ctx.custom_workflows:
+        return "error: no custom workflows available"
+
+    workflow = next((w for w in ctx.custom_workflows.list() if w.name == workflow_name), None)
+    if not workflow:
+        names = [w.name for w in ctx.custom_workflows.list()]
+        return f"error: no saved workflow named '{workflow_name}'. Available: {names or 'none — add one in Settings → Local Generation'}"
+
+    comfy_cfg = ctx.comfyui_config.get() if ctx.comfyui_config else None
+    base_url = comfy_cfg.base_url if comfy_cfg else COMFYUI_DEFAULT_BASE_URL
+    if not await comfyui_client.detect(base_url):
+        return f"error: ComfyUI is not reachable at {base_url}"
+
+    try:
+        files = await comfyui_client.run_custom_workflow(
+            base_url, workflow.workflow, workflow.prompt_node_id, workflow.prompt_input_key, prompt,
+        )
+    except RuntimeError as e:
+        return f"error: {e}"
+
+    saved = []
+    for filename, data in files:
+        ext = ("." + filename.rsplit(".", 1)[-1]).lower() if "." in filename else ""
+        kind = "video" if ext in _VIDEO_EXTENSIONS else "image"
+        content_type = "video/mp4" if kind == "video" else "image/png"
+        entry = ctx.generated_files.add(kind, filename, content_type, data, source=prompt)
+        saved.append({"kind": kind, "id": entry.id, "url": f"/api/generated/{entry.id}", "filename": filename})
+    return json.dumps({"files": saved})
+
+
+def _generate_document(args: dict, ctx: ToolContext) -> str:
+    content = args.get("content", "")
+    fmt = args.get("format", "md")
+    if not content:
+        return "error: content is required"
+    if fmt not in document_generation.VALID_FORMATS:
+        return f"error: unsupported format '{fmt}'"
+    try:
+        data = document_generation.generate(content, fmt)
+    except Exception as e:
+        return f"error: could not generate document: {e}"
+    filename = (args.get("filename") or "document").strip() + "." + fmt
+    entry = ctx.generated_files.add("document", filename, document_generation.CONTENT_TYPES[fmt],
+                                      data, source=content[:200])
+    return json.dumps({"kind": "document", "id": entry.id, "url": f"/api/generated/{entry.id}", "filename": filename})
 
 
 def _edit_file(args: dict, ctx: ToolContext) -> str:

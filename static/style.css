@@ -144,7 +144,6 @@ select, input[type="text"], input[type="password"] {
 }
 select { cursor: pointer; max-width: 260px; }
 select:focus, input:focus { border-color: var(--red); }
-#ctxSize { max-width: 90px; }
 
 .output {
   flex: 1;
@@ -516,6 +515,17 @@ html.light .topbar-logo { filter: none; }
   cursor: pointer;
 }
 .theme-toggle.warning { color: var(--amber); }
+
+.capability-warning {
+  padding: 6px 18px;
+  font-size: 0.72rem;
+  color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 10%, transparent);
+  border-bottom: 1px solid var(--border);
+}
+.capability-warning[hidden] { display: none; }
+
+.branch-link { font-size: 0.68rem; color: var(--muted); }
 
 .dir-browser {
   border: 1px solid var(--border);
