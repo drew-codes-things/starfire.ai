@@ -50,7 +50,7 @@
         <p class="info-line">// Ollama runs on your machine, nothing leaves it</p>
         <p class="info-line">// hosted providers (OpenAI, Anthropic, ...) opt in via settings</p>
         <br />
-        <p class="info-line" id="noModelsHint">// no models yet — open settings to add Ollama or an API provider</p>
+        <p class="info-line" id="noModelsHint">// no models yet - open settings to add Ollama or an API provider</p>
         <br />
         <p class="info-line">&#x2192; select a model above and start typing</p>
       </div>
@@ -193,7 +193,7 @@
               <div class="settings-row">
                 <label class="theme-toggle">
                   <input type="checkbox" id="toggleGithubCli" />
-                  <span>GitHub (gh CLI) — scoped to the gh binary only</span>
+                  <span>GitHub (gh CLI) - scoped to the gh binary only</span>
                 </label>
               </div>
               <div class="settings-row">
@@ -241,7 +241,7 @@
               <div class="settings-row">
                 <label class="theme-toggle warning">
                   <input type="checkbox" id="toggleRunShell" />
-                  <span>&#9888;&#65039; Run shell commands — no sandbox, executes directly on this machine</span>
+                  <span>&#9888;&#65039; Run shell commands - no sandbox, executes directly on this machine</span>
                 </label>
               </div>
               <p class="settings-hint">Add facts in the Memory tab, files in the Documents tab, jobs in Automations, accounts in Email, to-dos in Notes.</p>
@@ -249,7 +249,7 @@
 
             <div class="settings-card">
               <h3>Quick add (official MCP reference servers)</h3>
-              <p class="settings-hint">Fetch and Memory are already installed and connected below — enable their checkbox to use them. Filesystem needs a directory choice, so it stays a manual add. Requires Node.js (npx) installed locally.</p>
+              <p class="settings-hint">Fetch and Memory are already installed and connected below - enable their checkbox to use them. Filesystem needs a directory choice, so it stays a manual add. Requires Node.js (npx) installed locally.</p>
               <div class="settings-row">
                 <input id="filesystemPath" type="text" placeholder="allowed directory (for filesystem)" autocomplete="off" spellcheck="false" />
                 <button class="btn ghost" id="browseDirBtn" type="button">browse…</button>
@@ -268,10 +268,10 @@
             <div class="settings-card">
               <h3>MCP server repository</h3>
               <p class="settings-hint">A broader catalog beyond Filesystem/Fetch/Memory above. Each needs its own
-                credentials/config — pick one to see what it needs. Connection is tested live before it's saved,
+                credentials/config - pick one to see what it needs. Connection is tested live before it's saved,
                 same as everywhere else, so a wrong or outdated entry just fails cleanly.</p>
               <div class="settings-row">
-                <select id="mcpRepoSelect"><option value="">— choose a server —</option></select>
+                <select id="mcpRepoSelect"><option value="">- choose a server -</option></select>
               </div>
               <div id="mcpRepoConfigureBox" hidden>
                 <div class="settings-row" id="mcpRepoPathRow" hidden>
@@ -358,7 +358,7 @@
               <h3>New note</h3>
               <div class="settings-row">
                 <select id="noteTemplateSelect">
-                  <option value="">— start from a template —</option>
+                  <option value="">- start from a template -</option>
                 </select>
                 <button class="btn ghost" id="useTemplateBtn" type="button">use</button>
               </div>
@@ -382,7 +382,7 @@
                 </div>
               </div>
               <div class="settings-row">
-                <input id="noteDueDate" type="text" placeholder="due date — e.g. &quot;tomorrow at 9am&quot;, &quot;next friday&quot;, or YYYY-MM-DD" autocomplete="off" spellcheck="false" />
+                <input id="noteDueDate" type="text" placeholder="due date - e.g. &quot;tomorrow at 9am&quot;, &quot;next friday&quot;, or YYYY-MM-DD" autocomplete="off" spellcheck="false" />
                 <select id="noteRepeat">
                   <option value="none">no repeat</option>
                   <option value="daily">daily</option>
@@ -497,7 +497,7 @@
             <div class="settings-card">
               <h3>Rules</h3>
               <p class="settings-hint">Checked automatically in the background every couple of minutes for accounts with
-                at least one enabled rule — not just when you open the inbox.</p>
+                at least one enabled rule - not just when you open the inbox.</p>
               <div class="settings-row">
                 <select id="ruleAccountSelect"></select>
                 <select id="ruleFolder">
@@ -576,7 +576,7 @@
           <div class="settings-panel" data-panel="localgen" hidden>
             <div class="settings-card">
               <h3>Local image generation (ComfyUI)</h3>
-              <p class="settings-hint">No API key — ComfyUI is a plain local server, same trust model as Ollama.
+              <p class="settings-hint">No API key - ComfyUI is a plain local server, same trust model as Ollama.
                 Content is entirely up to whatever checkpoint you load; nothing here filters it.</p>
               <div class="settings-row">
                 <input id="comfyBaseUrl" type="text" placeholder="http://127.0.0.1:8188" autocomplete="off" spellcheck="false" />
@@ -593,7 +593,7 @@
                 <button class="btn send" id="comfyDirBrowserSelectBtn" type="button">use this folder</button>
               </div>
               <div class="settings-row">
-                <select id="comfyCheckpointSelect"><option value="">— default checkpoint —</option></select>
+                <select id="comfyCheckpointSelect"><option value="">- default checkpoint -</option></select>
               </div>
               <div class="settings-row">
                 <input id="comfyNegativePrompt" type="text" placeholder="default negative prompt (optional)" autocomplete="off" spellcheck="false" />
@@ -605,7 +605,7 @@
             </div>
             <div class="settings-card">
               <h3>Pull a checkpoint</h3>
-              <p class="settings-hint">Generic download by URL into your checkpoints folder above — works for any
+              <p class="settings-hint">Generic download by URL into your checkpoints folder above - works for any
                 checkpoint file (Hugging Face, Civitai, anywhere); nothing here curates or suggests specific ones.</p>
               <div class="settings-row">
                 <input id="comfyPullUrl" type="text" placeholder="direct download URL" autocomplete="off" spellcheck="false" />
@@ -620,9 +620,9 @@
 
             <div class="settings-card">
               <h3>Local speech generation (Piper)</h3>
-              <p class="settings-hint">No API key — runs as a local process, not a server.</p>
+              <p class="settings-hint">No API key - runs as a local process, not a server.</p>
               <div class="settings-row">
-                <input id="piperVoicePath" type="text" placeholder="path to voice .onnx file — filled in automatically after a pull below" autocomplete="off" spellcheck="false" />
+                <input id="piperVoicePath" type="text" placeholder="path to voice .onnx file - filled in automatically after a pull below" autocomplete="off" spellcheck="false" />
               </div>
               <div class="settings-row">
                 <button class="btn send" id="piperSaveBtn" type="button">save</button>
@@ -632,7 +632,7 @@
             <div class="settings-card">
               <h3>Pull a voice</h3>
               <p class="settings-hint">Downloads from Piper's official voice repository (Hugging Face,
-                rhasspy/piper-voices) into the folder above — e.g. name "en_US-lessac", quality "medium".</p>
+                rhasspy/piper-voices) into the folder above - e.g. name "en_US-lessac", quality "medium".</p>
               <div class="settings-row">
                 <input id="piperVoiceName" type="text" placeholder="voice name, e.g. en_US-lessac" autocomplete="off" spellcheck="false" />
                 <select id="piperVoiceQuality">
@@ -653,7 +653,7 @@
 
             <div class="settings-card">
               <h3>Video generation (custom ComfyUI workflows)</h3>
-              <p class="settings-hint">No built-in default — export a working workflow from ComfyUI's own UI as JSON,
+              <p class="settings-hint">No built-in default - export a working workflow from ComfyUI's own UI as JSON,
                 tell starfire which node/input holds the prompt text, and save it here. Runs against the ComfyUI
                 server configured above.</p>
               <div class="settings-row">
@@ -677,14 +677,14 @@
           <div class="settings-panel" data-panel="data" hidden>
             <div class="settings-card">
               <h3>Backup</h3>
-              <p class="settings-hint">Downloads a zip of the whole data/ directory — endpoints, encrypted keys, memory,
+              <p class="settings-hint">Downloads a zip of the whole data/ directory - endpoints, encrypted keys, memory,
                 documents, notes, chat sessions, everything.</p>
               <button class="btn ghost" id="downloadBackupBtn">download backup</button>
             </div>
             <div class="settings-card">
               <h3>Restore</h3>
               <p class="settings-hint warning-text">&#9888;&#65039; Overwrites your current data with the contents of the
-                zip. This cannot be undone — back up first if you're unsure.</p>
+                zip. This cannot be undone - back up first if you're unsure.</p>
               <div class="settings-row">
                 <input id="restoreFile" type="file" accept=".zip" />
                 <button class="btn send" id="restoreBackupBtn">restore</button>

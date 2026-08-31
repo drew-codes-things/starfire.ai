@@ -1,10 +1,3 @@
-"""Email account registry: metadata only (host/port/username), same JSON
-CRUD shape as model_endpoints.py/mcp_servers_store.py. The app password
-itself is NOT stored here — it goes through the existing api_key_manager.py
-(the same encrypted store already protecting provider API keys), keyed by
-account id, so this pass doesn't need any new secret-storage code.
-"""
-
 from __future__ import annotations
 
 import json
@@ -13,7 +6,6 @@ import uuid
 from dataclasses import asdict, dataclass
 
 from atomic_io import atomic_write_json
-
 
 @dataclass
 class EmailAccount:
@@ -24,8 +16,7 @@ class EmailAccount:
     imap_port: int = 993
     smtp_host: str = ""
     smtp_port: int = 587
-    username: str = ""  # defaults to email_address if blank
-
+    username: str = ""
 
 class EmailAccountStore:
     def __init__(self, data_dir: str):
@@ -86,37 +77,21 @@ class EmailAccountStore:
         self._save(remaining)
         return True
 
-
-# ── email rules ──────────────────────────────────────────────────────────
-# "when a message matching X arrives in this account/folder, do Y" —
-# checked automatically by a background poller (email_rule_checker.py)
-# rather than only when you happen to open the folder yourself.
-#
-# This is a genuine change from this app's previously-documented "no
-# background inbox sync" design. That claim stays true for ordinary
-# browsing (every read/list action still opens a live connection on
-# demand, nothing cached) — but rule matching specifically needs to notice
-# new mail without you looking, so accounts with at least one enabled rule
-# now also get a periodic IMAP check. See email_rule_checker.py for the
-# poll loop.
-
 VALID_MATCH_FIELDS = {"from", "subject"}
 VALID_ACTIONS = {"mark_read", "archive", "delete", "add_note", "ai_summarize_note"}
-
 
 @dataclass
 class EmailRule:
     id: str
     account_id: str
     folder: str = "INBOX"
-    match_field: str = "from"  # from | subject
-    match_value: str = ""      # case-insensitive substring match
+    match_field: str = "from"
+    match_value: str = ""
     action: str = "add_note"
-    endpoint_id: str = ""      # required for action=ai_summarize_note
-    model: str = ""            # required for action=ai_summarize_note
+    endpoint_id: str = ""
+    model: str = ""
     enabled: bool = True
-    last_seen_uid: int = 0     # highest message UID already processed for this rule
-
+    last_seen_uid: int = 0
 
 class EmailRuleStore:
     def __init__(self, data_dir: str):

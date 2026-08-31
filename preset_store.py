@@ -1,8 +1,3 @@
-"""Presets: a saved (system prompt + model + enabled tools) bundle you can
-apply with one click instead of reconfiguring the header/toggles each time.
-Same JSON-file store shape as everything else here.
-"""
-
 from __future__ import annotations
 
 import json
@@ -11,7 +6,6 @@ import uuid
 from dataclasses import asdict, dataclass, field
 
 from atomic_io import atomic_write_json
-
 
 @dataclass
 class Preset:
@@ -22,7 +16,6 @@ class Preset:
     model: str = ""
     enabled_mcp_servers: list[str] = field(default_factory=list)
     enabled_builtin_tools: list[str] = field(default_factory=list)
-
 
 class PresetStore:
     def __init__(self, data_dir: str):

@@ -1,17 +1,3 @@
-"""Scoped GitHub access via the `gh` CLI — runs ONLY the `gh` binary with the
-arguments given, never an arbitrary shell string. Meaningfully narrower than
-routing this through run_shell/shell_tool.py: this tool can list issues,
-open PRs, check CI status, etc., but can't `rm -rf` anything, can't chain
-commands with `&&`/`;`/pipes, and can't touch any binary other than `gh`
-itself. Toggleable independently of the general shell tool for that reason —
-enabling GitHub access doesn't require also enabling full shell access.
-
-Requires the `gh` CLI installed and authenticated (`gh auth login`) on this
-machine — this tool doesn't manage credentials itself, same separation
-providers.py/email_client.py use (the caller already has whatever `gh` is
-already configured with).
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -19,7 +5,6 @@ import shutil
 
 TIMEOUT_SECONDS = 60
 MAX_OUTPUT_CHARS = 8000
-
 
 async def run_gh(args: list[str]) -> str:
     if not args:

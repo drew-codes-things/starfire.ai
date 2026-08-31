@@ -1,11 +1,3 @@
-"""Storage for the Local Gen feature area: ComfyUI config, Piper config,
-saved custom ComfyUI workflows (video), and generated file metadata. Four
-small, single-purpose stores that only ever get used together (by the same
-Local Gen settings panel and the same generation tools), each a thin
-atomic-JSON-file CRUD wrapper — combined here rather than kept as four
-near-empty files.
-"""
-
 from __future__ import annotations
 
 import json
@@ -18,20 +10,12 @@ from atomic_io import atomic_write_json
 
 DEFAULT_COMFYUI_BASE_URL = "http://127.0.0.1:8188"
 
-
-# ── ComfyUI config ───────────────────────────────────────────────────────
-# One record, not a list — base URL, the local directory its
-# models/checkpoints folder lives in (needed for the checkpoint downloader,
-# since ComfyUI's own HTTP API manages workflows, not model files), and
-# which checkpoint to use by default.
-
 @dataclass
 class ComfyUIConfig:
     base_url: str = DEFAULT_COMFYUI_BASE_URL
     checkpoints_dir: str = ""
     default_checkpoint: str = ""
     default_negative_prompt: str = ""
-
 
 class ComfyUIConfigStore:
     def __init__(self, data_dir: str):
@@ -62,17 +46,10 @@ class ComfyUIConfigStore:
         atomic_write_json(self.path, asdict(current))
         return current
 
-
-# ── Piper TTS config ─────────────────────────────────────────────────────
-# Same single-record pattern as ComfyUIConfigStore above — which voice
-# model file (.onnx) to use, and the directory new voices get downloaded
-# into.
-
 @dataclass
 class PiperConfig:
     voice_model_path: str = ""
     voices_dir: str = ""
-
 
 class PiperConfigStore:
     def __init__(self, data_dir: str):
@@ -98,15 +75,6 @@ class PiperConfigStore:
         atomic_write_json(self.path, asdict(current))
         return current
 
-
-# ── Custom ComfyUI workflows (video) ─────────────────────────────────────
-# The video generation path — see comfyui_client.py's module docstring for
-# why video has no fixed built-in workflow the way images do. You export a
-# working workflow as JSON from ComfyUI's own UI, tell starfire which
-# node/input holds the prompt text, and save it here under a name; the
-# generate_video tool then queues it by name with your prompt substituted
-# in.
-
 @dataclass
 class CustomWorkflow:
     id: str
@@ -114,7 +82,6 @@ class CustomWorkflow:
     workflow: dict = field(default_factory=dict)
     prompt_node_id: str = ""
     prompt_input_key: str = "text"
-
 
 class CustomWorkflowStore:
     def __init__(self, data_dir: str):
@@ -169,23 +136,14 @@ class CustomWorkflowStore:
         self._save(remaining)
         return True
 
-
-# ── Generated file metadata ──────────────────────────────────────────────
-# Metadata + on-disk storage for generated images/audio/documents. One
-# store for all three kinds rather than three near-identical ones — they
-# only differ by content_type and file extension, everything else (save
-# bytes to data/generated/<id>.<ext>, keep a JSON index of what's there) is
-# the same.
-
 @dataclass
 class GeneratedFile:
     id: str
-    kind: str  # image | audio | document
+    kind: str
     filename: str
     content_type: str
-    source: str = ""  # the prompt/content that produced it, for display
+    source: str = ""
     created: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
 
 class GeneratedFileStore:
     def __init__(self, data_dir: str):

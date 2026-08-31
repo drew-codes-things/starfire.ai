@@ -1,15 +1,3 @@
-"""Usage/cost tracking: one row per chat turn, with an estimated token count
-and (for known hosted providers) a rough dollar cost. Nothing here talks to
-a billing API — providers don't expose exact per-request token counts
-consistently across Ollama/OpenAI/Anthropic in the streaming path this app
-already uses, so both token counts and cost are *estimates*
-(context_budget.py's existing ~4-chars/token heuristic, and a small static
-$/million-token price table below) — good enough to see where your usage
-and spend are trending, not for an exact invoice reconciliation.
-
-Ollama/local models always cost $0 — no pricing lookup needed for them.
-"""
-
 from __future__ import annotations
 
 import json
@@ -21,9 +9,6 @@ from datetime import datetime, timezone
 from atomic_io import atomic_write_json
 from context_budget import estimate_tokens
 
-# $ per million tokens, (input, output). Deliberately small and approximate —
-# update as pricing changes; an unlisted model just shows token counts with
-# no cost estimate rather than a wrong number.
 _PRICING_PER_MILLION = {
     "claude-opus": (15.0, 75.0),
     "claude-sonnet": (3.0, 15.0),
@@ -34,7 +19,6 @@ _PRICING_PER_MILLION = {
     "gpt-3.5": (0.5, 1.5),
 }
 
-
 def _estimate_cost(provider: str, model: str, input_tokens: int, output_tokens: int) -> float | None:
     if provider == "ollama":
         return 0.0
@@ -43,7 +27,6 @@ def _estimate_cost(provider: str, model: str, input_tokens: int, output_tokens: 
         if prefix in model_lower:
             return (input_tokens * in_price + output_tokens * out_price) / 1_000_000
     return None
-
 
 @dataclass
 class UsageEntry:
@@ -54,7 +37,6 @@ class UsageEntry:
     output_tokens: int
     cost: float | None
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
 
 class UsageStore:
     def __init__(self, data_dir: str):
@@ -92,8 +74,6 @@ class UsageStore:
                             input_tokens=input_tokens, output_tokens=output_tokens, cost=cost)
         entries = self._load()
         entries.append(entry)
-        # Keep the raw log from growing forever — a few thousand turns is
-        # already far more history than the summary view below needs.
         entries = entries[-5000:]
         self._save(entries)
         return entry
