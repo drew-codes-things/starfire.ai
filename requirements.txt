@@ -1,0 +1,15 @@
+fastapi>=0.115
+uvicorn[standard]>=0.32
+python-dotenv>=1.0
+httpx>=0.27
+pydantic-settings>=2.5
+cryptography>=43
+mcp>=1.0
+pypdf>=4.0
+python-multipart>=0.0.9
+croniter>=2.0
+# Not imported by any starfire code — installed for the `uvx` binary it
+# provides, which the Fetch MCP reference server runs under (see
+# mcp_servers_store.py's REFERENCE_SERVERS). Folding it in here means the
+# server.py bootstrap only needs one install path for every dependency.
+uv>=0.4

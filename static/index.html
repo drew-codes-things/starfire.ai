@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>starfire.ai</title>
+  <link rel="icon" href="assets/logo.svg" type="image/svg+xml" />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+</head>
+<body>
+  <div class="bg-grid" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <a href="https://drew-gnr.xyz" class="topbar-link" aria-label="Drew's Realm">
+      <img src="assets/logo.svg" alt="Logo" class="topbar-logo">
+    </a>
+    <span class="topbar-title">starfire.ai</span>
+  </header>
+
+  <div class="page-content">
+  <div class="terminal">
+
+    <div class="titlebar">
+      <span class="brand">starfire.ai</span>
+      <div class="status">
+        <span class="dot" id="dot"></span>
+        <span id="statusText">connecting…</span>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <select id="modelList"></select>
+      <select id="ctxSize" title="context window (tokens)">
+        <option value="512">ctx 512</option>
+        <option value="1024">ctx 1024</option>
+        <option value="2048" selected>ctx 2048</option>
+        <option value="4096">ctx 4096</option>
+        <option value="8192">ctx 8192</option>
+      </select>
+      <div class="spacer"></div>
+      <button class="btn ghost" id="compareBtn" title="Compare models side by side">compare</button>
+      <button class="btn ghost" id="settingsBtn" title="Providers &amp; appearance">settings</button>
+      <button class="btn ghost" id="exportBtn">export</button>
+      <button class="btn ghost" id="clearBtn" title="Start a new saved conversation">new chat</button>
+    </div>
+
+    <div class="output" id="output">
+      <div class="welcome" id="welcome">
+        <div class="welcome-brand">starfire<span class="dim">.ai</span></div>
+        <p class="info-line">// local-first AI chat</p>
+        <p class="info-line">// Ollama runs on your machine, nothing leaves it</p>
+        <p class="info-line">// hosted providers (OpenAI, Anthropic, ...) opt in via settings</p>
+        <br />
+        <p class="info-line" id="noModelsHint">// no models yet — open settings to add Ollama or an API provider</p>
+        <br />
+        <p class="info-line">&#x2192; select a model above and start typing</p>
+      </div>
+    </div>
+
+    <div class="sysbar">
+      <span class="label">sys&gt;</span>
+      <input id="sysPrompt" type="text" placeholder="optional system prompt…" autocomplete="off" spellcheck="false" />
+    </div>
+
+    <form class="inputbar" id="form">
+      <span class="prompt-glyph">&gt;</span>
+      <textarea id="msgInput" rows="1" placeholder="type a message… (enter to send)" disabled spellcheck="false"></textarea>
+      <button class="btn ghost" type="button" id="micBtn" title="Voice input" hidden>&#127908;</button>
+      <button class="btn ghost" type="button" id="stopBtn" hidden>stop</button>
+      <button class="btn send" type="submit" id="sendBtn" disabled>send</button>
+    </form>
+
+  </div>
+  </div>
+
+  <div class="modal-overlay" id="settingsModal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+      <div class="modal-header">
+        <span id="settingsTitle">settings</span>
+        <button class="btn ghost modal-close" id="settingsCloseBtn" aria-label="Close settings">×</button>
+      </div>
+      <div class="settings-layout">
+        <nav class="settings-sidebar">
+          <button class="settings-tab active" data-tab="providers">Providers</button>
+          <button class="settings-tab" data-tab="chats">Chats</button>
+          <button class="settings-tab" data-tab="tools">Tools</button>
+          <button class="settings-tab" data-tab="memory">Memory</button>
+          <button class="settings-tab" data-tab="documents">Documents</button>
+          <button class="settings-tab" data-tab="notes">Notes</button>
+          <button class="settings-tab" data-tab="automations">Automations</button>
+          <button class="settings-tab" data-tab="email">Email</button>
+          <button class="settings-tab" data-tab="presets">Presets</button>
+          <button class="settings-tab" data-tab="usage">Usage</button>
+          <button class="settings-tab" data-tab="hardware">Hardware</button>
+          <button class="settings-tab" data-tab="data">Data</button>
+          <button class="settings-tab" data-tab="appearance">Appearance</button>
+        </nav>
+        <div class="settings-panels">
+
+          <div class="settings-panel" data-panel="providers">
+            <div class="settings-card">
+              <h3>Add local (Ollama, LM Studio, llama.cpp, vLLM)</h3>
+              <div class="settings-row">
+                <input id="localBaseUrl" type="text" placeholder="http://localhost:11434" autocomplete="off" spellcheck="false" />
+                <button class="btn ghost" id="addOllamaBtn" title="Fill the default Ollama endpoint">add ollama</button>
+              </div>
+              <div class="settings-row">
+                <button class="btn ghost" id="discoverBtn" title="Scan common local ports for a running model server">scan network</button>
+                <button class="btn ghost" id="testLocalBtn">test</button>
+                <button class="btn send" id="addLocalBtn">add</button>
+              </div>
+              <p class="settings-hint" id="localTestResult"></p>
+            </div>
+
+            <div class="settings-card">
+              <h3>Add API provider</h3>
+              <div class="settings-row">
+                <select id="apiProviderSelect">
+                  <option value="openai" data-url="https://api.openai.com/v1">OpenAI</option>
+                  <option value="anthropic" data-url="https://api.anthropic.com">Anthropic</option>
+                  <option value="other" data-url="">Other (OpenAI-compatible)</option>
+                </select>
+              </div>
+              <div class="settings-row">
+                <input id="apiBaseUrl" type="text" placeholder="base URL" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="settings-row">
+                <input id="apiKeyInput" type="password" placeholder="API key" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="settings-row">
+                <button class="btn ghost" id="testApiBtn">test</button>
+                <button class="btn send" id="addApiBtn">add</button>
+              </div>
+              <p class="settings-hint" id="apiTestResult"></p>
+            </div>
+
+            <div class="settings-card">
+              <h3>Configured endpoints</h3>
+              <ul class="endpoint-list" id="endpointList"></ul>
+            </div>
+          </div>
+
+          <div class="settings-panel" data-panel="chats" hidden>
+            <div class="settings-card">
+              <h3>Saved conversations</h3>
+              <p class="settings-hint">Every conversation is saved automatically as you chat. Click one to reopen it.</p>
+              <div class="settings-row">
+                <input id="chatSearchInput" type="text" placeholder="search titles and messages…" autocomplete="off" spellcheck="false" />
+              </div>
+              <ul class="endpoint-list" id="chatSessionList"></ul>
+            </div>
+          </div>
+
+          <div class="settings-panel" data-panel="tools" hidden>
+            <div class="settings-card">
+              <h3>Built-in tools</h3>
+              <div class="settings-row">
+                <label class="theme-toggle">
+                  <input type="checkbox" id="toggleManageMemory" />
+                  <span>Remember &amp; recall facts</span>
+                </label>
+              </div>
+              <div class="settings-row">
+                <label class="theme-toggle">
+                  <input type="checkbox" id="toggleSearchDocuments" />
+                  <span>Search my documents</span>
+                </label>
+              </div>
+              <div class="settings-row">
+                <label class="theme-toggle">
+                  <input type="checkbox" id="toggleManageTasks" />
+                  <span>Manage scheduled tasks</span>
+                </label>
+              </div>
+              <div class="settings-row">
+                <label class="theme-toggle">
+                  <input type="checkbox" id="toggleManageEmail" />
+                  <span>Read &amp; send email</span>
+                </label>
+              </div>
+              <div class="settings-row">
+                <label class="theme-toggle">
+                  <input type="checkbox" id="toggleManageNotes" />
+                  <span>Manage notes &amp; to-dos</span>
+                </label>
+              </div>
+              <div class="settings-row">
+                <label class="theme-toggle">
+                  <input type="checkbox" id="toggleSearchWeb" />
+                  <span>Search the web</span>
+                </label>
+              </div>
+              <div class="settings-row">
+                <label class="theme-toggle">
+                  <input type="checkbox" id="toggleGithubCli" />
+                  <span>GitHub (gh CLI) — scoped to the gh binary only</span>
+                </label>
+              </div>
+              <div class="settings-row">
+                <label class="theme-toggle">
+                  <input type="checkbox" id="toggleDeepResearch" />
+                  <span>Deep research (search + read sources + cited report)</span>
+                </label>
+              </div>
+              <div class="settings-row">
+                <label class="theme-toggle warning">
+                  <input type="checkbox" id="toggleEditFile" />
+                  <span>&#9888;&#65039; Edit files (writes to disk, with a diff shown in chat)</span>
+                </label>
+              </div>
+              <div class="settings-row" id="editApprovalRow" hidden>
+                <label class="theme-toggle">
+                  <input type="checkbox" id="toggleEditApproval" />
+                  <span>Require my approval before an edit is written (default: auto-apply)</span>
+                </label>
+              </div>
+              <div class="settings-row">
+                <label class="theme-toggle warning">
+                  <input type="checkbox" id="toggleRunShell" />
+                  <span>&#9888;&#65039; Run shell commands — no sandbox, executes directly on this machine</span>
+                </label>
+              </div>
+              <p class="settings-hint">Add facts in the Memory tab, files in the Documents tab, jobs in Automations, accounts in Email, to-dos in Notes.</p>
+            </div>
+
+            <div class="settings-card">
+              <h3>Quick add (official MCP reference servers)</h3>
+              <p class="settings-hint">Fetch and Memory are already installed and connected below — enable their checkbox to use them. Filesystem needs a directory choice, so it stays a manual add. Requires Node.js (npx) installed locally.</p>
+              <div class="settings-row">
+                <input id="filesystemPath" type="text" placeholder="allowed directory (for filesystem)" autocomplete="off" spellcheck="false" />
+                <button class="btn ghost" id="browseDirBtn" type="button">browse…</button>
+              </div>
+              <div class="dir-browser" id="dirBrowserBox" hidden>
+                <div class="dir-browser-path" id="dirBrowserPath"></div>
+                <ul class="endpoint-list" id="dirBrowserList"></ul>
+                <button class="btn send" id="dirBrowserSelectBtn" type="button">use this folder</button>
+              </div>
+              <div class="settings-row">
+                <button class="btn ghost" id="addFilesystemBtn">filesystem</button>
+              </div>
+              <p class="settings-hint" id="mcpQuickAddResult"></p>
+            </div>
+
+            <div class="settings-card">
+              <h3>Custom MCP server (stdio)</h3>
+              <div class="settings-row">
+                <input id="mcpName" type="text" placeholder="name" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="settings-row">
+                <input id="mcpCommand" type="text" placeholder="command, e.g. npx" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="settings-row">
+                <input id="mcpArgs" type="text" placeholder="args, space-separated" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="settings-row">
+                <button class="btn send" id="addMcpCustomBtn">add</button>
+              </div>
+              <p class="settings-hint" id="mcpCustomResult"></p>
+            </div>
+
+            <div class="settings-card">
+              <h3>Configured MCP servers</h3>
+              <ul class="endpoint-list" id="mcpServerList"></ul>
+            </div>
+          </div>
+
+          <div class="settings-panel" data-panel="memory" hidden>
+            <div class="settings-card">
+              <h3>Add a memory</h3>
+              <div class="settings-row">
+                <input id="newMemoryText" type="text" placeholder="a fact to remember" autocomplete="off" spellcheck="false" />
+                <select id="newMemoryCategory">
+                  <option value="fact">fact</option>
+                  <option value="identity">identity</option>
+                  <option value="preference">preference</option>
+                  <option value="contact">contact</option>
+                  <option value="task">task</option>
+                </select>
+                <button class="btn send" id="addMemoryEntryBtn">add</button>
+              </div>
+              <p class="settings-hint">You can also just type "remember: ..." in the chat.</p>
+            </div>
+            <div class="settings-card">
+              <h3>Remembered facts</h3>
+              <ul class="endpoint-list" id="memoryList"></ul>
+            </div>
+          </div>
+
+          <div class="settings-panel" data-panel="documents" hidden>
+            <div class="settings-card">
+              <h3>Upload a document</h3>
+              <div class="settings-row">
+                <input id="documentFile" type="file" accept=".txt,.md,.pdf" />
+                <button class="btn send" id="uploadDocumentBtn">upload</button>
+              </div>
+              <p class="settings-hint" id="documentUploadResult"></p>
+            </div>
+            <div class="settings-card">
+              <h3>Indexed documents</h3>
+              <ul class="endpoint-list" id="documentList"></ul>
+            </div>
+          </div>
+
+          <div class="settings-panel" data-panel="notes" hidden>
+            <div class="settings-card">
+              <h3>New note</h3>
+              <div class="settings-row">
+                <input id="noteTitle" type="text" placeholder="title" autocomplete="off" spellcheck="false" />
+                <select id="noteType">
+                  <option value="note">note</option>
+                  <option value="checklist">checklist</option>
+                </select>
+              </div>
+              <div class="settings-row" id="noteContentRow">
+                <input id="noteContent" type="text" placeholder="content" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="settings-row" id="noteItemsRow" hidden>
+                <div style="flex:1">
+                  <ul class="endpoint-list" id="noteItemsEditor"></ul>
+                  <div class="settings-row">
+                    <input id="noteNewItem" type="text" placeholder="checklist item…" autocomplete="off" spellcheck="false" />
+                    <button class="btn ghost" id="noteAddItemBtn">add item</button>
+                  </div>
+                </div>
+              </div>
+              <div class="settings-row">
+                <input id="noteDueDate" type="text" placeholder="due date — e.g. &quot;tomorrow at 9am&quot;, &quot;next friday&quot;, or YYYY-MM-DD" autocomplete="off" spellcheck="false" />
+                <select id="noteRepeat">
+                  <option value="none">no repeat</option>
+                  <option value="daily">daily</option>
+                  <option value="weekly">weekly</option>
+                  <option value="monthly">monthly</option>
+                  <option value="yearly">yearly</option>
+                </select>
+              </div>
+              <div class="settings-row">
+                <input id="noteLabel" type="text" placeholder="label (optional)" autocomplete="off" spellcheck="false" />
+                <input id="noteColor" type="text" placeholder="color (optional, e.g. #ff4d2e)" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="settings-row">
+                <button class="btn send" id="createNoteBtn">add note</button>
+              </div>
+              <p class="settings-hint" id="noteCreateResult"></p>
+            </div>
+            <div class="settings-card">
+              <h3>Notes</h3>
+              <div class="settings-row">
+                <label class="theme-toggle"><input type="checkbox" id="showArchivedNotes" /><span>show archived</span></label>
+              </div>
+              <ul class="endpoint-list" id="noteList"></ul>
+            </div>
+          </div>
+
+          <div class="settings-panel" data-panel="automations" hidden>
+            <div class="settings-card">
+              <h3>New automation</h3>
+              <p class="settings-hint">Sends a prompt to a model on a schedule and records the reply. Any tools you enable below are available to that run too.</p>
+              <div class="settings-row">
+                <input id="taskName" type="text" placeholder="name" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="settings-row">
+                <input id="taskPrompt" type="text" placeholder="prompt to send" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="settings-row">
+                <select id="taskEndpointSelect"></select>
+              </div>
+              <div class="settings-row">
+                <select id="taskSchedule">
+                  <option value="once">once</option>
+                  <option value="daily">daily</option>
+                  <option value="weekly">weekly</option>
+                  <option value="cron">cron</option>
+                </select>
+                <input id="taskTime" type="text" placeholder="HH:MM" style="max-width:70px" autocomplete="off" spellcheck="false" />
+                <input id="taskDay" type="text" placeholder="weekday (weekly)" style="max-width:140px" autocomplete="off" spellcheck="false" />
+                <input id="taskCron" type="text" placeholder="cron expression" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="settings-row" id="taskToolCheckboxes"></div>
+              <div class="settings-row">
+                <button class="btn send" id="createTaskBtn">create</button>
+              </div>
+              <p class="settings-hint" id="taskCreateResult"></p>
+            </div>
+            <div class="settings-card">
+              <h3>Scheduled tasks</h3>
+              <ul class="endpoint-list" id="taskList"></ul>
+            </div>
+            <div class="settings-card">
+              <h3>Recent runs</h3>
+              <ul class="endpoint-list" id="taskRunList"></ul>
+            </div>
+          </div>
+
+          <div class="settings-panel" data-panel="email" hidden>
+            <div class="settings-card">
+              <h3>Add account (app password)</h3>
+              <div class="settings-row">
+                <input id="emailLabel" type="text" placeholder="label (optional)" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="settings-row">
+                <input id="emailAddress" type="text" placeholder="you@example.com" autocomplete="off" spellcheck="false" />
+                <input id="emailPassword" type="password" placeholder="app password" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="settings-row">
+                <input id="emailImapHost" type="text" placeholder="imap host" autocomplete="off" spellcheck="false" />
+                <input id="emailImapPort" type="text" placeholder="993" style="max-width:70px" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="settings-row">
+                <input id="emailSmtpHost" type="text" placeholder="smtp host (optional)" autocomplete="off" spellcheck="false" />
+                <input id="emailSmtpPort" type="text" placeholder="587" style="max-width:70px" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="settings-row">
+                <button class="btn send" id="addEmailAccountBtn">add</button>
+              </div>
+              <p class="settings-hint" id="emailAddResult"></p>
+            </div>
+            <div class="settings-card">
+              <h3>Accounts</h3>
+              <ul class="endpoint-list" id="emailAccountList"></ul>
+            </div>
+            <div class="settings-card" id="emailInboxCard" hidden>
+              <h3>Inbox</h3>
+              <div class="settings-row">
+                <select id="emailFolderSelect"></select>
+                <button class="btn ghost" id="emailRefreshBtn">refresh</button>
+              </div>
+              <div class="email-layout">
+                <ul class="endpoint-list email-message-list" id="emailMessageList"></ul>
+                <div class="email-reading-pane" id="emailReadingPane">
+                  <p class="settings-hint">select a message</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-panel" data-panel="presets" hidden>
+            <div class="settings-card">
+              <h3>Save current setup as a preset</h3>
+              <p class="settings-hint">Captures the current model, system prompt, and enabled tools.</p>
+              <div class="settings-row">
+                <input id="presetName" type="text" placeholder="preset name, e.g. \"coding\"" autocomplete="off" spellcheck="false" />
+                <button class="btn send" id="savePresetBtn">save current setup</button>
+              </div>
+              <p class="settings-hint" id="presetSaveResult"></p>
+            </div>
+            <div class="settings-card">
+              <h3>Presets</h3>
+              <ul class="endpoint-list" id="presetList"></ul>
+            </div>
+          </div>
+
+          <div class="settings-panel" data-panel="usage" hidden>
+            <div class="settings-card">
+              <h3>Usage &amp; estimated cost</h3>
+              <p class="settings-hint">Token counts are estimated (~4 chars/token), not exact. Cost is estimated for known
+                hosted models only; Ollama/local models always cost $0. Not a substitute for your provider's own billing page.</p>
+              <div id="usageSummary"></div>
+            </div>
+          </div>
+
+          <div class="settings-panel" data-panel="hardware" hidden>
+            <div class="settings-card">
+              <h3>This machine</h3>
+              <p class="settings-hint">Detected once when this tab is opened. VRAM detection needs `nvidia-smi`; without it,
+                sizing falls back to system RAM (CPU/unified-memory inference).</p>
+              <div id="hardwareInfo"></div>
+            </div>
+            <div class="settings-card">
+              <h3>Suggested Ollama models</h3>
+              <ul class="endpoint-list" id="hardwareModelList"></ul>
+            </div>
+          </div>
+
+          <div class="settings-panel" data-panel="data" hidden>
+            <div class="settings-card">
+              <h3>Backup</h3>
+              <p class="settings-hint">Downloads a zip of the whole data/ directory — endpoints, encrypted keys, memory,
+                documents, notes, chat sessions, everything.</p>
+              <button class="btn ghost" id="downloadBackupBtn">download backup</button>
+            </div>
+            <div class="settings-card">
+              <h3>Restore</h3>
+              <p class="settings-hint warning-text">&#9888;&#65039; Overwrites your current data with the contents of the
+                zip. This cannot be undone — back up first if you're unsure.</p>
+              <div class="settings-row">
+                <input id="restoreFile" type="file" accept=".zip" />
+                <button class="btn send" id="restoreBackupBtn">restore</button>
+              </div>
+              <p class="settings-hint" id="restoreResult"></p>
+            </div>
+          </div>
+
+          <div class="settings-panel" data-panel="appearance" hidden>
+            <div class="settings-card">
+              <h3>Theme</h3>
+              <div class="settings-row">
+                <label class="theme-toggle">
+                  <input type="checkbox" id="lightModeToggle" />
+                  <span>Light mode</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="compareModal" hidden>
+    <div class="modal compare-modal" role="dialog" aria-modal="true" aria-labelledby="compareTitle">
+      <div class="modal-header">
+        <span id="compareTitle">compare models</span>
+        <button class="btn ghost modal-close" id="compareCloseBtn" aria-label="Close compare">×</button>
+      </div>
+      <div class="compare-body">
+        <form class="compare-prompt-row" id="compareForm">
+          <input id="comparePromptInput" type="text" placeholder="one prompt, sent to every column…" autocomplete="off" spellcheck="false" />
+          <button class="btn send" type="submit" id="compareSendBtn">send</button>
+        </form>
+        <div class="compare-columns" id="compareColumns"></div>
+        <button class="btn ghost" type="button" id="compareAddColumnBtn">+ add model</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="palette-overlay" id="paletteOverlay" hidden>
+    <div class="palette-box" role="dialog" aria-modal="true" aria-label="Command palette">
+      <input id="paletteInput" type="text" placeholder="type a command…" autocomplete="off" spellcheck="false" />
+      <ul id="paletteList"></ul>
+    </div>
+  </div>
+
+  <script src="streamingSegmenter.js"></script>
+  <script src="streamingRenderer.js"></script>
+  <script src="providers.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
