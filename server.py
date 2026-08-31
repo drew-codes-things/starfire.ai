@@ -65,6 +65,7 @@ import routes
 from config import config
 from mcp_manager import McpConnectionError, mcp_manager
 from mcp_servers_store import REFERENCE_SERVERS
+import ollama_manager
 from model_discovery import detect_ollama
 
 # Pre-installed on first run, same spirit as Ollama auto-detection below —
@@ -114,6 +115,15 @@ DEFAULT_NOTE_TEMPLATES = [
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     detected = await detect_ollama(config.ollama_base_url)
+    if not detected and ollama_manager.is_installed():
+        # It's already installed, just not running — starting a daemon you
+        # already have on your own machine needs no elevated privileges, so
+        # this is safe to do automatically (unlike installing it — see
+        # ollama_manager.py's docstring for why that step stays manual).
+        started, message = await ollama_manager.start(config.ollama_base_url)
+        print(f"  starfire.ai  ->  Ollama installed but not running, tried to start it: {message}")
+        if started:
+            detected = await detect_ollama(config.ollama_base_url)
     if detected and not routes.endpoints.find_by_url(detected):
         endpoint = routes.endpoints.add(detected, kind="ollama", label="Ollama (auto-detected)")
         print(f"  starfire.ai  ->  detected Ollama at {endpoint.base_url}, added automatically")

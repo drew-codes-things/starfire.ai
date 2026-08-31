@@ -22,6 +22,7 @@ import email_client
 import file_edit_tool
 import hardware_probe
 import model_capabilities
+import ollama_manager
 import pending_edits_store
 from agent_loop import run_chat_with_tools
 from api_key_manager import APIKeyManager
@@ -1149,6 +1150,25 @@ async def get_model_capabilities(provider: str, model: str):
 @router.get("/hardware")
 async def get_hardware():
     return await hardware_probe.probe()
+
+
+@router.get("/hardware/ollama")
+async def get_ollama_status():
+    installed = ollama_manager.is_installed()
+    running = bool(await detect_ollama(config.ollama_base_url)) if installed else False
+    return {
+        "installed": installed,
+        "running": running,
+        "install": None if installed else ollama_manager.install_info(),
+    }
+
+
+@router.post("/hardware/ollama/start")
+async def start_ollama():
+    ok, message = await ollama_manager.start(config.ollama_base_url)
+    if not ok:
+        raise HTTPException(502, message)
+    return {"started": True, "message": message}
 
 
 @router.post("/hardware/pull")
