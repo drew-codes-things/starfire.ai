@@ -19,11 +19,10 @@ from pydantic import BaseModel
 import builtin_tools
 import date_parsing
 import email_client
-import file_edit_tool
+import file_edit_tool  # also carries the pending-edit queue (stage/get_pending/...)
 import hardware_probe
 import model_capabilities
 import ollama_manager
-import pending_edits_store
 from agent_loop import run_chat_with_tools
 from api_key_manager import APIKeyManager
 from chat_session_store import ChatSessionStore
@@ -33,20 +32,15 @@ from context_budget import trim_to_budget
 from documents_store import DocumentStore
 import comfyui_client
 import piper_tts
-from comfyui_config_store import ComfyUIConfigStore
-from custom_workflow_store import CustomWorkflowStore
-from generated_files_store import GeneratedFileStore
-from piper_config_store import PiperConfigStore
+from local_gen_store import ComfyUIConfigStore, CustomWorkflowStore, GeneratedFileStore, PiperConfigStore
 from email_rule_checker import EmailRuleChecker
-from email_rule_store import EmailRuleStore
-from email_store import EmailAccountStore
+from email_store import EmailAccountStore, EmailRuleStore
 from mcp_manager import McpConnectionError, mcp_manager
 from mcp_servers_store import MCP_SERVER_REPOSITORY, REFERENCE_SERVERS, McpServerStore
 from memory_store import MemoryStore
 from model_discovery import detect_ollama, discover_servers
 from model_endpoints import ModelEndpointStore
-from note_store import NoteStore
-from note_template_store import NoteTemplateStore
+from note_store import NoteStore, NoteTemplateStore
 from preset_store import PresetStore
 from providers import build_models_url
 from task_scheduler import TaskScheduler, compute_next_run
@@ -1218,16 +1212,16 @@ async def pull_model(body: dict):
 
 @router.get("/pending-edits")
 async def list_pending_edits():
-    return {"edits": pending_edits_store.list_pending()}
+    return {"edits": file_edit_tool.list_pending()}
 
 
 @router.post("/pending-edits/{edit_id}/approve")
 async def approve_pending_edit(edit_id: str):
-    edit = pending_edits_store.get(edit_id)
+    edit = file_edit_tool.get_pending(edit_id)
     if not edit:
         raise HTTPException(404, "no pending edit with that id (already approved/rejected, or the server restarted)")
     result = file_edit_tool.apply_edit(edit["path"], edit["content"])
-    pending_edits_store.remove(edit_id)
+    file_edit_tool.remove_pending(edit_id)
     if not result["ok"]:
         raise HTTPException(500, result["error"])
     return {"ok": True, "path": edit["path"]}
@@ -1235,7 +1229,7 @@ async def approve_pending_edit(edit_id: str):
 
 @router.post("/pending-edits/{edit_id}/reject")
 async def reject_pending_edit(edit_id: str):
-    if not pending_edits_store.remove(edit_id):
+    if not file_edit_tool.remove_pending(edit_id):
         raise HTTPException(404, "no pending edit with that id")
     return {"ok": True}
 

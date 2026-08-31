@@ -18,8 +18,7 @@ import asyncio
 import logging
 
 import email_client
-from email_rule_store import EmailRule, EmailRuleStore
-from email_store import EmailAccountStore
+from email_store import EmailAccountStore, EmailRule, EmailRuleStore
 from note_store import NoteStore
 
 logger = logging.getLogger(__name__)
