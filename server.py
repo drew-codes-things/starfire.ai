@@ -3,6 +3,8 @@ import shutil
 import subprocess
 import sys
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "server_configs"))
+
 def _bootstrap_dependencies() -> None:
     need_install = shutil.which("uvx") is None or shutil.which("piper") is None
     if not need_install:
