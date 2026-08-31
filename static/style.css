@@ -527,6 +527,20 @@ html.light .topbar-logo { filter: none; }
 
 .branch-link { font-size: 0.68rem; color: var(--muted); }
 
+.pull-progress {
+  width: 100%;
+  height: 6px;
+  margin: 6px 0;
+  appearance: none;
+  border: none;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.pull-progress[hidden] { display: none; }
+.pull-progress::-webkit-progress-bar { background: var(--panel); border-radius: 3px; }
+.pull-progress::-webkit-progress-value { background: var(--red); border-radius: 3px; transition: width .15s; }
+.pull-progress::-moz-progress-bar { background: var(--red); border-radius: 3px; }
+
 .dir-browser {
   border: 1px solid var(--border);
   border-radius: 4px;

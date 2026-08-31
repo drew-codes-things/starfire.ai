@@ -40,7 +40,7 @@ from email_rule_checker import EmailRuleChecker
 from email_rule_store import EmailRuleStore
 from email_store import EmailAccountStore
 from mcp_manager import McpConnectionError, mcp_manager
-from mcp_servers_store import REFERENCE_SERVERS, McpServerStore
+from mcp_servers_store import MCP_SERVER_REPOSITORY, REFERENCE_SERVERS, McpServerStore
 from memory_store import MemoryStore
 from model_discovery import detect_ollama, discover_servers
 from model_endpoints import ModelEndpointStore
@@ -275,6 +275,14 @@ class AddMcpServerBody(BaseModel):
     path: str | None = None  # required by the filesystem preset
 
 
+@router.get("/mcp/repository")
+async def list_mcp_repository():
+    return {"repository": [
+        {"id": rid, "name": p["name"], "needs_path": p.get("needs_path", False), "env_fields": p.get("env_fields", [])}
+        for rid, p in MCP_SERVER_REPOSITORY.items()
+    ]}
+
+
 @router.get("/mcp/servers")
 async def list_mcp_servers():
     return {"servers": [
@@ -287,13 +295,16 @@ async def list_mcp_servers():
 @router.post("/mcp/servers")
 async def add_mcp_server(body: AddMcpServerBody):
     if body.preset:
-        preset = REFERENCE_SERVERS.get(body.preset)
+        preset = REFERENCE_SERVERS.get(body.preset) or MCP_SERVER_REPOSITORY.get(body.preset)
         if not preset:
             raise HTTPException(400, f"unknown preset '{body.preset}'")
-        if preset["needs_path"] and not body.path:
+        if preset.get("needs_path") and not body.path:
             raise HTTPException(400, f"the {preset['name']} server needs a directory path")
+        missing = [f["key"] for f in preset.get("env_fields", []) if not body.env.get(f["key"])]
+        if missing:
+            raise HTTPException(400, f"the {preset['name']} server needs: {', '.join(missing)}")
         name, command, args = preset["name"], preset["command"], list(preset["args"])
-        if preset["needs_path"]:
+        if preset.get("needs_path"):
             args.append(body.path)
     else:
         if not body.command:

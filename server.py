@@ -73,6 +73,43 @@ from model_discovery import detect_ollama
 # directory choice from the user, so it stays a manual "Quick add" action.
 DEFAULT_MCP_PRESETS = ["fetch", "memory"]
 
+# A handful of common starting points — not exhaustive, just enough that
+# Settings -> Notes -> Templates isn't empty the first time you look.
+DEFAULT_NOTE_TEMPLATES = [
+    {
+        "name": "Meeting notes",
+        "title": "Meeting — ",
+        "content": "Attendees:\n\nAgenda:\n- \n\nNotes:\n\n\nAction items:\n- ",
+        "note_type": "note",
+    },
+    {
+        "name": "Daily to-do",
+        "title": "To-do — today",
+        "note_type": "checklist",
+        "repeat": "daily",
+        "items": [{"text": "", "done": False}],
+    },
+    {
+        "name": "Weekly review",
+        "title": "Weekly review",
+        "content": "What went well:\n\nWhat didn't:\n\nFocus for next week:\n",
+        "note_type": "note",
+        "repeat": "weekly",
+    },
+    {
+        "name": "Shopping list",
+        "title": "Shopping list",
+        "note_type": "checklist",
+        "items": [{"text": "", "done": False}],
+    },
+    {
+        "name": "Project brainstorm",
+        "title": "Brainstorm — ",
+        "content": "Problem:\n\nIdeas:\n- \n\nOpen questions:\n- ",
+        "note_type": "note",
+    },
+]
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -96,6 +133,16 @@ async def lifespan(app: FastAPI):
             continue
         routes.mcp_servers.add(name=preset["name"], command=preset["command"], args=list(preset["args"]))
         print(f"  starfire.ai  ->  added default MCP server '{preset['name']}'")
+
+    # Seed a few starter note templates, once — only if the store is
+    # completely empty, unlike the MCP presets above. Templates have no
+    # external service to reconcile against, so "you deleted it" should
+    # just stay deleted; re-seeding is only a concern if every template
+    # was removed, which is rare and easy to redo if genuinely unwanted.
+    if not routes.note_templates.list():
+        for template in DEFAULT_NOTE_TEMPLATES:
+            routes.note_templates.add(**template)
+        print(f"  starfire.ai  ->  added {len(DEFAULT_NOTE_TEMPLATES)} starter note templates")
 
     # MCP sessions are subprocess-backed and don't survive a restart — every
     # server marked enabled in the store gets reconnected here, same as

@@ -51,6 +51,77 @@ REFERENCE_SERVERS = {
     },
 }
 
+# A broader catalog beyond the three always-available quick-adds above —
+# each of these needs a "configure" step (an API key/token, typically)
+# before it can connect, unlike the zero-config REFERENCE_SERVERS. Based on
+# the official MCP reference servers repo and well-known community servers;
+# package names/availability can drift over time in an ecosystem this
+# young, so treat this list as a starting point, not a guarantee. That's a
+# safe thing to ship regardless: add_mcp_server already validates every
+# addition by actually connecting before persisting it (see routes.py), so
+# a stale entry here just fails with a clear connection error — it can
+# never silently break anything already configured.
+MCP_SERVER_REPOSITORY = {
+    "git": {
+        "name": "Git",
+        "command": "uvx",
+        "args": ["mcp-server-git", "--repository"],
+        "needs_path": True,  # path to a local git repository
+        "env_fields": [],
+    },
+    "github": {
+        "name": "GitHub",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-github"],
+        "needs_path": False,
+        "env_fields": [{"key": "GITHUB_PERSONAL_ACCESS_TOKEN", "label": "GitHub personal access token"}],
+    },
+    "gitlab": {
+        "name": "GitLab",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-gitlab"],
+        "needs_path": False,
+        "env_fields": [{"key": "GITLAB_PERSONAL_ACCESS_TOKEN", "label": "GitLab personal access token"}],
+    },
+    "sqlite": {
+        "name": "SQLite",
+        "command": "uvx",
+        # mcp-server-sqlite is an old, unmaintained reference server written
+        # against mcp SDK 1.0's Server API (Server.list_resources() etc.),
+        # which the current SDK (2.x, what this app's own venv resolves)
+        # removed — it crashes with a bare AttributeError against the
+        # latest mcp otherwise. Verified directly: pinning the old SDK via
+        # --with is what actually makes this specific server work.
+        "args": ["--with", "mcp==1.0.0", "mcp-server-sqlite", "--db-path"],
+        "needs_path": True,  # path to a .db file
+        "env_fields": [],
+    },
+    "brave_search": {
+        "name": "Brave Search",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+        "needs_path": False,
+        "env_fields": [{"key": "BRAVE_API_KEY", "label": "Brave Search API key"}],
+    },
+    "slack": {
+        "name": "Slack",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-slack"],
+        "needs_path": False,
+        "env_fields": [
+            {"key": "SLACK_BOT_TOKEN", "label": "Slack bot token"},
+            {"key": "SLACK_TEAM_ID", "label": "Slack team ID"},
+        ],
+    },
+    "puppeteer": {
+        "name": "Puppeteer (browser automation)",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-puppeteer"],
+        "needs_path": False,
+        "env_fields": [],
+    },
+}
+
 
 class McpServerStore:
     def __init__(self, data_dir: str):
