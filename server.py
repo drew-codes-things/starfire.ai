@@ -25,7 +25,7 @@ def _bootstrap_dependencies() -> None:
     installer, which this doesn't do without you choosing to run that
     yourself. A missing npx just gets a clear one-line hint instead.
     """
-    need_install = shutil.which("uvx") is None
+    need_install = shutil.which("uvx") is None or shutil.which("piper") is None
     if not need_install:
         try:
             import fastapi  # noqa: F401
@@ -109,15 +109,19 @@ async def lifespan(app: FastAPI):
             print(f"  starfire.ai  ->  could not start MCP server '{server.name}': {e}")
 
     scheduler_task = asyncio.create_task(routes.scheduler.run_loop())
+    email_rule_task = asyncio.create_task(routes.email_rule_checker.run_loop())
 
     yield
 
     routes.scheduler.stop()
     scheduler_task.cancel()
-    try:
-        await scheduler_task
-    except (asyncio.CancelledError, Exception):
-        pass
+    routes.email_rule_checker.stop()
+    email_rule_task.cancel()
+    for task in (scheduler_task, email_rule_task):
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
 
     for server in routes.mcp_servers.list():
         await mcp_manager.disconnect(server.id)
