@@ -10,7 +10,7 @@ import embeddings as embeddings_module
 import lexical_search
 from atomic_io import atomic_write_json
 from config import config
-from model_discovery import detect_ollama
+from model_endpoints import detect_ollama
 
 CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 200

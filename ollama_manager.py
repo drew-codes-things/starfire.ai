@@ -4,7 +4,7 @@ import asyncio
 import platform
 import shutil
 
-from model_discovery import detect_ollama
+from model_endpoints import detect_ollama
 
 _SYSTEM = platform.system()
 
