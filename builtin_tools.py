@@ -23,22 +23,23 @@ import date_parsing
 import deep_research
 import document_generation
 import email_client
-import file_edit_tool
+import file_edit_tool  # also carries the pending-edit queue (stage/get_pending/...)
 import github_tool
 import image_generation
-import pending_edits_store
 import piper_tts
 import shell_tool
 import web_search
 from api_key_manager import APIKeyManager
-from comfyui_config_store import DEFAULT_BASE_URL as COMFYUI_DEFAULT_BASE_URL
-from comfyui_config_store import ComfyUIConfigStore
-from custom_workflow_store import CustomWorkflowStore
 from documents_store import DocumentStore
 from email_store import EmailAccountStore
-from generated_files_store import GeneratedFileStore
+from local_gen_store import (
+    DEFAULT_COMFYUI_BASE_URL as COMFYUI_DEFAULT_BASE_URL,
+    ComfyUIConfigStore,
+    CustomWorkflowStore,
+    GeneratedFileStore,
+    PiperConfigStore,
+)
 from model_endpoints import ModelEndpointStore
-from piper_config_store import PiperConfigStore
 from memory_store import VALID_CATEGORIES, MemoryStore
 from note_store import VALID_NOTE_TYPES, VALID_REPEATS, NoteStore
 from task_store import ScheduledTask, TaskRunStore, TaskStore
@@ -508,7 +509,7 @@ def _edit_file(args: dict, ctx: ToolContext) -> str:
     diff_text = file_edit_tool.make_diff(path, old_content, new_content)
 
     if ctx.require_edit_approval:
-        pending_id = pending_edits_store.stage(path, new_content, diff_text)
+        pending_id = file_edit_tool.stage(path, new_content, diff_text)
         return json.dumps({"staged": True, "pending_id": pending_id, "path": path, "diff": diff_text})
 
     result = file_edit_tool.apply_edit(path, new_content)

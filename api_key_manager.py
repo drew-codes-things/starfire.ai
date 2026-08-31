@@ -3,7 +3,9 @@
 Ported near-verbatim from odysseus-dev's src/api_key_manager.py — the user
 asked for starfire's API-key handling to mirror odysseus directly, and this
 module is small, generic, and has no odysseus-specific coupling beyond the
-safe_chmod import. Only that import path changed.
+safe_chmod helper below (trimmed from odysseus's core/platform_compat.py,
+which also has process-liveness/shell-discovery helpers this app has no use
+for — folded in here since this is its only caller).
 """
 
 import os
@@ -12,9 +14,24 @@ import logging
 from typing import Dict
 from cryptography.fernet import Fernet, InvalidToken
 
-from platform_compat import safe_chmod
-
 logger = logging.getLogger(__name__)
+
+IS_WINDOWS = os.name == "nt"
+
+
+def safe_chmod(path: str, mode: int) -> bool:
+    """chmod that no-ops (rather than raising) on Windows or on failure.
+
+    Windows files are already ACL-restricted to the owning user, so a Unix
+    permission bit has nothing to do there.
+    """
+    if IS_WINDOWS:
+        return False
+    try:
+        os.chmod(path, mode)
+        return True
+    except OSError:
+        return False
 
 
 class APIKeyManager:
