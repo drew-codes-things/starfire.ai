@@ -1,14 +1,5 @@
-"""Shared atomic JSON write.
-
-Every *_store.py module used to reimplement the same temp-file + fsync +
-os.replace pattern independently. Factored into one place here, mirroring
-odysseus-dev's own core/atomic_io.py — one spot to fix if the write strategy
-ever needs to change, instead of eight.
-"""
-
 import json
 import os
-
 
 def atomic_write_json(path: str, data) -> None:
     tmp_file = path + ".tmp"

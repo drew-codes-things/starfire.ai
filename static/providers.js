@@ -1,8 +1,4 @@
-// providers.js
-//
-// Pure lookup module for provider display — trimmed port of odysseus-dev's
-// static/js/providers.js (187 lines, ~90 providers) down to the handful
-// starfire actually talks to.
+
 
 const _PROVIDERS = [
   [/ollama|:11434/i, 'Ollama'],
@@ -18,7 +14,7 @@ function providerLabel(endpointUrlOrModelId) {
       return 'Local';
     }
   } catch (_) {
-    // not a URL — probably a model id, fall through to pattern match
+
   }
   for (const [re, label] of _PROVIDERS) {
     if (re.test(s)) return label;

@@ -1,10 +1,3 @@
-"""MCP server registry: a JSON file, same shape/philosophy as model_endpoints.py
-(no DB — odysseus uses a DB-backed McpServer table because it's multi-user;
-starfire is single-user and already committed to file-based config elsewhere)."""
-
-# Deferred annotation evaluation: McpServerStore defines a method named
-# list(), which would otherwise shadow the builtin `list` for every type hint
-# written after it in the class body (e.g. `args: list[str]` in add()).
 from __future__ import annotations
 
 import json
@@ -13,7 +6,6 @@ import uuid
 from dataclasses import asdict, dataclass, field
 
 from atomic_io import atomic_write_json
-
 
 @dataclass
 class McpServerConfig:
@@ -24,18 +16,12 @@ class McpServerConfig:
     env: dict[str, str] = field(default_factory=dict)
     enabled: bool = True
 
-
-# One-click presets for the Tools settings tab. Verified against the official
-# MCP reference servers repo (github.com/modelcontextprotocol/servers):
-# filesystem/memory are npm packages run via npx, fetch is a Python package
-# run via uvx (not npm — an initial lookup got this wrong before checking the
-# server's own README).
 REFERENCE_SERVERS = {
     "filesystem": {
         "name": "Filesystem",
         "command": "npx",
         "args": ["-y", "@modelcontextprotocol/server-filesystem"],
-        "needs_path": True,  # UI collects one allowed directory, appended to args
+        "needs_path": True,
     },
     "fetch": {
         "name": "Fetch",
@@ -51,22 +37,12 @@ REFERENCE_SERVERS = {
     },
 }
 
-# A broader catalog beyond the three always-available quick-adds above —
-# each of these needs a "configure" step (an API key/token, typically)
-# before it can connect, unlike the zero-config REFERENCE_SERVERS. Based on
-# the official MCP reference servers repo and well-known community servers;
-# package names/availability can drift over time in an ecosystem this
-# young, so treat this list as a starting point, not a guarantee. That's a
-# safe thing to ship regardless: add_mcp_server already validates every
-# addition by actually connecting before persisting it (see routes.py), so
-# a stale entry here just fails with a clear connection error — it can
-# never silently break anything already configured.
 MCP_SERVER_REPOSITORY = {
     "git": {
         "name": "Git",
         "command": "uvx",
         "args": ["mcp-server-git", "--repository"],
-        "needs_path": True,  # path to a local git repository
+        "needs_path": True,
         "env_fields": [],
     },
     "github": {
@@ -86,14 +62,8 @@ MCP_SERVER_REPOSITORY = {
     "sqlite": {
         "name": "SQLite",
         "command": "uvx",
-        # mcp-server-sqlite is an old, unmaintained reference server written
-        # against mcp SDK 1.0's Server API (Server.list_resources() etc.),
-        # which the current SDK (2.x, what this app's own venv resolves)
-        # removed — it crashes with a bare AttributeError against the
-        # latest mcp otherwise. Verified directly: pinning the old SDK via
-        # --with is what actually makes this specific server work.
         "args": ["--with", "mcp==1.0.0", "mcp-server-sqlite", "--db-path"],
-        "needs_path": True,  # path to a .db file
+        "needs_path": True,
         "env_fields": [],
     },
     "brave_search": {
@@ -121,7 +91,6 @@ MCP_SERVER_REPOSITORY = {
         "env_fields": [],
     },
 }
-
 
 class McpServerStore:
     def __init__(self, data_dir: str):

@@ -1,34 +1,13 @@
-"""starfire.ai — FastAPI entrypoint.
-
-One linear script, matching odysseus-dev's app.py shape at a fraction of the
-size: config → app → lifespan (Ollama auto-detect) → routes → static files.
-"""
-
 import os
 import shutil
 import subprocess
 import sys
 
-
 def _bootstrap_dependencies() -> None:
-    """First-run bootstrap: if fastapi or the uv/uvx toolchain isn't present
-    yet, install requirements.txt automatically — so `python server.py` (or
-    `uvicorn server:app`) works right after a fresh clone with no separate
-    manual `pip install` step. Must run before any third-party import below,
-    using only the standard library, or a missing fastapi would crash this
-    file before ever reaching this function.
-
-    Node.js (npx, needed for the Filesystem and MCP Memory servers) is
-    deliberately NOT auto-installed — it's a system runtime, not a Python
-    package, and installing one automatically means invoking a
-    platform-specific package manager (apt/brew/choco) or a downloaded
-    installer, which this doesn't do without you choosing to run that
-    yourself. A missing npx just gets a clear one-line hint instead.
-    """
     need_install = shutil.which("uvx") is None or shutil.which("piper") is None
     if not need_install:
         try:
-            import fastapi  # noqa: F401
+            import fastapi
         except ImportError:
             need_install = True
 
@@ -39,14 +18,13 @@ def _bootstrap_dependencies() -> None:
             subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-r", req_file], check=True)
         except subprocess.CalledProcessError:
             sys.exit(
-                "starfire.ai: automatic dependency install failed — run "
+                "starfire.ai: automatic dependency install failed - run "
                 "'pip install -r requirements.txt' yourself and try again."
             )
 
     if shutil.which("npx") is None:
-        print("  starfire.ai  ->  Node.js not found — the Filesystem and MCP Memory servers "
+        print("  starfire.ai  ->  Node.js not found - the Filesystem and MCP Memory servers "
               "won't connect. Install it from https://nodejs.org to use them.")
-
 
 _bootstrap_dependencies()
 
@@ -68,24 +46,18 @@ from mcp_servers_store import REFERENCE_SERVERS
 import ollama_manager
 from model_discovery import detect_ollama
 
-# Pre-installed on first run, same spirit as Ollama auto-detection below —
-# zero-setup tool-calling for the two reference servers with no configuration
-# of their own. Filesystem is deliberately NOT included here: it needs a
-# directory choice from the user, so it stays a manual "Quick add" action.
 DEFAULT_MCP_PRESETS = ["fetch", "memory"]
 
-# A handful of common starting points — not exhaustive, just enough that
-# Settings -> Notes -> Templates isn't empty the first time you look.
 DEFAULT_NOTE_TEMPLATES = [
     {
         "name": "Meeting notes",
-        "title": "Meeting — ",
+        "title": "Meeting - ",
         "content": "Attendees:\n\nAgenda:\n- \n\nNotes:\n\n\nAction items:\n- ",
         "note_type": "note",
     },
     {
         "name": "Daily to-do",
-        "title": "To-do — today",
+        "title": "To-do - today",
         "note_type": "checklist",
         "repeat": "daily",
         "items": [{"text": "", "done": False}],
@@ -105,21 +77,16 @@ DEFAULT_NOTE_TEMPLATES = [
     },
     {
         "name": "Project brainstorm",
-        "title": "Brainstorm — ",
+        "title": "Brainstorm - ",
         "content": "Problem:\n\nIdeas:\n- \n\nOpen questions:\n- ",
         "note_type": "note",
     },
 ]
 
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     detected = await detect_ollama(config.ollama_base_url)
     if not detected and ollama_manager.is_installed():
-        # It's already installed, just not running — starting a daemon you
-        # already have on your own machine needs no elevated privileges, so
-        # this is safe to do automatically (unlike installing it — see
-        # ollama_manager.py's docstring for why that step stays manual).
         started, message = await ollama_manager.start(config.ollama_base_url)
         print(f"  starfire.ai  ->  Ollama installed but not running, tried to start it: {message}")
         if started:
@@ -128,13 +95,6 @@ async def lifespan(app: FastAPI):
         endpoint = routes.endpoints.add(detected, kind="ollama", label="Ollama (auto-detected)")
         print(f"  starfire.ai  ->  detected Ollama at {endpoint.base_url}, added automatically")
 
-    # Register the default presets once — matched by (command, args) so this
-    # is idempotent across restarts and doesn't re-add one the user deleted
-    # on purpose... except it does, the same way Ollama auto-detection above
-    # re-adds a deleted-but-still-running Ollama: "on" is the resting state
-    # this app returns to unless the underlying thing (server/Ollama) is
-    # actually gone. Disable via each server's own checkbox instead of
-    # deleting it if you don't want it coming back.
     existing = {(s.command, tuple(s.args)) for s in routes.mcp_servers.list()}
     for preset_id in DEFAULT_MCP_PRESETS:
         preset = REFERENCE_SERVERS[preset_id]
@@ -144,19 +104,11 @@ async def lifespan(app: FastAPI):
         routes.mcp_servers.add(name=preset["name"], command=preset["command"], args=list(preset["args"]))
         print(f"  starfire.ai  ->  added default MCP server '{preset['name']}'")
 
-    # Seed a few starter note templates, once — only if the store is
-    # completely empty, unlike the MCP presets above. Templates have no
-    # external service to reconcile against, so "you deleted it" should
-    # just stay deleted; re-seeding is only a concern if every template
-    # was removed, which is rare and easy to redo if genuinely unwanted.
     if not routes.note_templates.list():
         for template in DEFAULT_NOTE_TEMPLATES:
             routes.note_templates.add(**template)
         print(f"  starfire.ai  ->  added {len(DEFAULT_NOTE_TEMPLATES)} starter note templates")
 
-    # MCP sessions are subprocess-backed and don't survive a restart — every
-    # server marked enabled in the store gets reconnected here, same as
-    # odysseus's register_builtin_servers() does for its own builtins.
     for server in routes.mcp_servers.list():
         if not server.enabled:
             continue
@@ -183,36 +135,17 @@ async def lifespan(app: FastAPI):
     for server in routes.mcp_servers.list():
         await mcp_manager.disconnect(server.id)
 
-
 app = FastAPI(title="starfire.ai", lifespan=lifespan)
-
 
 @app.middleware("http")
 async def require_client_header(request: Request, call_next):
-    """CSRF guard for a no-auth app: any state-changing request to /api/*
-    must carry a custom header this app's own frontend always sends (see
-    app.js's fetch wrapper). This app sets no CORS headers anywhere, so a
-    cross-origin request that needs a preflight (any custom header, or a
-    non-"simple" method/content-type) already fails before it's ever sent —
-    that already covered every JSON POST/PUT/DELETE here. It did NOT cover
-    multipart/form-data POSTs (/api/documents, /api/restore): browsers treat
-    that content type as CORS-"simple" and skip preflight entirely, so a
-    malicious page the user has open in another tab could otherwise
-    auto-submit a <form> straight to /api/restore and silently overwrite
-    the whole data/ directory. Requiring this header closes that gap
-    uniformly (forces a preflight regardless of content type) rather than
-    patching those two routes individually — and covers anything mutating
-    added here later without needing to remember to do it again.
-    """
     if request.method not in ("GET", "HEAD", "OPTIONS") and request.url.path.startswith("/api/"):
         if "x-starfire-client" not in request.headers:
             return JSONResponse({"detail": "missing required client header"}, status_code=403)
     return await call_next(request)
 
-
 app.include_router(routes.router)
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
-
 
 if __name__ == "__main__":
     import uvicorn

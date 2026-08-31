@@ -1,17 +1,3 @@
-"""Background loop that checks each enabled email rule's account/folder for
-new messages and applies the rule's action. Same run_loop()/stop() shape as
-task_scheduler.py's TaskScheduler, so server.py starts/stops it the same way.
-
-email_client.py's functions are synchronous (imaplib/smtplib, blocking) —
-routes.py calls them directly since a single interactive request blocking
-briefly is fine. A background loop is a different failure mode: blocking
-the whole event loop every TICK_SECONDS while polling a possibly slow/
-unreachable IMAP server would stall every other request (chat streaming
-included) for that duration. Every email_client call here goes through
-asyncio.to_thread for exactly that reason — not needed for the on-demand
-routes, needed here.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -25,14 +11,8 @@ logger = logging.getLogger(__name__)
 
 TICK_SECONDS = 120
 
-
 class EmailRuleChecker:
     def __init__(self, rules: EmailRuleStore, accounts: EmailAccountStore, get_password, chat_fn, notes: NoteStore):
-        """get_password(account_id) -> str | None and chat_fn(endpoint_id,
-        model, prompt) -> awaitable[str] are injected rather than imported
-        directly, mirroring task_scheduler.py's chat_fn injection — avoids
-        this module importing routes.py (which would be a cycle, since
-        routes.py is what constructs this checker)."""
         self.rules = rules
         self.accounts = accounts
         self.get_password = get_password
@@ -105,7 +85,7 @@ class EmailRuleChecker:
             elif rule.action == "add_note":
                 self.notes.add(
                     title=f"Email: {message.get('subject') or '(no subject)'}",
-                    content=f"From: {message.get('from', '')}\n\n(added automatically — matched an email rule)",
+                    content=f"From: {message.get('from', '')}\n\n(added automatically - matched an email rule)",
                     source="agent",
                 )
             elif rule.action == "ai_summarize_note":

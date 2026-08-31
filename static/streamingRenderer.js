@@ -1,17 +1,4 @@
-// streamingRenderer.js
-//
-// Owns the incremental DOM for one streaming assistant message: text arriving
-// before the last "safe" boundary (see streamingSegmenter.js) is rendered
-// once and frozen into a static block; only the live tail is re-rendered on
-// every token. Simplified reimplementation of odysseus-dev's
-// static/js/streamingRenderer.js — see streamingSegmenter.js for why this
-// isn't a byte-for-byte port.
-//
-// Usage:
-//   const renderer = createStreamRenderer(el, { render: markdownRender });
-//   renderer.push(deltaText);   // call once per streamed chunk
-//   renderer.finish();          // call once the stream is done — renders any
-//                                // remaining tail and highlights code blocks
+
 
 function createStreamRenderer(el, { render }) {
   let full = '';
@@ -37,8 +24,7 @@ function createStreamRenderer(el, { render }) {
         frozenHtml += render(full.slice(frozenUpTo, cut));
         frozenUpTo = cut;
       } catch (_) {
-        // Renderer choked on a boundary we thought was safe — fall back to a
-        // full re-render on finish() rather than freezing bad HTML.
+
       }
     }
     paint();

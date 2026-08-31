@@ -1,13 +1,3 @@
-"""Persistent memory: facts the assistant remembers across chats.
-
-Ported from odysseus-dev's src/memory.py, scoped down: JSON-file store (no
-DB), same atomic-write pattern as every other store in this codebase, the
-same lexical get_relevant_memories() retrieval approach (now shared via
-lexical_search.py), and the same category-keyword-boost idea — but dropped:
-multi-user ownership, session-linking (starfire has no server-side chat
-sessions to link to), and the LLM-based audit/consolidate pass.
-"""
-
 from __future__ import annotations
 
 import json
@@ -24,10 +14,6 @@ from model_discovery import detect_ollama
 
 VALID_CATEGORIES = {"fact", "identity", "preference", "contact", "task"}
 
-# Keyword hints that nudge a category's relevance score up a little when the
-# query looks like it's asking about that kind of thing — ported from
-# memory.py's category-boost idea, kept small and specific to memory (not
-# pushed into the shared lexical_search module, which documents don't need).
 _CATEGORY_BOOST_KEYWORDS = {
     "identity": {"name", "who", "call", "i", "me", "my"},
     "contact": {"email", "phone", "address", "contact", "reach"},
@@ -35,18 +21,16 @@ _CATEGORY_BOOST_KEYWORDS = {
     "task": {"todo", "task", "remind", "deadline", "due"},
 }
 
-
 @dataclass
 class MemoryEntry:
     id: str
     text: str
     category: str = "fact"
-    source: str = "user"  # user | inline_command | agent
+    source: str = "user"
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     pinned: bool = False
     uses: int = 0
     embedding: list[float] = field(default_factory=list)
-
 
 class MemoryStore:
     def __init__(self, data_dir: str):
@@ -90,7 +74,6 @@ class MemoryStore:
         return None
 
     def find_duplicate(self, text: str) -> MemoryEntry | None:
-        """Exact-text dedup check, ported from memory.py's find_duplicates."""
         normalized = text.strip().lower()
         for e in self._load():
             if e.text.strip().lower() == normalized:
@@ -144,11 +127,6 @@ class MemoryStore:
         return found
 
     async def relevant(self, query: str, max_items: int = 8) -> list[MemoryEntry]:
-        """Pinned entries are always included (surfaced first); the rest are
-        ranked by lexical relevance to the query, optionally blended with
-        semantic similarity when a local Ollama (with an embedding model
-        pulled) is reachable — see embeddings.py. Falls back to lexical-only
-        ranking, unchanged from before embeddings existed, whenever it isn't."""
         entries = self._load()
         pinned = [e for e in entries if e.pinned]
         unpinned = [e for e in entries if not e.pinned]
@@ -181,9 +159,6 @@ class MemoryStore:
 
         ollama_url = await detect_ollama(config.ollama_base_url)
         if not ollama_url or not unpinned:
-            # No semantic signal available — same ordering as before
-            # embeddings existed: lexical matches, then boosted-category
-            # entries that scored below threshold.
             return list(dict.fromkeys(lexical_ranked + [i for i in boosted_ids if i not in lexical_ranked]))
 
         await self._ensure_embeddings(unpinned, ollama_url)
@@ -199,9 +174,6 @@ class MemoryStore:
         return list(dict.fromkeys(ranked + [i for i in boosted_ids if i not in ranked]))
 
     async def _ensure_embeddings(self, entries: list[MemoryEntry], ollama_url: str) -> None:
-        """Compute and persist embeddings for any entries missing one.
-        Best-effort — a failed embed() call just leaves that entry without
-        one, which _rank_unpinned already treats as "no semantic score"."""
         missing = [e for e in entries if not e.embedding]
         if not missing:
             return
@@ -218,8 +190,6 @@ class MemoryStore:
             self._save(all_entries)
 
     def _touch(self, memory_ids: set[str]) -> None:
-        """Bump usage counters after a set of entries was actually surfaced
-        into context — ported from memory.py's increment_uses."""
         entries = self._load()
         changed = False
         for e in entries:

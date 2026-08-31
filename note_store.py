@@ -1,15 +1,3 @@
-"""Notes: Google-Keep-style notes and checklists with due dates, pins,
-labels, colors, and repeat — odysseus-dev's actual to-do-list equivalent
-(its "Tasks" subsystem, ported earlier, is scheduled agent automation, a
-different feature despite the name).
-
-Ported from odysseus-dev's Note model (core/database.py), scoped to JSON
-storage (no DB) and the fields a to-do list actually needs — dropped:
-owner/session_id (no multi-user/sessions here), image_url (no image
-uploads), and ai_classification/ai_content_hash/agent_session_id (an AI
-auto-triage + note-spawns-a-chat-session feature, not built here).
-"""
-
 from __future__ import annotations
 
 import json
@@ -23,12 +11,10 @@ from atomic_io import atomic_write_json
 VALID_REPEATS = {"none", "daily", "weekly", "monthly", "yearly"}
 VALID_NOTE_TYPES = {"note", "checklist"}
 
-
 @dataclass
 class NoteItem:
     text: str
     done: bool = False
-
 
 @dataclass
 class Note:
@@ -36,17 +22,16 @@ class Note:
     title: str = ""
     content: str = ""
     items: list[NoteItem] = field(default_factory=list)
-    note_type: str = "note"  # note | checklist
+    note_type: str = "note"
     color: str = ""
     label: str = ""
     pinned: bool = False
     archived: bool = False
-    due_date: str = ""  # ISO date/datetime string, or ""
-    repeat: str = "none"  # none | daily | weekly | monthly | yearly
-    source: str = "user"  # user | agent
+    due_date: str = ""
+    repeat: str = "none"
+    source: str = "user"
     sort_order: int = 0
     created: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
 
 class NoteStore:
     def __init__(self, data_dir: str):
@@ -88,7 +73,6 @@ class NoteStore:
             notes = [n for n in notes if n.archived == archived]
         if label:
             notes = [n for n in notes if n.label == label]
-        # Pinned first, matching odysseus's Note.pinned.desc() list ordering.
         return sorted(notes, key=lambda n: (not n.pinned, n.sort_order, n.created))
 
     def get(self, note_id: str) -> Note | None:
@@ -156,26 +140,17 @@ class NoteStore:
                 return True
         return False
 
-
-# ── note templates ───────────────────────────────────────────────────────
-# A saved note/checklist shape (title, content or checklist items, type,
-# label, color, repeat) you can instantiate with one click instead of
-# rebuilding the same recurring structure — a weekly meeting-notes format,
-# a standard shopping checklist, etc. Same domain as NoteStore above, kept
-# in the same file rather than its own near-empty one.
-
 @dataclass
 class NoteTemplate:
     id: str
     name: str
     title: str = ""
     content: str = ""
-    items: list[dict] = field(default_factory=list)  # [{text, done}], done always false when instantiated
+    items: list[dict] = field(default_factory=list)
     note_type: str = "note"
     label: str = ""
     color: str = ""
     repeat: str = "none"
-
 
 class NoteTemplateStore:
     def __init__(self, data_dir: str):

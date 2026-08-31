@@ -1,15 +1,3 @@
-"""MCP client — connects out to stdio Model Context Protocol servers and
-exposes their tools to the chat/tool-calling loop.
-
-Mirrors odysseus-dev's src/mcp_manager.py client role (ClientSession over
-stdio_client), trimmed to stdio transport only — no SSE/HTTP/OAuth, which
-odysseus needs for remote/authenticated MCP servers but starfire's scope
-(the 3 official reference servers + arbitrary local commands) doesn't.
-
-Connections are long-lived subprocesses kept open for the app's lifetime,
-same as odysseus's builtin-server model — not spawned per request.
-"""
-
 import asyncio
 import logging
 from contextlib import AsyncExitStack
@@ -19,10 +7,8 @@ from mcp.client.stdio import stdio_client
 
 logger = logging.getLogger(__name__)
 
-
 class McpConnectionError(Exception):
     pass
-
 
 class McpManager:
     def __init__(self):
@@ -33,11 +19,6 @@ class McpManager:
 
     async def connect(self, server_id: str, command: str, args: list[str],
                        env: dict[str, str] | None = None) -> list[dict]:
-        """Start the server subprocess, initialize the session, and cache its
-        tool list. Returns the tool list (as plain dicts) on success; raises
-        McpConnectionError with a readable message on failure — the same
-        contract /api/model-endpoints/test relies on for its probe-before-add
-        UX, reused here for the "quick add" flow."""
         async with self._lock:
             if server_id in self._sessions:
                 return self._tools_cache.get(server_id, [])
@@ -47,9 +28,6 @@ class McpManager:
                 params = StdioServerParameters(command=command, args=args, env=env)
                 read, write = await stack.enter_async_context(stdio_client(params))
                 session = await stack.enter_async_context(ClientSession(read, write))
-                # 45s, not 15s: an npx/uvx package that isn't cached yet has
-                # to be fetched over the network before the server even
-                # starts, on top of MCP's own initialize handshake.
                 await asyncio.wait_for(session.initialize(), timeout=45)
                 result = await asyncio.wait_for(session.list_tools(), timeout=45)
                 tools = [
@@ -57,14 +35,7 @@ class McpManager:
                     for t in result.tools
                 ]
             except Exception as e:
-                # Must close within this same task — stdio_client's anyio
-                # task group raises "cancel scope in a different task" if
-                # torn down later (e.g. by GC after the exception escaped
-                # uncleaned), so every failure path after entering the stack
-                # closes it right here, not just the connect/initialize ones.
                 await stack.aclose()
-                # str(TimeoutError()) is '' — name the exception type too so
-                # a timeout doesn't surface as a blank, useless error message.
                 detail = str(e) or type(e).__name__
                 raise McpConnectionError(f"failed to start '{command}': {detail}") from e
 
@@ -91,11 +62,6 @@ class McpManager:
         return self._tools_cache.get(server_id, [])
 
     def get_all_openai_schemas(self, enabled_ids: set[str]) -> list[dict]:
-        """OpenAI-style function-tool schemas across every connected+enabled
-        server, named mcp__{server_id}__{tool_name} — same qualification
-        scheme as odysseus's McpManager.get_all_openai_schemas, so a tool
-        call can be routed back to the right server/tool by splitting the
-        name."""
         schemas = []
         for server_id, tools in self._tools_cache.items():
             if server_id not in enabled_ids:
@@ -112,9 +78,6 @@ class McpManager:
         return schemas
 
     async def call_tool(self, qualified_name: str, arguments: dict) -> str:
-        """Split 'mcp__{server_id}__{tool_name}', dispatch to that server's
-        session, and stringify the result content for feeding back into the
-        conversation as a role:"tool" message."""
         if not qualified_name.startswith("mcp__"):
             raise McpConnectionError(f"not an MCP tool: {qualified_name}")
         try:
@@ -136,6 +99,5 @@ class McpManager:
         if getattr(result, "isError", False):
             text = f"error: {text}"
         return text
-
 
 mcp_manager = McpManager()

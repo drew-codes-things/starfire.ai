@@ -1,15 +1,3 @@
-"""Web search: a single no-API-key backend (DuckDuckGo's HTML results page),
-consistent with starfire's "no accounts needed" stance. odysseus-dev
-aggregates six real search-provider APIs with ranking/caching/analytics
-(services/search/) — real infrastructure this app's scope doesn't need.
-Swapping this for a proper provider (Brave, SearXNG, Tavily) later is a
-one-function change, since callers only ever see search() -> list[dict].
-
-Scrapes DuckDuckGo's HTML (non-JS) endpoint rather than calling an official
-API — it needs no key, but also carries no stability guarantee; if DDG
-changes that page's markup this parser may need a matching update.
-"""
-
 from __future__ import annotations
 
 import re
@@ -24,15 +12,10 @@ _RESULT_RE = re.compile(
 )
 _TAG_RE = re.compile(r"<[^>]+>")
 
-
 def _strip_tags(html: str) -> str:
     return unescape(_TAG_RE.sub("", html)).strip()
 
-
 async def search(query: str, max_results: int = 5) -> list[dict]:
-    """Returns [{title, url, snippet}, ...]. Never raises — a request or
-    parse failure comes back as an empty list, which callers treat as "no
-    results" rather than an error worth surfacing to the model."""
     query = (query or "").strip()
     if not query:
         return []

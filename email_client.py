@@ -1,14 +1,3 @@
-"""Stdlib IMAP/SMTP mailbox operations — no OAuth, no caching, every call
-opens a live connection. Ported from odysseus-dev's protocol-handling code
-in routes/email_helpers.py / routes/email_routes.py, which is itself pure
-stdlib (imaplib/smtplib/email) with no third-party mail library — that
-carries over here with zero new dependencies.
-
-Every function takes the account's password already decrypted by the
-caller (routes.py), the same separation providers.py uses for provider API
-keys — this module never touches the encrypted store directly.
-"""
-
 from __future__ import annotations
 
 import email as email_pkg
@@ -19,7 +8,6 @@ from email.mime.text import MIMEText
 from email.utils import formatdate, make_msgid
 
 from email_store import EmailAccount
-
 
 def _decode(value: str | None) -> str:
     if not value:
@@ -33,12 +21,10 @@ def _decode(value: str | None) -> str:
             decoded.append(text)
     return "".join(decoded)
 
-
 def _connect_imap(account: EmailAccount, password: str) -> imaplib.IMAP4_SSL:
     conn = imaplib.IMAP4_SSL(account.imap_host, account.imap_port)
     conn.login(account.username or account.email_address, password)
     return conn
-
 
 def _strip_html(html: str) -> str:
     from html.parser import HTMLParser
@@ -54,7 +40,6 @@ def _strip_html(html: str) -> str:
     stripper = _Stripper()
     stripper.feed(html)
     return "".join(stripper.parts)
-
 
 def _body_text(msg: "email_pkg.message.Message") -> str:
     if not msg.is_multipart():
@@ -83,7 +68,6 @@ def _body_text(msg: "email_pkg.message.Message") -> str:
         return _strip_html(html)
     return ""
 
-
 def list_folders(account: EmailAccount, password: str) -> list[str]:
     conn = _connect_imap(account, password)
     try:
@@ -95,8 +79,6 @@ def list_folders(account: EmailAccount, password: str) -> list[str]:
             if not line:
                 continue
             decoded = line.decode("utf-8", errors="replace")
-            # e.g. '(\\HasNoChildren) "/" "INBOX"' — folder name is the last
-            # quoted token.
             if '"' in decoded:
                 name = decoded.rsplit('"', 2)[-2]
             else:
@@ -105,7 +87,6 @@ def list_folders(account: EmailAccount, password: str) -> list[str]:
         return folders
     finally:
         conn.logout()
-
 
 def list_messages(account: EmailAccount, password: str, folder: str = "INBOX", limit: int = 30) -> list[dict]:
     conn = _connect_imap(account, password)
@@ -117,7 +98,7 @@ def list_messages(account: EmailAccount, password: str, folder: str = "INBOX", l
         if typ != "OK":
             raise RuntimeError("SEARCH failed")
         uids = data[0].split()
-        uids = list(reversed(uids[-limit:]))  # most recent first
+        uids = list(reversed(uids[-limit:]))
 
         messages = []
         for uid in uids:
@@ -134,7 +115,6 @@ def list_messages(account: EmailAccount, password: str, folder: str = "INBOX", l
         return messages
     finally:
         conn.logout()
-
 
 def read_message(account: EmailAccount, password: str, folder: str, uid: str, mark_seen: bool = True) -> dict:
     conn = _connect_imap(account, password)
@@ -156,7 +136,6 @@ def read_message(account: EmailAccount, password: str, folder: str, uid: str, ma
         return result
     finally:
         conn.logout()
-
 
 def search_messages(account: EmailAccount, password: str, query: str, folder: str = "INBOX", limit: int = 20) -> list[dict]:
     conn = _connect_imap(account, password)
@@ -184,7 +163,6 @@ def search_messages(account: EmailAccount, password: str, query: str, folder: st
     finally:
         conn.logout()
 
-
 def mark_read(account: EmailAccount, password: str, folder: str, uid: str, read: bool = True) -> None:
     conn = _connect_imap(account, password)
     try:
@@ -194,23 +172,17 @@ def mark_read(account: EmailAccount, password: str, folder: str, uid: str, read:
     finally:
         conn.logout()
 
-
 def archive_message(account: EmailAccount, password: str, folder: str, uid: str, archive_folder: str = "Archive") -> None:
-    """Copies to `archive_folder` (defaults to "Archive" — the exact
-    special-use folder name varies by provider, e.g. Gmail's is
-    "[Gmail]/All Mail"; pass the right one for your provider) then deletes
-    from the source folder."""
     conn = _connect_imap(account, password)
     try:
         conn.select(folder)
         typ, _ = conn.uid("copy", uid, archive_folder)
         if typ != "OK":
-            raise RuntimeError(f"could not copy to '{archive_folder}' — does that folder exist?")
+            raise RuntimeError(f"could not copy to '{archive_folder}' - does that folder exist?")
         conn.uid("store", uid, "+FLAGS", "\\Deleted")
         conn.expunge()
     finally:
         conn.logout()
-
 
 def delete_message(account: EmailAccount, password: str, folder: str, uid: str) -> None:
     conn = _connect_imap(account, password)
@@ -220,7 +192,6 @@ def delete_message(account: EmailAccount, password: str, folder: str, uid: str) 
         conn.expunge()
     finally:
         conn.logout()
-
 
 def send_message(account: EmailAccount, password: str, to: str, subject: str, body: str,
                   in_reply_to: str | None = None) -> None:
@@ -245,7 +216,6 @@ def send_message(account: EmailAccount, password: str, to: str, subject: str, bo
         server.send_message(msg)
     finally:
         server.quit()
-
 
 def reply_message(account: EmailAccount, password: str, folder: str, uid: str, body: str) -> None:
     original = read_message(account, password, folder, uid, mark_seen=False)

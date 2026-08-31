@@ -1,9 +1,3 @@
-"""API routes — wires config, api_key_manager, model_endpoints, providers,
-model_discovery, and chat_stream together. Mirrors odysseus-dev's
-routes/model_routes.py + routes/chat_routes.py naming, trimmed to what a
-single-user local chat app needs.
-"""
-
 import io
 import json
 import logging
@@ -19,7 +13,7 @@ from pydantic import BaseModel
 import builtin_tools
 import date_parsing
 import email_client
-import file_edit_tool  # also carries the pending-edit queue (stage/get_pending/...)
+import file_edit_tool
 import hardware_probe
 import model_capabilities
 import ollama_manager
@@ -70,7 +64,6 @@ notes = NoteStore(config.data_dir)
 note_templates = NoteTemplateStore(config.data_dir)
 chat_sessions = ChatSessionStore(config.data_dir)
 
-
 def _tool_context(base_url: str = "", api_key: str | None = None, model: str = "",
                    require_edit_approval: bool = False) -> builtin_tools.ToolContext:
     return builtin_tools.ToolContext(
@@ -82,32 +75,21 @@ def _tool_context(base_url: str = "", api_key: str | None = None, model: str = "
         require_edit_approval=require_edit_approval,
     )
 
-# Ported from odysseus-dev's src/memory.py:process_inline_memory_command —
-# intercepted before the message ever reaches the LLM.
 _INLINE_MEMORY_RE = re.compile(r"^(?:remember|memorize|save|note|store)[:\-]?\s+(.+)$", re.IGNORECASE)
 
-
 def _api_key_for(endpoint_id: str, provider: str) -> str | None:
-    """Keys are saved keyed by endpoint id (falls back to provider name for
-    the common single-key-per-provider case, e.g. a pre-existing 'openai' key
-    reused for a newly added OpenAI endpoint)."""
     keys = api_keys.load()
     return keys.get(endpoint_id) or keys.get(provider) or None
-
-
-# ── endpoint management ──────────────────────────────────────────────
 
 class AddEndpointBody(BaseModel):
     base_url: str
     api_key: str | None = None
-    kind: str = "api-key"  # "ollama" | "api-key"
+    kind: str = "api-key"
     label: str = ""
-
 
 class TestEndpointBody(BaseModel):
     base_url: str
     api_key: str | None = None
-
 
 @router.get("/model-endpoints")
 async def list_endpoints():
@@ -115,7 +97,6 @@ async def list_endpoints():
         {"id": e.id, "base_url": e.base_url, "kind": e.kind, "provider": e.provider, "label": e.label}
         for e in endpoints.list()
     ]}
-
 
 async def _probe_endpoint(base_url: str, api_key: str | None) -> tuple[bool, str]:
     from providers import build_headers
@@ -132,12 +113,10 @@ async def _probe_endpoint(base_url: str, api_key: str | None) -> tuple[bool, str
     except httpx.HTTPError as e:
         return False, f"cannot reach {url}: {e}"
 
-
 @router.post("/model-endpoints/test")
 async def test_endpoint(body: TestEndpointBody):
     ok, message = await _probe_endpoint(body.base_url, body.api_key)
     return {"ok": ok, "message": message}
-
 
 @router.post("/model-endpoints")
 async def add_endpoint(body: AddEndpointBody):
@@ -152,7 +131,6 @@ async def add_endpoint(body: AddEndpointBody):
     return {"id": endpoint.id, "base_url": endpoint.base_url, "kind": endpoint.kind,
             "provider": endpoint.provider, "label": endpoint.label}
 
-
 @router.delete("/model-endpoints/{endpoint_id}")
 async def delete_endpoint(endpoint_id: str):
     if not endpoints.delete(endpoint_id):
@@ -160,17 +138,12 @@ async def delete_endpoint(endpoint_id: str):
     api_keys.delete(endpoint_id)
     return {"ok": True}
 
-
 @router.get("/discover")
 async def discover():
     return {"found": await discover_servers()}
 
-
-# ── models ────────────────────────────────────────────────────────────
-
 @router.get("/models")
 async def list_models():
-    """Merged model list across every configured endpoint."""
     result = []
     async with httpx.AsyncClient(timeout=5.0) as client:
         for e in endpoints.list():
@@ -194,10 +167,8 @@ async def list_models():
                     result.append({"id": m.get("id"), "endpoint_id": e.id, "provider": e.provider})
     return {"models": result}
 
-
 @router.post("/warm")
 async def warm(body: dict):
-    """Keep-alive ping — Ollama-only, no-op for hosted providers."""
     endpoint_id = body.get("endpoint_id")
     model = body.get("model")
     endpoint = endpoints.get(endpoint_id) if endpoint_id else None
@@ -213,27 +184,11 @@ async def warm(body: dict):
         pass
     return {"ok": True}
 
-
-# ── config ────────────────────────────────────────────────────────────
-
 @router.get("/config")
 async def get_config():
     from model_discovery import detect_ollama
     detected = await detect_ollama(config.ollama_base_url)
     return {"ollama_base_url": detected or "http://localhost:11434"}
-
-
-# ── directory browser (for the filesystem MCP server's path field) ─────
-#
-# A browser can't hand a backend subprocess a real OS path via any file/
-# folder picker API — showDirectoryPicker() and <input webkitdirectory> both
-# only ever expose a sandboxed handle or relative paths, by design, for
-# privacy reasons that make sense for an arbitrary website but don't apply
-# here: starfire's browser tab and its backend are the same machine, at the
-# same trust level (the backend already runs a full shell tool). So this is
-# a small server-side directory listing instead, browsed by clicking
-# folders in the UI — same trust boundary as everything else in this app,
-# not a new one.
 
 def _list_dirs(path: str) -> dict:
     base = os.path.abspath(os.path.expanduser(path or "~"))
@@ -247,28 +202,21 @@ def _list_dirs(path: str) -> dict:
                 continue
             entries.append({"name": name, "path": full})
     except PermissionError:
-        pass  # unreadable directory — just show it empty rather than erroring
+        pass
     parent = os.path.dirname(base)
     return {"path": base, "parent": parent if parent != base else None, "entries": entries}
-
 
 @router.get("/browse-dir")
 async def browse_dir(path: str = ""):
     return _list_dirs(path)
 
-
-# ── MCP servers ──────────────────────────────────────────────────────
-
 class AddMcpServerBody(BaseModel):
-    # either a custom command...
     name: str | None = None
     command: str | None = None
     args: list[str] = []
     env: dict[str, str] = {}
-    # ...or a one-click reference-server preset
     preset: str | None = None
-    path: str | None = None  # required by the filesystem preset
-
+    path: str | None = None
 
 @router.get("/mcp/repository")
 async def list_mcp_repository():
@@ -277,7 +225,6 @@ async def list_mcp_repository():
         for rid, p in MCP_SERVER_REPOSITORY.items()
     ]}
 
-
 @router.get("/mcp/servers")
 async def list_mcp_servers():
     return {"servers": [
@@ -285,7 +232,6 @@ async def list_mcp_servers():
          "connected": mcp_manager.is_connected(s.id), "tool_count": len(mcp_manager.list_tools(s.id))}
         for s in mcp_servers.list()
     ], "presets": [{"id": pid, **{k: v for k, v in p.items() if k != "args"}} for pid, p in REFERENCE_SERVERS.items()]}
-
 
 @router.post("/mcp/servers")
 async def add_mcp_server(body: AddMcpServerBody):
@@ -310,12 +256,11 @@ async def add_mcp_server(body: AddMcpServerBody):
     try:
         tools = await mcp_manager.connect(server.id, server.command, server.args, server.env or None)
     except McpConnectionError as e:
-        mcp_servers.delete(server.id)  # don't persist a server that can't start
+        mcp_servers.delete(server.id)
         raise HTTPException(502, str(e))
 
     return {"id": server.id, "name": server.name, "command": server.command, "args": server.args,
             "enabled": server.enabled, "tool_count": len(tools)}
-
 
 @router.patch("/mcp/servers/{server_id}")
 async def update_mcp_server(server_id: str, body: dict):
@@ -325,7 +270,6 @@ async def update_mcp_server(server_id: str, body: dict):
         raise HTTPException(404, "server not found")
     return {"ok": True}
 
-
 @router.delete("/mcp/servers/{server_id}")
 async def delete_mcp_server(server_id: str):
     if not mcp_servers.delete(server_id):
@@ -333,22 +277,16 @@ async def delete_mcp_server(server_id: str):
     await mcp_manager.disconnect(server_id)
     return {"ok": True}
 
-
-# ── memory ───────────────────────────────────────────────────────────
-
 class AddMemoryBody(BaseModel):
     text: str
     category: str = "fact"
-
 
 class UpdateMemoryBody(BaseModel):
     text: str | None = None
     category: str | None = None
 
-
 class SetPinnedBody(BaseModel):
     pinned: bool
-
 
 @router.get("/memory")
 async def list_memory():
@@ -358,7 +296,6 @@ async def list_memory():
         for e in memory.list()
     ]}
 
-
 @router.post("/memory")
 async def add_memory(body: AddMemoryBody):
     if not body.text.strip():
@@ -366,13 +303,11 @@ async def add_memory(body: AddMemoryBody):
     entry = memory.add(body.text, category=body.category, source="user")
     return {"id": entry.id, "text": entry.text, "category": entry.category}
 
-
 @router.put("/memory/{memory_id}")
 async def update_memory(memory_id: str, body: UpdateMemoryBody):
     if not memory.update(memory_id, text=body.text, category=body.category):
         raise HTTPException(404, "memory not found")
     return {"ok": True}
-
 
 @router.delete("/memory/{memory_id}")
 async def delete_memory(memory_id: str):
@@ -380,15 +315,11 @@ async def delete_memory(memory_id: str):
         raise HTTPException(404, "memory not found")
     return {"ok": True}
 
-
 @router.post("/memory/{memory_id}/pin")
 async def pin_memory(memory_id: str, body: SetPinnedBody):
     if not memory.set_pinned(memory_id, body.pinned):
         raise HTTPException(404, "memory not found")
     return {"ok": True}
-
-
-# ── documents ────────────────────────────────────────────────────────
 
 @router.get("/documents")
 async def list_documents():
@@ -396,7 +327,6 @@ async def list_documents():
         {"id": d.id, "filename": d.filename, "added": d.added, "chunk_count": d.chunk_count}
         for d in documents.list()
     ]}
-
 
 @router.post("/documents")
 async def add_document(file: UploadFile):
@@ -407,20 +337,16 @@ async def add_document(file: UploadFile):
         raise HTTPException(400, str(e))
     return {"id": doc.id, "filename": doc.filename, "chunk_count": doc.chunk_count}
 
-
 @router.delete("/documents/{document_id}")
 async def delete_document(document_id: str):
     if not documents.delete(document_id):
         raise HTTPException(404, "document not found")
     return {"ok": True}
 
-
-# ── scheduled tasks ──────────────────────────────────────────────────
-
 class CreateTaskBody(BaseModel):
     name: str = ""
     prompt: str
-    schedule: str  # once | daily | weekly | cron
+    schedule: str
     scheduled_time: str = ""
     scheduled_day: str = ""
     cron_expression: str = ""
@@ -428,7 +354,6 @@ class CreateTaskBody(BaseModel):
     model: str = ""
     enabled_mcp_servers: list[str] = []
     enabled_builtin_tools: list[str] = []
-
 
 def _task_chat_fn(endpoint_id, model, prompt, enabled_mcp_servers, enabled_builtin_tools):
     from agent_loop import run_chat_collected
@@ -444,13 +369,10 @@ def _task_chat_fn(endpoint_id, model, prompt, enabled_mcp_servers, enabled_built
         ctx=ctx,
     )
 
-
 scheduler = TaskScheduler(tasks, task_runs, _task_chat_fn)
-
 
 def _email_rule_password(account_id: str) -> str | None:
     return api_keys.load().get(account_id)
-
 
 async def _email_rule_chat_fn(endpoint_id: str, model: str, prompt: str) -> str:
     from agent_loop import run_chat_collected
@@ -461,9 +383,7 @@ async def _email_rule_chat_fn(endpoint_id: str, model: str, prompt: str) -> str:
     api_key = _api_key_for(endpoint.id, endpoint.provider)
     return await run_chat_collected(endpoint.base_url, api_key, model, [{"role": "user", "content": prompt}])
 
-
 email_rule_checker = EmailRuleChecker(email_rules, email_accounts, _email_rule_password, _email_rule_chat_fn, notes)
-
 
 @router.get("/tasks")
 async def list_tasks():
@@ -474,7 +394,6 @@ async def list_tasks():
          "model": t.model, "next_run": t.next_run, "last_run": t.last_run, "run_count": t.run_count}
         for t in tasks.list()
     ]}
-
 
 @router.post("/tasks")
 async def create_task(body: CreateTaskBody):
@@ -493,20 +412,17 @@ async def create_task(body: CreateTaskBody):
     ))
     return {"id": task.id, "next_run": task.next_run}
 
-
 @router.post("/tasks/{task_id}/pause")
 async def pause_task(task_id: str):
     if not tasks.update(task_id, status="paused"):
         raise HTTPException(404, "task not found")
     return {"ok": True}
 
-
 @router.post("/tasks/{task_id}/resume")
 async def resume_task(task_id: str):
     if not tasks.update(task_id, status="active"):
         raise HTTPException(404, "task not found")
     return {"ok": True}
-
 
 @router.post("/tasks/{task_id}/run")
 async def run_task_now(task_id: str):
@@ -516,13 +432,11 @@ async def run_task_now(task_id: str):
     await scheduler.run_now(task)
     return {"ok": True}
 
-
 @router.delete("/tasks/{task_id}")
 async def delete_task(task_id: str):
     if not tasks.delete(task_id):
         raise HTTPException(404, "task not found")
     return {"ok": True}
-
 
 @router.get("/tasks/{task_id}/runs")
 async def get_task_runs(task_id: str):
@@ -531,7 +445,6 @@ async def get_task_runs(task_id: str):
         for r in task_runs.for_task(task_id)
     ]}
 
-
 @router.get("/tasks/runs/recent")
 async def get_recent_runs():
     return {"runs": [
@@ -539,9 +452,6 @@ async def get_recent_runs():
          "status": r.status, "output": r.output}
         for r in task_runs.recent()
     ]}
-
-
-# ── email ────────────────────────────────────────────────────────────
 
 class AddEmailAccountBody(BaseModel):
     label: str = ""
@@ -553,20 +463,16 @@ class AddEmailAccountBody(BaseModel):
     smtp_port: int = 587
     username: str = ""
 
-
 class SendEmailBody(BaseModel):
     to: str
     subject: str = ""
     body: str
 
-
 class ReplyEmailBody(BaseModel):
     body: str
 
-
 def _email_password(account_id: str) -> str | None:
     return api_keys.load().get(account_id)
-
 
 @router.get("/email/accounts")
 async def list_email_accounts():
@@ -575,7 +481,6 @@ async def list_email_accounts():
          "imap_host": a.imap_host, "imap_port": a.imap_port}
         for a in email_accounts.list()
     ]}
-
 
 @router.post("/email/accounts")
 async def add_email_account(body: AddEmailAccountBody):
@@ -593,14 +498,12 @@ async def add_email_account(body: AddEmailAccountBody):
         raise HTTPException(502, f"could not connect: {e}")
     return {"id": account.id, "label": account.label, "email_address": account.email_address}
 
-
 @router.delete("/email/accounts/{account_id}")
 async def delete_email_account(account_id: str):
     if not email_accounts.delete(account_id):
         raise HTTPException(404, "account not found")
     api_keys.delete(account_id)
     return {"ok": True}
-
 
 def _get_account_or_404(account_id: str):
     account = email_accounts.get(account_id)
@@ -611,7 +514,6 @@ def _get_account_or_404(account_id: str):
         raise HTTPException(500, "no password on file for this account")
     return account, password
 
-
 @router.get("/email/{account_id}/folders")
 async def list_email_folders(account_id: str):
     account, password = _get_account_or_404(account_id)
@@ -619,7 +521,6 @@ async def list_email_folders(account_id: str):
         return {"folders": email_client.list_folders(account, password)}
     except Exception as e:
         raise HTTPException(502, str(e))
-
 
 @router.get("/email/{account_id}/messages")
 async def list_email_messages(account_id: str, folder: str = "INBOX"):
@@ -629,7 +530,6 @@ async def list_email_messages(account_id: str, folder: str = "INBOX"):
     except Exception as e:
         raise HTTPException(502, str(e))
 
-
 @router.get("/email/{account_id}/message/{uid}")
 async def read_email_message(account_id: str, uid: str, folder: str = "INBOX"):
     account, password = _get_account_or_404(account_id)
@@ -638,7 +538,6 @@ async def read_email_message(account_id: str, uid: str, folder: str = "INBOX"):
     except Exception as e:
         raise HTTPException(502, str(e))
 
-
 @router.get("/email/{account_id}/search")
 async def search_email(account_id: str, query: str, folder: str = "INBOX"):
     account, password = _get_account_or_404(account_id)
@@ -646,7 +545,6 @@ async def search_email(account_id: str, query: str, folder: str = "INBOX"):
         return {"results": email_client.search_messages(account, password, query, folder)}
     except Exception as e:
         raise HTTPException(502, str(e))
-
 
 @router.post("/email/{account_id}/send")
 async def send_email(account_id: str, body: SendEmailBody):
@@ -657,7 +555,6 @@ async def send_email(account_id: str, body: SendEmailBody):
         raise HTTPException(502, str(e))
     return {"ok": True}
 
-
 @router.post("/email/{account_id}/message/{uid}/reply")
 async def reply_email(account_id: str, uid: str, body: ReplyEmailBody, folder: str = "INBOX"):
     account, password = _get_account_or_404(account_id)
@@ -666,7 +563,6 @@ async def reply_email(account_id: str, uid: str, body: ReplyEmailBody, folder: s
     except Exception as e:
         raise HTTPException(502, str(e))
     return {"ok": True}
-
 
 @router.post("/email/{account_id}/message/{uid}/mark-read")
 async def mark_email_read(account_id: str, uid: str, folder: str = "INBOX"):
@@ -677,7 +573,6 @@ async def mark_email_read(account_id: str, uid: str, folder: str = "INBOX"):
         raise HTTPException(502, str(e))
     return {"ok": True}
 
-
 @router.post("/email/{account_id}/message/{uid}/archive")
 async def archive_email(account_id: str, uid: str, folder: str = "INBOX"):
     account, password = _get_account_or_404(account_id)
@@ -686,7 +581,6 @@ async def archive_email(account_id: str, uid: str, folder: str = "INBOX"):
     except Exception as e:
         raise HTTPException(502, str(e))
     return {"ok": True}
-
 
 @router.delete("/email/{account_id}/message/{uid}")
 async def delete_email(account_id: str, uid: str, folder: str = "INBOX"):
@@ -697,12 +591,10 @@ async def delete_email(account_id: str, uid: str, folder: str = "INBOX"):
         raise HTTPException(502, str(e))
     return {"ok": True}
 
-
 class AiActionBody(BaseModel):
     endpoint_id: str
     model: str
     instruction: str = ""
-
 
 @router.post("/email/{account_id}/message/{uid}/ai")
 async def email_ai_action(account_id: str, uid: str, action: str, body: AiActionBody, folder: str = "INBOX"):
@@ -721,9 +613,6 @@ async def email_ai_action(account_id: str, uid: str, action: str, body: AiAction
         raise HTTPException(502, str(e))
     return {"result": result}
 
-
-# ── email rules ──────────────────────────────────────────────────────
-
 class EmailRuleBody(BaseModel):
     account_id: str
     folder: str = "INBOX"
@@ -733,17 +622,14 @@ class EmailRuleBody(BaseModel):
     endpoint_id: str = ""
     model: str = ""
 
-
 def _rule_dict(r) -> dict:
     return {"id": r.id, "account_id": r.account_id, "folder": r.folder, "match_field": r.match_field,
             "match_value": r.match_value, "action": r.action, "endpoint_id": r.endpoint_id,
             "model": r.model, "enabled": r.enabled}
 
-
 @router.get("/email/rules")
 async def list_email_rules():
     return {"rules": [_rule_dict(r) for r in email_rules.list()]}
-
 
 @router.post("/email/rules")
 async def create_email_rule(body: EmailRuleBody):
@@ -756,7 +642,6 @@ async def create_email_rule(body: EmailRuleBody):
                              endpoint_id=body.endpoint_id, model=body.model)
     return _rule_dict(rule)
 
-
 @router.patch("/email/rules/{rule_id}")
 async def update_email_rule(rule_id: str, body: dict):
     if "enabled" not in body:
@@ -765,20 +650,15 @@ async def update_email_rule(rule_id: str, body: dict):
         raise HTTPException(404, "rule not found")
     return {"ok": True}
 
-
 @router.delete("/email/rules/{rule_id}")
 async def delete_email_rule(rule_id: str):
     if not email_rules.delete(rule_id):
         raise HTTPException(404, "rule not found")
     return {"ok": True}
 
-
-# ── notes ────────────────────────────────────────────────────────────
-
 class NoteItemBody(BaseModel):
     text: str
     done: bool = False
-
 
 class CreateNoteBody(BaseModel):
     title: str = ""
@@ -790,7 +670,6 @@ class CreateNoteBody(BaseModel):
     due_date: str = ""
     repeat: str = "none"
 
-
 class UpdateNoteBody(BaseModel):
     title: str | None = None
     content: str | None = None
@@ -801,7 +680,6 @@ class UpdateNoteBody(BaseModel):
     due_date: str | None = None
     repeat: str | None = None
 
-
 def _note_dict(n) -> dict:
     return {
         "id": n.id, "title": n.title, "content": n.content,
@@ -811,11 +689,9 @@ def _note_dict(n) -> dict:
         "repeat": n.repeat, "source": n.source, "sort_order": n.sort_order, "created": n.created,
     }
 
-
 @router.get("/notes")
 async def list_notes(archived: bool | None = None, label: str | None = None):
     return {"notes": [_note_dict(n) for n in notes.list(archived=archived, label=label)]}
-
 
 @router.post("/notes")
 async def create_note(body: CreateNoteBody):
@@ -826,14 +702,12 @@ async def create_note(body: CreateNoteBody):
     )
     return _note_dict(note)
 
-
 @router.get("/notes/{note_id}")
 async def get_note(note_id: str):
     note = notes.get(note_id)
     if not note:
         raise HTTPException(404, "note not found")
     return _note_dict(note)
-
 
 @router.put("/notes/{note_id}")
 async def update_note(note_id: str, body: UpdateNoteBody):
@@ -846,13 +720,11 @@ async def update_note(note_id: str, body: UpdateNoteBody):
         raise HTTPException(404, "note not found")
     return {"ok": True}
 
-
 @router.delete("/notes/{note_id}")
 async def delete_note(note_id: str):
     if not notes.delete(note_id):
         raise HTTPException(404, "note not found")
     return {"ok": True}
-
 
 @router.post("/notes/{note_id}/pin")
 async def pin_note(note_id: str, body: SetPinnedBody):
@@ -860,10 +732,8 @@ async def pin_note(note_id: str, body: SetPinnedBody):
         raise HTTPException(404, "note not found")
     return {"ok": True}
 
-
 class SetArchivedBody(BaseModel):
     archived: bool
-
 
 @router.post("/notes/{note_id}/archive")
 async def archive_note(note_id: str, body: SetArchivedBody):
@@ -871,15 +741,11 @@ async def archive_note(note_id: str, body: SetArchivedBody):
         raise HTTPException(404, "note not found")
     return {"ok": True}
 
-
 @router.post("/notes/{note_id}/items/{index}/toggle")
 async def toggle_note_item(note_id: str, index: int):
     if not notes.toggle_item(note_id, index):
         raise HTTPException(404, "note or item not found")
     return {"ok": True}
-
-
-# ── note templates ───────────────────────────────────────────────────
 
 class NoteTemplateBody(BaseModel):
     name: str
@@ -891,17 +757,14 @@ class NoteTemplateBody(BaseModel):
     color: str = ""
     repeat: str = "none"
 
-
 def _template_dict(t) -> dict:
     return {"id": t.id, "name": t.name, "title": t.title, "content": t.content,
             "items": t.items, "note_type": t.note_type, "label": t.label,
             "color": t.color, "repeat": t.repeat}
 
-
 @router.get("/note-templates")
 async def list_note_templates():
     return {"templates": [_template_dict(t) for t in note_templates.list()]}
-
 
 @router.post("/note-templates")
 async def create_note_template(body: NoteTemplateBody):
@@ -914,13 +777,11 @@ async def create_note_template(body: NoteTemplateBody):
     )
     return _template_dict(template)
 
-
 @router.delete("/note-templates/{template_id}")
 async def delete_note_template(template_id: str):
     if not note_templates.delete(template_id):
         raise HTTPException(404, "template not found")
     return {"ok": True}
-
 
 @router.post("/note-templates/{template_id}/use")
 async def use_note_template(template_id: str):
@@ -934,9 +795,6 @@ async def use_note_template(template_id: str):
     )
     return _note_dict(note)
 
-
-# ── chat ──────────────────────────────────────────────────────────────
-
 class ChatBody(BaseModel):
     endpoint_id: str
     model: str
@@ -947,12 +805,7 @@ class ChatBody(BaseModel):
     enabled_builtin_tools: list[str] = []
     require_edit_approval: bool = False
 
-
 async def _track_usage(gen, provider: str, model: str, input_text: str):
-    """Passes SSE chunks through unchanged while accumulating the delta text,
-    then records one usage_store entry once the stream ends. Wraps every
-    chat_stream call (tool-calling or not) in one place rather than
-    instrumenting run_chat_with_tools/stream_chat separately."""
     output_parts: list[str] = []
     async for chunk in gen:
         yield chunk
@@ -966,17 +819,12 @@ async def _track_usage(gen, provider: str, model: str, input_text: str):
             pass
     usage.record(provider, model, input_text, "".join(output_parts))
 
-
 async def _synthetic_reply(text: str):
     yield _sse_line({"delta": text})
     yield _sse_line({"done": True})
 
-
 @router.post("/chat_stream")
 async def chat_stream_endpoint(body: ChatBody):
-    # Inline "remember: X" is intercepted before any LLM call, mirroring
-    # odysseus's handle_memory_command — cheap, instant, and doesn't spend
-    # the user's API budget for something that's just a local write.
     if body.messages:
         last = body.messages[-1]
         if last.get("role") == "user":
@@ -991,33 +839,13 @@ async def chat_stream_endpoint(body: ChatBody):
         raise HTTPException(404, "endpoint not found")
     api_key = _api_key_for(endpoint.id, endpoint.provider)
 
-    # The frontend sends the session's full message list rather than
-    # pre-slicing to a fixed count — trimming to an actual token budget
-    # happens once, here, so it applies identically whether or not tools
-    # are enabled below. No per-chat control over this budget anymore (the
-    # header's ctx-size selector was removed — it only ever affected Ollama
-    # requests directly, and confusingly meant something different, or
-    # nothing at all, for every other provider), so this fixed default has
-    # to be generous enough on its own: most current models comfortably
-    # support context windows far larger than the old default of 2048.
     DEFAULT_CONTEXT_BUDGET_TOKENS = 8192
     num_ctx = (body.options or {}).get("num_ctx", DEFAULT_CONTEXT_BUDGET_TOKENS)
     messages = trim_to_budget(body.messages, num_ctx)
 
-    # Enforced here, not just warned about in the UI: a model
-    # model_capabilities flags as unreliable at tool use (either it doesn't
-    # support the tool-calling format at all, or it's small enough to
-    # frequently hallucinate a tool call instead of just answering — see
-    # model_capabilities.py) never gets a tools list at all, regardless of
-    # which tools are checked in Settings. The frontend's capability
-    # warning banner is advisory; this is what actually stops it.
     tools_requested = bool(body.enabled_mcp_servers or body.enabled_builtin_tools)
     tools_usable = tools_requested and model_capabilities.supports_tools(endpoint.provider, body.model)
     if tools_usable:
-        # Make sure every requested server is actually connected — a server
-        # added earlier in this process lifetime already is (connect() below
-        # is then a cheap no-op); one added in a previous process run needs
-        # reconnecting since MCP sessions aren't persisted across restarts.
         for server_id in body.enabled_mcp_servers:
             if mcp_manager.is_connected(server_id):
                 continue
@@ -1045,15 +873,11 @@ async def chat_stream_endpoint(body: ChatBody):
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
     )
 
-
-# ── chat sessions (persisted conversations) ─────────────────────────────
-
 class CreateChatSessionBody(BaseModel):
     title: str = "New chat"
     messages: list[dict] = []
     parent_session_id: str = ""
     branch_point: int = -1
-
 
 class UpdateChatSessionBody(BaseModel):
     title: str | None = None
@@ -1062,17 +886,14 @@ class UpdateChatSessionBody(BaseModel):
     model: str | None = None
     pinned: bool | None = None
 
-
 def _session_summary(s) -> dict:
     return {"id": s.id, "title": s.title, "endpoint_id": s.endpoint_id, "model": s.model,
             "pinned": s.pinned, "parent_session_id": s.parent_session_id, "branch_point": s.branch_point,
             "created": s.created, "updated": s.updated, "message_count": len(s.messages)}
 
-
 @router.get("/chat/sessions")
 async def list_chat_sessions(q: str = ""):
     return {"sessions": [_session_summary(s) for s in chat_sessions.list(query=q)]}
-
 
 @router.post("/chat/sessions")
 async def create_chat_session(body: CreateChatSessionBody):
@@ -1080,11 +901,9 @@ async def create_chat_session(body: CreateChatSessionBody):
                                   parent_session_id=body.parent_session_id, branch_point=body.branch_point)
     return {**_session_summary(session), "messages": session.messages}
 
-
 @router.get("/chat/sessions/{session_id}/branches")
 async def list_session_branches(session_id: str):
     return {"branches": [_session_summary(s) for s in chat_sessions.branches_of(session_id)]}
-
 
 @router.get("/chat/sessions/{session_id}")
 async def get_chat_session(session_id: str):
@@ -1093,7 +912,6 @@ async def get_chat_session(session_id: str):
         raise HTTPException(404, "session not found")
     return {**_session_summary(session), "messages": session.messages}
 
-
 @router.put("/chat/sessions/{session_id}")
 async def update_chat_session(session_id: str, body: UpdateChatSessionBody):
     fields = body.model_dump(exclude_unset=True)
@@ -1101,28 +919,19 @@ async def update_chat_session(session_id: str, body: UpdateChatSessionBody):
         raise HTTPException(404, "session not found")
     return {"ok": True}
 
-
 @router.delete("/chat/sessions/{session_id}")
 async def delete_chat_session(session_id: str):
     if not chat_sessions.delete(session_id):
         raise HTTPException(404, "session not found")
     return {"ok": True}
 
-
-# ── usage / cost tracking ────────────────────────────────────────────
-
 class QuickCompleteBody(BaseModel):
     endpoint_id: str
     model: str
     prompt: str
 
-
 @router.post("/quick-complete")
 async def quick_complete(body: QuickCompleteBody):
-    """One-shot, non-streaming completion — used by the Notes "improve with
-    AI" button and anywhere else that needs "send a prompt, get text back"
-    without a client-side SSE reader (agent_loop.run_chat_collected already
-    does exactly this internally; this just exposes it over HTTP)."""
     from agent_loop import run_chat_collected
 
     endpoint = endpoints.get(body.endpoint_id)
@@ -1137,23 +946,17 @@ async def quick_complete(body: QuickCompleteBody):
     usage.record(endpoint.provider, body.model, body.prompt, text)
     return {"text": text}
 
-
 @router.get("/usage")
 async def get_usage():
     return usage.summary()
-
-
-# ── hardware-aware model suggestions ────────────────────────────────
 
 @router.get("/model-capabilities")
 async def get_model_capabilities(provider: str, model: str):
     return {"supports_tools": model_capabilities.supports_tools(provider, model)}
 
-
 @router.get("/hardware")
 async def get_hardware():
     return await hardware_probe.probe()
-
 
 @router.get("/hardware/ollama")
 async def get_ollama_status():
@@ -1165,7 +968,6 @@ async def get_ollama_status():
         "install": None if installed else ollama_manager.install_info(),
     }
 
-
 @router.post("/hardware/ollama/start")
 async def start_ollama():
     ok, message = await ollama_manager.start(config.ollama_base_url)
@@ -1173,20 +975,14 @@ async def start_ollama():
         raise HTTPException(502, message)
     return {"started": True, "message": message}
 
-
 @router.post("/hardware/pull")
 async def pull_model(body: dict):
-    """Streams Ollama's own /api/pull progress straight through as SSE, one
-    frame per line Ollama emits — same 'forward the upstream stream' shape
-    chat_stream.py already uses for chat, just a different upstream
-    endpoint. Requires Ollama actually running; a model already present is a
-    fast no-op on Ollama's end, not an error here."""
     model = body.get("model")
     if not model:
         raise HTTPException(400, "model is required")
     ollama_url = await detect_ollama(config.ollama_base_url)
     if not ollama_url:
-        raise HTTPException(502, "Ollama not detected — is it running?")
+        raise HTTPException(502, "Ollama not detected - is it running?")
 
     async def stream():
         try:
@@ -1207,13 +1003,9 @@ async def pull_model(body: dict):
     return StreamingResponse(stream(), media_type="text/event-stream",
                               headers={"Cache-Control": "no-cache", "Connection": "keep-alive"})
 
-
-# ── pending file edits (edit_file tool's approval mode) ─────────────
-
 @router.get("/pending-edits")
 async def list_pending_edits():
     return {"edits": file_edit_tool.list_pending()}
-
 
 @router.post("/pending-edits/{edit_id}/approve")
 async def approve_pending_edit(edit_id: str):
@@ -1226,15 +1018,11 @@ async def approve_pending_edit(edit_id: str):
         raise HTTPException(500, result["error"])
     return {"ok": True, "path": edit["path"]}
 
-
 @router.post("/pending-edits/{edit_id}/reject")
 async def reject_pending_edit(edit_id: str):
     if not file_edit_tool.remove_pending(edit_id):
         raise HTTPException(404, "no pending edit with that id")
     return {"ok": True}
-
-
-# ── presets ──────────────────────────────────────────────────────────
 
 class PresetBody(BaseModel):
     name: str
@@ -1244,30 +1032,23 @@ class PresetBody(BaseModel):
     enabled_mcp_servers: list[str] = []
     enabled_builtin_tools: list[str] = []
 
-
-# ── local image generation (ComfyUI) ────────────────────────────────
-
 class ComfyUIConfigBody(BaseModel):
     base_url: str | None = None
     checkpoints_dir: str | None = None
     default_checkpoint: str | None = None
     default_negative_prompt: str | None = None
 
-
 @router.get("/comfyui/config")
 async def get_comfyui_config():
     return asdict_comfyui(comfyui_config.get())
-
 
 @router.put("/comfyui/config")
 async def update_comfyui_config(body: ComfyUIConfigBody):
     return asdict_comfyui(comfyui_config.update(**body.model_dump(exclude_unset=True)))
 
-
 def asdict_comfyui(cfg) -> dict:
     return {"base_url": cfg.base_url, "checkpoints_dir": cfg.checkpoints_dir,
             "default_checkpoint": cfg.default_checkpoint, "default_negative_prompt": cfg.default_negative_prompt}
-
 
 @router.get("/comfyui/status")
 async def comfyui_status():
@@ -1275,7 +1056,6 @@ async def comfyui_status():
     connected = await comfyui_client.detect(cfg.base_url)
     checkpoints = await comfyui_client.list_checkpoints(cfg.base_url) if connected else []
     return {"connected": connected, "checkpoints": checkpoints}
-
 
 @router.post("/comfyui/pull-checkpoint")
 async def pull_comfyui_checkpoint(body: dict):
@@ -1298,13 +1078,9 @@ async def pull_comfyui_checkpoint(body: dict):
     return StreamingResponse(stream(), media_type="text/event-stream",
                               headers={"Cache-Control": "no-cache", "Connection": "keep-alive"})
 
-
-# ── local audio generation (Piper) ──────────────────────────────────
-
 class PiperConfigBody(BaseModel):
     voice_model_path: str | None = None
     voices_dir: str | None = None
-
 
 @router.get("/piper/config")
 async def get_piper_config():
@@ -1312,12 +1088,10 @@ async def get_piper_config():
     return {"voice_model_path": cfg.voice_model_path, "voices_dir": cfg.voices_dir,
             "installed": piper_tts.is_installed()}
 
-
 @router.put("/piper/config")
 async def update_piper_config(body: PiperConfigBody):
     cfg = piper_config.update(**body.model_dump(exclude_unset=True))
     return {"voice_model_path": cfg.voice_model_path, "voices_dir": cfg.voices_dir}
-
 
 @router.post("/piper/pull-voice")
 async def pull_piper_voice(body: dict):
@@ -1342,15 +1116,11 @@ async def pull_piper_voice(body: dict):
     return StreamingResponse(stream(), media_type="text/event-stream",
                               headers={"Cache-Control": "no-cache", "Connection": "keep-alive"})
 
-
-# ── custom ComfyUI workflows (video generation) ─────────────────────
-
 class CustomWorkflowBody(BaseModel):
     name: str
     workflow: dict
     prompt_node_id: str
     prompt_input_key: str = "text"
-
 
 @router.get("/custom-workflows")
 async def list_custom_workflows():
@@ -1358,7 +1128,6 @@ async def list_custom_workflows():
         {"id": w.id, "name": w.name, "prompt_node_id": w.prompt_node_id, "prompt_input_key": w.prompt_input_key}
         for w in custom_workflows.list()
     ]}
-
 
 @router.post("/custom-workflows")
 async def create_custom_workflow(body: CustomWorkflowBody):
@@ -1370,15 +1139,11 @@ async def create_custom_workflow(body: CustomWorkflowBody):
                                prompt_node_id=body.prompt_node_id, prompt_input_key=body.prompt_input_key)
     return {"id": w.id, "name": w.name}
 
-
 @router.delete("/custom-workflows/{workflow_id}")
 async def delete_custom_workflow(workflow_id: str):
     if not custom_workflows.delete(workflow_id):
         raise HTTPException(404, "workflow not found")
     return {"ok": True}
-
-
-# ── generated files (image / audio / document generation) ──────────
 
 @router.get("/generated")
 async def list_generated_files():
@@ -1387,7 +1152,6 @@ async def list_generated_files():
          "source": f.source, "created": f.created}
         for f in generated_files.list()
     ]}
-
 
 @router.get("/generated/{file_id}")
 async def get_generated_file(file_id: str):
@@ -1404,13 +1168,11 @@ async def get_generated_file(file_id: str):
         headers={"Content-Disposition": f'inline; filename="{entry.filename}"'},
     )
 
-
 @router.delete("/generated/{file_id}")
 async def delete_generated_file(file_id: str):
     if not generated_files.delete(file_id):
         raise HTTPException(404, "file not found")
     return {"ok": True}
-
 
 @router.get("/presets")
 async def list_presets():
@@ -1421,7 +1183,6 @@ async def list_presets():
         for p in presets.list()
     ]}
 
-
 @router.post("/presets")
 async def create_preset(body: PresetBody):
     if not body.name.strip():
@@ -1429,21 +1190,11 @@ async def create_preset(body: PresetBody):
     preset = presets.add(**body.model_dump())
     return {"id": preset.id, "name": preset.name}
 
-
 @router.delete("/presets/{preset_id}")
 async def delete_preset(preset_id: str):
     if not presets.delete(preset_id):
         raise HTTPException(404, "preset not found")
     return {"ok": True}
-
-
-# ── backup / restore ─────────────────────────────────────────────────
-#
-# A local zip of the whole data/ directory — the same thing the README
-# already documents as a manual "copy the data folder" step, just done
-# through the UI. No new trust boundary: whoever can reach these endpoints
-# can already read/delete every file in data/ via the app's normal features
-# (memory, documents, API keys' encrypted blobs, etc.).
 
 @router.get("/backup")
 async def backup_data():
@@ -1462,7 +1213,6 @@ async def backup_data():
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
-
 @router.post("/restore")
 async def restore_data(file: UploadFile):
     raw = await file.read()
@@ -1472,9 +1222,6 @@ async def restore_data(file: UploadFile):
     except zipfile.BadZipFile:
         raise HTTPException(400, "not a valid zip file")
 
-    # Reject anything that would extract outside data_dir ("zip slip") before
-    # writing a single file — a restore is already a full-overwrite action,
-    # it must not also be a path-traversal one.
     for member in zf.namelist():
         target = os.path.abspath(os.path.join(data_dir, member))
         if not target.startswith(data_dir + os.sep) and target != data_dir:

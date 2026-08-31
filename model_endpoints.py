@@ -1,16 +1,3 @@
-"""Model endpoint registry: a small JSON file, not a database.
-
-odysseus-dev backs its ModelEndpoint table with SQLAlchemy because it also
-tracks per-user ownership, multi-model overrides, etc. starfire is a single
-local process with no multi-user surface, so a JSON file matches
-api_key_manager.py's own file-based philosophy without dragging in a DB
-dependency.
-
-API keys themselves are NOT stored here — they live in the encrypted store
-(api_key_manager.py), keyed by endpoint id. This file only ever holds
-non-secret connection metadata.
-"""
-
 import json
 import os
 import uuid
@@ -19,16 +6,14 @@ from dataclasses import asdict, dataclass
 from atomic_io import atomic_write_json
 from providers import _detect_provider
 
-
 @dataclass
 class ModelEndpoint:
     id: str
     base_url: str
-    kind: str  # "ollama" | "api-key"
-    provider: str  # detected via providers._detect_provider, cached at add-time
+    kind: str
+    provider: str
     label: str = ""
     model_type: str = "chat"
-
 
 class ModelEndpointStore:
     def __init__(self, data_dir: str):

@@ -1,16 +1,3 @@
-"""Scheduled task execution loop.
-
-Ported from odysseus-dev's src/task_scheduler.py (compute_next_run logic).
-Every task here is still "send a prompt to a model, record the reply" —
-there's no separate task_type for shell/SSH execution the way odysseus has a
-dedicated `action` task type for `run_local`/`ssh_command`. Instead, a task
-that should be able to run shell commands just has "run_shell" in its own
-enabled_builtin_tools (see builtin_tools.py / shell_tool.py) the same way a
-regular chat message does — one mechanism, not two parallel ones. That tool
-is off by default and has no sandbox under it, so only add it to an
-automation you trust not to encounter untrusted/prompt-injectable text.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -26,11 +13,8 @@ logger = logging.getLogger(__name__)
 TICK_SECONDS = 30
 _WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
 
-
 def compute_next_run(schedule: str, scheduled_time: str = "", scheduled_day: str = "",
                       cron_expression: str = "", after: datetime | None = None) -> str:
-    """Return the next UTC run time (ISO string) for a schedule, computed
-    strictly after `after` (defaults to now)."""
     now = after or datetime.now(timezone.utc)
 
     if schedule == "cron":
@@ -62,9 +46,7 @@ def compute_next_run(schedule: str, scheduled_time: str = "", scheduled_day: str
 
     raise ValueError(f"unknown schedule type: {schedule}")
 
-
 async def _run_task(task: ScheduledTask, task_runs: TaskRunStore, chat_fn) -> None:
-    """chat_fn(endpoint_id, model, prompt, enabled_mcp_servers, enabled_builtin_tools) -> str"""
     started = datetime.now(timezone.utc).isoformat()
     run = task_runs.add(TaskRun(id="", task_id=task.id, started=started, status="running"))
     try:
@@ -75,12 +57,11 @@ async def _run_task(task: ScheduledTask, task_runs: TaskRunStore, chat_fn) -> No
         logger.warning("task %s (%s) failed: %s", task.id, task.name, e)
         task_runs.update(run.id, status="error", output=str(e), finished=datetime.now(timezone.utc).isoformat())
 
-
 class TaskScheduler:
     def __init__(self, tasks: TaskStore, task_runs: TaskRunStore, chat_fn):
         self.tasks = tasks
         self.task_runs = task_runs
-        self.chat_fn = chat_fn  # injected so this module never imports routes.py (avoids a cycle)
+        self.chat_fn = chat_fn
         self._stop = asyncio.Event()
 
     async def run_loop(self):

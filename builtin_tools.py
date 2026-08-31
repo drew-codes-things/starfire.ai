@@ -1,17 +1,3 @@
-"""Native (non-MCP) tools the agent loop can call: memory, document search,
-scheduled tasks, and email. These are first-party, in-process Python
-functions — running them as separate MCP stdio subprocesses (odysseus's
-approach for its bundled email/memory/image_gen/rag servers) would be pure
-overhead for something only starfire itself ever calls; odysseus does it
-partly so the same servers are reusable from other MCP clients, which
-doesn't apply here.
-
-Schema shape matches what agent_loop.py already expects from MCP servers
-(OpenAI-style {type:'function', function:{name, description, parameters}}),
-so all tool sources merge into one list with no special-casing beyond
-dispatch-by-name in call_builtin_tool.
-"""
-
 from __future__ import annotations
 
 import json
@@ -23,7 +9,7 @@ import date_parsing
 import deep_research
 import document_generation
 import email_client
-import file_edit_tool  # also carries the pending-edit queue (stage/get_pending/...)
+import file_edit_tool
 import github_tool
 import image_generation
 import piper_tts
@@ -163,7 +149,7 @@ TOOL_SCHEMAS = [
             "name": "github_cli",
             "description": "Run a GitHub CLI ('gh') command, e.g. args=['issue','list'] or "
                             "args=['pr','create','--title','...','--body','...']. Only the gh "
-                            "binary can be run through this tool — not arbitrary shell.",
+                            "binary can be run through this tool - not arbitrary shell.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -180,7 +166,7 @@ TOOL_SCHEMAS = [
             "name": "deep_research",
             "description": "Research a question: search the web, read the top sources, and "
                             "return a synthesized, cited report. Slower and more thorough than "
-                            "search_web — use it for open-ended research questions, not quick lookups.",
+                            "search_web - use it for open-ended research questions, not quick lookups.",
             "parameters": {
                 "type": "object",
                 "properties": {"query": {"type": "string"}},
@@ -200,9 +186,9 @@ TOOL_SCHEMAS = [
                 "type": "object",
                 "properties": {
                     "prompt": {"type": "string"},
-                    "negative_prompt": {"type": "string", "description": "ComfyUI only — what to avoid"},
+                    "negative_prompt": {"type": "string", "description": "ComfyUI only - what to avoid"},
                     "quality": {"type": "string", "enum": sorted(comfyui_client.QUALITY_PRESETS),
-                                 "description": "ComfyUI only — trades speed for resolution/steps"},
+                                 "description": "ComfyUI only - trades speed for resolution/steps"},
                     "size": {"type": "string", "enum": ["1024x1024", "1792x1024", "1024x1792"],
                               "description": "OpenAI fallback only"},
                 },
@@ -232,7 +218,7 @@ TOOL_SCHEMAS = [
         "function": {
             "name": "generate_video",
             "description": "Generate a video (or video+audio) using a custom ComfyUI workflow you've "
-                            "saved in Settings. Requires at least one saved workflow — there's no "
+                            "saved in Settings. Requires at least one saved workflow - there's no "
                             "built-in default the way images have, since video workflows vary by which "
                             "model/nodes you have installed.",
             "parameters": {
@@ -268,7 +254,7 @@ TOOL_SCHEMAS = [
             "name": "edit_file",
             "description": "Write a file's full new content and get a diff of the change. If the "
                             "user has approval mode on, the edit is staged for the user to "
-                            "approve/reject in the chat UI rather than written immediately — the "
+                            "approve/reject in the chat UI rather than written immediately - the "
                             "tool result will say which happened.",
             "parameters": {
                 "type": "object",
@@ -284,7 +270,7 @@ TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "run_shell",
-            "description": "Run a shell command on this machine and return its output. No sandbox — "
+            "description": "Run a shell command on this machine and return its output. No sandbox - "
                             "runs as the local user with only a timeout and output-size limit. Only "
                             "available when explicitly enabled.",
             "parameters": {
@@ -301,15 +287,8 @@ TOOL_SCHEMAS = [
 
 _TOOL_NAMES = {t["function"]["name"] for t in TOOL_SCHEMAS}
 
-
 @dataclass
 class ToolContext:
-    """Everything call_builtin_tool needs beyond the tool name/arguments.
-    Bundled into one object because manage_tasks/manage_email need access to
-    several stores plus the current conversation's chat endpoint (for
-    creating tasks with sensible defaults, and for the email AI-extras
-    actions, which run one direct chat call against whatever endpoint the
-    calling conversation is already using)."""
     memory: MemoryStore
     documents: DocumentStore
     tasks: TaskStore
@@ -327,14 +306,11 @@ class ToolContext:
     model: str = ""
     require_edit_approval: bool = False
 
-
 def schemas_for(enabled: set[str]) -> list[dict]:
     return [t for t in TOOL_SCHEMAS if t["function"]["name"] in enabled]
 
-
 def is_builtin_tool(name: str) -> bool:
     return name in _TOOL_NAMES
-
 
 async def call_builtin_tool(name: str, arguments: dict, ctx: ToolContext) -> str:
     if name == "manage_memory":
@@ -367,14 +343,7 @@ async def call_builtin_tool(name: str, arguments: dict, ctx: ToolContext) -> str
         return await shell_tool.run_shell(arguments.get("command", ""), arguments.get("cwd"))
     raise ValueError(f"unknown builtin tool: {name}")
 
-
 def _find_openai_endpoint(ctx: ToolContext) -> tuple[str, str] | None:
-    """Image/audio generation need the real OpenAI API specifically (DALL-E
-    and TTS are OpenAI-proprietary endpoints, not something generic
-    OpenAI-compatible servers usually implement) — checked by hostname
-    rather than trusting providers.py's "openai" provider label, since that
-    label is also the catch-all for Groq/OpenRouter/local OpenAI-compatible
-    servers, none of which serve these two endpoints."""
     if not ctx.endpoints:
         return None
     keys = ctx.api_keys.load()
@@ -384,7 +353,6 @@ def _find_openai_endpoint(ctx: ToolContext) -> tuple[str, str] | None:
             if api_key:
                 return endpoint.base_url.rstrip("/"), api_key
     return None
-
 
 async def _generate_image(args: dict, ctx: ToolContext) -> str:
     prompt = args.get("prompt", "")
@@ -407,7 +375,7 @@ async def _generate_image(args: dict, ctx: ToolContext) -> str:
     found = _find_openai_endpoint(ctx)
     if not found:
         return ("error: no local ComfyUI configured (Settings → Local Generation) and no OpenAI endpoint "
-                "with an API key configured either — set up at least one")
+                "with an API key configured either - set up at least one")
     base_url, api_key = found
     try:
         data = await image_generation.generate(prompt, base_url, api_key, args.get("size", "1024x1024"))
@@ -415,7 +383,6 @@ async def _generate_image(args: dict, ctx: ToolContext) -> str:
         return f"error: {e}"
     entry = ctx.generated_files.add("image", "generated.png", "image/png", data, source=prompt)
     return json.dumps({"kind": "image", "id": entry.id, "url": f"/api/generated/{entry.id}", "prompt": prompt})
-
 
 async def _generate_audio(args: dict, ctx: ToolContext) -> str:
     text = args.get("text", "")
@@ -434,7 +401,7 @@ async def _generate_audio(args: dict, ctx: ToolContext) -> str:
     found = _find_openai_endpoint(ctx)
     if not found:
         return ("error: no local Piper voice configured (Settings → Local Generation) and no OpenAI "
-                "endpoint with an API key configured either — set up at least one")
+                "endpoint with an API key configured either - set up at least one")
     base_url, api_key = found
     try:
         data = await audio_generation.generate(text, base_url, api_key, args.get("voice", "alloy"))
@@ -443,9 +410,7 @@ async def _generate_audio(args: dict, ctx: ToolContext) -> str:
     entry = ctx.generated_files.add("audio", "generated.mp3", "audio/mpeg", data, source=text[:200])
     return json.dumps({"kind": "audio", "id": entry.id, "url": f"/api/generated/{entry.id}"})
 
-
 _VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".gif", ".mkv"}
-
 
 async def _generate_video(args: dict, ctx: ToolContext) -> str:
     workflow_name = args.get("workflow_name", "")
@@ -458,7 +423,7 @@ async def _generate_video(args: dict, ctx: ToolContext) -> str:
     workflow = next((w for w in ctx.custom_workflows.list() if w.name == workflow_name), None)
     if not workflow:
         names = [w.name for w in ctx.custom_workflows.list()]
-        return f"error: no saved workflow named '{workflow_name}'. Available: {names or 'none — add one in Settings → Local Generation'}"
+        return f"error: no saved workflow named '{workflow_name}'. Available: {names or 'none - add one in Settings → Local Generation'}"
 
     comfy_cfg = ctx.comfyui_config.get() if ctx.comfyui_config else None
     base_url = comfy_cfg.base_url if comfy_cfg else COMFYUI_DEFAULT_BASE_URL
@@ -481,7 +446,6 @@ async def _generate_video(args: dict, ctx: ToolContext) -> str:
         saved.append({"kind": kind, "id": entry.id, "url": f"/api/generated/{entry.id}", "filename": filename})
     return json.dumps({"files": saved})
 
-
 def _generate_document(args: dict, ctx: ToolContext) -> str:
     content = args.get("content", "")
     fmt = args.get("format", "md")
@@ -497,7 +461,6 @@ def _generate_document(args: dict, ctx: ToolContext) -> str:
     entry = ctx.generated_files.add("document", filename, document_generation.CONTENT_TYPES[fmt],
                                       data, source=content[:200])
     return json.dumps({"kind": "document", "id": entry.id, "url": f"/api/generated/{entry.id}", "filename": filename})
-
 
 def _edit_file(args: dict, ctx: ToolContext) -> str:
     path = args.get("path")
@@ -516,7 +479,6 @@ def _edit_file(args: dict, ctx: ToolContext) -> str:
     return json.dumps({"applied": result["ok"], "path": path, "diff": diff_text,
                         **({"error": result["error"]} if not result["ok"] else {})})
 
-
 async def _deep_research(args: dict, ctx: ToolContext) -> str:
     query = args.get("query", "")
     if not query:
@@ -529,7 +491,6 @@ async def _deep_research(args: dict, ctx: ToolContext) -> str:
 
     return await deep_research.research(query, chat_fn)
 
-
 async def _search_web(args: dict) -> str:
     query = args.get("query", "")
     if not query:
@@ -538,7 +499,6 @@ async def _search_web(args: dict) -> str:
     if not results:
         return "no results found"
     return json.dumps(results)
-
 
 async def _manage_memory(args: dict, memory: MemoryStore) -> str:
     action = args.get("action")
@@ -568,7 +528,6 @@ async def _manage_memory(args: dict, memory: MemoryStore) -> str:
         return json.dumps([{"id": e.id, "text": e.text, "category": e.category} for e in results])
     return f"error: unknown action '{action}'"
 
-
 async def _search_documents(args: dict, documents: DocumentStore) -> str:
     query = args.get("query", "")
     if not query:
@@ -577,7 +536,6 @@ async def _search_documents(args: dict, documents: DocumentStore) -> str:
     if not results:
         return "no matching passages found"
     return json.dumps(results)
-
 
 async def _manage_tasks(args: dict, ctx: ToolContext) -> str:
     action = args.get("action")
@@ -627,18 +585,16 @@ async def _manage_tasks(args: dict, ctx: ToolContext) -> str:
             return "ran"
     return f"error: unknown action '{action}'"
 
-
 def _make_task_chat_fn(ctx: ToolContext):
     async def chat_fn(endpoint_id, model, prompt, enabled_mcp_servers, enabled_builtin_tools):
         from agent_loop import run_chat_collected
-        base_url = ctx.base_url  # tasks created without a real endpoint reuse the caller's
+        base_url = ctx.base_url
         return await run_chat_collected(
             base_url, ctx.api_key, model or ctx.model, [{"role": "user", "content": prompt}],
             enabled_server_ids=set(enabled_mcp_servers), enabled_builtin_tools=set(enabled_builtin_tools),
             ctx=ctx,
         )
     return chat_fn
-
 
 async def _manage_email(args: dict, ctx: ToolContext) -> str:
     action = args.get("action")
@@ -708,11 +664,7 @@ async def _manage_email(args: dict, ctx: ToolContext) -> str:
         return f"error: {e}"
     return f"error: unknown action '{action}'"
 
-
 async def email_ai_action(action: str, message: dict, instruction: str, ctx: ToolContext) -> str:
-    """summarize/draft_reply/check_urgency — each a single on-demand chat
-    call against whatever endpoint the current conversation is using. Never
-    called automatically; only when this specific tool action is invoked."""
     from agent_loop import run_chat_collected
 
     if action == "summarize":
@@ -720,18 +672,16 @@ async def email_ai_action(action: str, message: dict, instruction: str, ctx: Too
     elif action == "check_urgency":
         prompt = (f"Is this email urgent (needs action within 24 hours)? Reply with one line: "
                   f"URGENT or NOT URGENT, then a short reason.\n\nFrom: {message['from']}\nSubject: {message['subject']}\n\n{message['body']}")
-    else:  # draft_reply
+    else:
         prompt = (f"Draft a reply to this email. {instruction or 'Keep it brief and polite.'}\n\n"
                   f"From: {message['from']}\nSubject: {message['subject']}\n\n{message['body']}")
 
     return await run_chat_collected(ctx.base_url, ctx.api_key, ctx.model, [{"role": "user", "content": prompt}])
 
-
 def _note_summary(n) -> dict:
     return {"id": n.id, "title": n.title, "note_type": n.note_type, "due_date": n.due_date,
             "repeat": n.repeat, "label": n.label, "pinned": n.pinned,
             "items": [{"text": i.text, "done": i.done} for i in n.items]}
-
 
 def _manage_notes(args: dict, notes: NoteStore) -> str:
     action = args.get("action")

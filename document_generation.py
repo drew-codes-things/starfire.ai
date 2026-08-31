@@ -1,11 +1,3 @@
-"""Document generation: turn plain text/markdown content into a real
-downloadable file — .md/.txt need nothing extra, .pdf uses fpdf2 and .docx
-uses python-docx (both pure-Python, no system dependency like a headless
-LibreOffice or wkhtmltopdf install). Formatting is intentionally simple —
-this reads Markdown-ish structure (headings via '#', bullets via '-') well
-enough for a generated report or note, not a full CommonMark renderer.
-"""
-
 from __future__ import annotations
 
 import io
@@ -19,10 +11,8 @@ CONTENT_TYPES = {
     "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
 
-
 def _plain_bytes(content: str) -> bytes:
     return content.encode("utf-8")
-
 
 def _to_pdf(content: str) -> bytes:
     from fpdf import FPDF
@@ -37,21 +27,12 @@ def _to_pdf(content: str) -> bytes:
             pdf.multi_cell(0, 8, heading.group(2))
             pdf.set_font("Helvetica", size=11)
         elif not line.strip():
-            # A blank line rendered as multi_cell(0, h, " ") leaves fpdf2's
-            # cursor in a state where the *next* multi_cell call raises
-            # "Not enough horizontal space to render a single character" —
-            # a real fpdf2 quirk, not a false alarm. ln() advances the
-            # cursor the same visual amount without touching that state.
             pdf.ln(6)
         else:
             text = re.sub(r"^[-*]\s+", "-  ", line)
-            # fpdf2's core fonts are Latin-1 only — replace anything outside
-            # that range rather than letting the whole generation crash on
-            # one smart-quote or emoji the model happened to output.
             safe_text = text.encode("latin-1", errors="replace").decode("latin-1")
             pdf.multi_cell(0, 6, safe_text)
     return bytes(pdf.output())
-
 
 def _to_docx(content: str) -> bytes:
     from docx import Document
@@ -68,7 +49,6 @@ def _to_docx(content: str) -> bytes:
     buf = io.BytesIO()
     doc.save(buf)
     return buf.getvalue()
-
 
 def generate(content: str, fmt: str) -> bytes:
     if fmt not in VALID_FORMATS:

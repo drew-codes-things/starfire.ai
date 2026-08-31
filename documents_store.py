@@ -1,15 +1,3 @@
-"""Document RAG: upload text/markdown/PDF files, chunk them, and search the
-chunks by lexical relevance.
-
-Ported from odysseus-dev's src/rag_vector.py, scoped down: no ChromaDB, no
-embeddings — search runs odysseus's own keyword-only fallback path
-(_keyword_search_fallback) as the primary (only) path here, via the shared
-lexical_search.py module. Chunking (_split_into_chunks: sentence-aware,
-chunk_size=1000/overlap=200) is ported as-is — it's pure Python with no
-dependency on the vector layer. PDF extraction uses pypdf (the one new
-dependency this subsystem needs); .txt/.md are read directly.
-"""
-
 from __future__ import annotations
 
 import json
@@ -29,12 +17,7 @@ CHUNK_OVERLAP = 200
 
 _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 
-
 def split_into_chunks(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
-    """Sentence-aware chunking: pack whole sentences into ~chunk_size-character
-    windows, repeating the trailing `overlap` characters of context at the
-    start of the next chunk so a fact split across a chunk boundary isn't lost
-    to either side."""
     sentences = [s.strip() for s in _SENTENCE_RE.split(text) if s.strip()]
     if not sentences:
         return []
@@ -53,7 +36,6 @@ def split_into_chunks(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CH
         chunks.append(current)
     return chunks
 
-
 def extract_text(filename: str, raw: bytes) -> str:
     ext = os.path.splitext(filename)[1].lower()
     if ext == ".pdf":
@@ -63,15 +45,13 @@ def extract_text(filename: str, raw: bytes) -> str:
         return "\n\n".join(page.extract_text() or "" for page in reader.pages)
     return raw.decode("utf-8", errors="replace")
 
-
 @dataclass
 class DocumentChunk:
     id: str
     document_id: str
     text: str
     chunk_index: int
-    embedding: list[float] | None = None  # None means "not computed yet"
-
+    embedding: list[float] | None = None
 
 @dataclass
 class Document:
@@ -79,7 +59,6 @@ class Document:
     filename: str
     added: str
     chunk_count: int
-
 
 class DocumentStore:
     def __init__(self, data_dir: str):
@@ -132,10 +111,6 @@ class DocumentStore:
         return True
 
     async def search(self, query: str, k: int = 5) -> list[dict]:
-        """Lexical ranking, optionally blended with semantic similarity when
-        a local Ollama (with an embedding model pulled) is reachable — see
-        embeddings.py. Falls back to lexical-only ranking, unchanged from
-        before embeddings existed, whenever it isn't."""
         data = self._load_raw()
         chunks = data["chunks"]
         lexical_scores = {
@@ -177,10 +152,6 @@ class DocumentStore:
 
     @staticmethod
     async def _ensure_embeddings(chunks: list[dict], ollama_url: str) -> bool:
-        """Compute embeddings for any chunk missing one, mutating the dicts
-        in place. Returns whether anything changed (so the caller knows
-        whether a save is needed). Best-effort — a failed embed() call just
-        leaves that chunk without one."""
         changed = False
         for chunk in chunks:
             if chunk.get("embedding"):

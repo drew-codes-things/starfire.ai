@@ -1,12 +1,5 @@
 'use strict';
 
-// CSRF guard: every mutating request this page makes carries a custom
-// header the server requires (see server.py's require_client_header
-// middleware) — setting a custom header cross-origin forces a CORS
-// preflight, which fails since this app grants no other origin CORS
-// permission, so a malicious page open in another tab can't forge these
-// requests. Patched onto the global fetch once here rather than passed to
-// every one of this file's ~60 call sites individually.
 const _rawFetch = window.fetch.bind(window);
 window.fetch = (input, init = {}) => {
   const method = (init.method || 'GET').toUpperCase();
@@ -208,7 +201,7 @@ const settingsEls = {
 
 let messages = [];
 let busy     = false;
-let models   = []; // [{id, endpoint_id, provider, size}]
+let models   = [];
 let abortController = null;
 let currentSessionId = null;
 try { currentSessionId = localStorage.getItem('sf_current_session') || null; } catch (_) {}
@@ -253,25 +246,11 @@ function printSep() {
 }
 
 function markdownRender(text) {
-  // Sanitized with DOMPurify before it ever reaches innerHTML — marked.parse()
-  // on its own passes raw HTML straight through, and the model's own output
-  // isn't trustworthy input: prompt injection from a fetched web page, an
-  // email body, a document, or a search result can land literal <script>/
-  // onerror= payloads in the reply text, and this app has no auth boundary
-  // stopping injected JS from calling any of its own APIs (memory, email,
-  // shell if enabled, etc.) once it runs in this page's origin.
+
   if (window.marked && window.DOMPurify) return window.DOMPurify.sanitize(window.marked.parse(text));
-  // Either CDN script failed to load — fail toward plain-escaped text
-  // rather than ever rendering raw, unsanitized model output as HTML.
+
   return text.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 }
-
-// ── chat message rows (copy / edit / regenerate) ────────────────────
-//
-// Each user/assistant message renders as a row with a small action toolbar
-// (shown on hover via CSS). content.dataset.msgIndex ties the DOM node back
-// to its index in `messages`, independent of whatever info/tool/separator
-// lines (printLine()) are interleaved around it in the live transcript.
 
 function appendMessageRow(role, idx) {
   const w = $('welcome');
@@ -335,10 +314,7 @@ function addEditButton(actions, idx) {
 }
 
 function addRegenerateButton(actions, idx) {
-  // A compact model picker next to regenerate — defaults to whatever's
-  // selected in the header, but letting you retry against a *different*
-  // model without touching the header dropdown (and thus without also
-  // starting a new chat, which changing the header selector does).
+
   const select = document.createElement('select');
   select.className = 'regen-model-select';
   for (const m of models) {
@@ -372,12 +348,12 @@ function addRegenerateButton(actions, idx) {
 
 function speakText(text) {
   if (!window.speechSynthesis || !text) return;
-  window.speechSynthesis.cancel(); // stop whatever's currently playing first
+  window.speechSynthesis.cancel();
   window.speechSynthesis.speak(new SpeechSynthesisUtterance(text));
 }
 
 function addListenButton(actions, getText) {
-  if (!window.speechSynthesis) return; // no TTS support — just omit the button
+  if (!window.speechSynthesis) return;
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'line-action-btn';
@@ -405,9 +381,9 @@ function renderDiffCard(resultJson) {
 
   const card = document.createElement('div');
   card.className = 'diff-card';
-  const status = data.staged ? 'proposed edit — awaiting approval' : data.applied ? 'applied edit' : 'edit failed';
+  const status = data.staged ? 'proposed edit - awaiting approval' : data.applied ? 'applied edit' : 'edit failed';
   card.innerHTML =
-    `<div class="diff-card-header">${status} — ${escapeHtml(data.path || '')}${data.error ? ' — ' + escapeHtml(data.error) : ''}</div>` +
+    `<div class="diff-card-header">${status} - ${escapeHtml(data.path || '')}${data.error ? ' - ' + escapeHtml(data.error) : ''}</div>` +
     `<pre>${diffToHtml(data.diff || '')}</pre>`;
 
   if (data.staged && data.pending_id) {
@@ -421,14 +397,14 @@ function renderDiffCard(resultJson) {
       approveBtn.disabled = true; rejectBtn.disabled = true;
       try {
         const r = await fetch(`/api/pending-edits/${data.pending_id}/approve`, { method: 'POST' });
-        actionsRow.textContent = r.ok ? 'approved — written to disk' : 'failed to approve';
+        actionsRow.textContent = r.ok ? 'approved - written to disk' : 'failed to approve';
       } catch (_) { actionsRow.textContent = 'failed to approve'; }
     };
     rejectBtn.onclick = async () => {
       approveBtn.disabled = true; rejectBtn.disabled = true;
       try {
         await fetch(`/api/pending-edits/${data.pending_id}/reject`, { method: 'POST' });
-        actionsRow.textContent = 'rejected — no changes written';
+        actionsRow.textContent = 'rejected - no changes written';
       } catch (_) { actionsRow.textContent = 'failed to reject'; }
     };
     actionsRow.appendChild(approveBtn);
@@ -450,7 +426,7 @@ function renderGeneratedFileCard(toolName, resultJson) {
   if (w) w.remove();
 
   const card = document.createElement('div');
-  card.className = 'diff-card'; // reuses the same bordered-card look, not diff-specific styling
+  card.className = 'diff-card';
 
   if (data.kind === 'image') {
     card.innerHTML = `<img src="${data.url}" alt="${escapeHtml(data.prompt || 'generated image')}" style="max-width:100%;display:block;" />`;
@@ -521,12 +497,6 @@ function startEdit(idx) {
   };
 }
 
-// Editing a message or regenerating with a different model used to
-// truncate `messages` in place and overwrite the current session,
-// discarding everything after the fork point. This instead saves the
-// truncated prefix as a brand-new sibling session (parent_session_id set)
-// and switches to it — the original session is untouched and still
-// reachable from the Chats tab, so no branch is ever thrown away.
 async function forkSession(uptoIdx) {
   const forkedMessages = messages.slice(0, uptoIdx);
   const parentId = currentSessionId;
@@ -546,9 +516,7 @@ async function forkSession(uptoIdx) {
       try { localStorage.setItem('sf_current_session', currentSessionId); } catch (_) {}
     }
   } catch (_) {
-    // Fork request failed (offline/server hiccup) — fall through and edit
-    // in place against whatever session was already current rather than
-    // losing the edit entirely.
+
   }
   messages = forkedMessages;
 }
@@ -585,13 +553,6 @@ function rerenderAll() {
   }
 }
 
-// ── persisted chat sessions ──────────────────────────────────────────
-//
-// Every conversation autosaves to a backend session (chat_session_store.py)
-// after each exchange — see persistSession(). A localStorage draft is kept
-// alongside purely as a crash/offline fallback (saveDraft()); it's cleared
-// once the backend save actually succeeds.
-
 function saveDraft() {
   try { localStorage.setItem('sf_draft_messages', JSON.stringify(messages)); } catch (_) {}
 }
@@ -616,14 +577,10 @@ async function persistSession() {
     });
     try { localStorage.removeItem('sf_draft_messages'); } catch (_) {}
     if (!settingsEls.modal.hidden) refreshSessionList();
-    // Only once, right after the first exchange — the truncated-first-
-    // message title is already set and usable in the meantime, so this
-    // runs in the background rather than delaying the save above.
+
     if (isNewSession && model && messages.length >= 2) generateSessionTitle(currentSessionId, model);
   } catch (_) {
-    // Backend save failed (offline/server hiccup) — saveDraft()'s
-    // localStorage copy of this conversation is the fallback, so nothing
-    // said so far is lost even though it isn't durably saved yet.
+
   }
 }
 
@@ -676,7 +633,7 @@ async function loadModels() {
       opt.value             = m.id;
       opt.dataset.endpointId = m.endpoint_id;
       const label           = window.providerLabel ? window.providerLabel(m.provider) : m.provider;
-      opt.textContent        = m.id + (m.size ? ' (' + (m.size / 1073741824).toFixed(1) + ' GB)' : '') + ' — ' + label;
+      opt.textContent        = m.id + (m.size ? ' (' + (m.size / 1073741824).toFixed(1) + ' GB)' : '') + ' - ' + label;
       els.modelList.appendChild(opt);
     }
 
@@ -719,21 +676,16 @@ async function send(text, overrideModel) {
   addEditButton(userRow.actions, userIdx);
   saveDraft();
 
-  // aiLine/renderer are created lazily on the first text delta, so any
-  // tool_start/tool_result activity prints as its own info line *before*
-  // the assistant's reply bubble appears, in chronological order.
   let aiLine = null;
   let aiActions = null;
   let renderer = null;
   let gotToken = false;
-  const aiIdx = messages.length; // where the assistant reply will land, once pushed below
+  const aiIdx = messages.length;
 
   setStatus('loading', 'waiting...');
 
   try {
-    // Sends the full session — context_budget.py on the backend trims to a
-    // default token budget rather than the frontend guessing a fixed
-    // message count.
+
     const r = await fetch('/api/chat_stream', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -840,7 +792,7 @@ async function send(text, overrideModel) {
     }
     if (aborted) {
       setStatus('ready', model.id);
-      printLine('— stopped —', 'info');
+      printLine('- stopped -', 'info');
       persistSession();
     } else {
       setStatus('error', 'error');
@@ -886,9 +838,6 @@ els.modelList.addEventListener('change', () => {
   checkModelToolCapability();
 });
 
-// Warns (doesn't block — the toggle stays whatever you set it to) when the
-// selected model is one we know doesn't support tool-calling but at least
-// one tool is currently enabled, since the tools would silently do nothing.
 async function checkModelToolCapability() {
   const model = currentModel();
   const anyToolsEnabled = enabledMcpServers.size > 0 || enabledBuiltinTools.size > 0;
@@ -901,7 +850,7 @@ async function checkModelToolCapability() {
     const { supports_tools } = await r.json();
     if (supports_tools === false) {
       els.capabilityWarning.textContent =
-        `⚠️ ${model.id} likely doesn't support tool-calling — enabled tools may be silently ignored.`;
+        `⚠️ ${model.id} likely doesn't support tool-calling - enabled tools may be silently ignored.`;
       els.capabilityWarning.hidden = false;
     } else {
       els.capabilityWarning.hidden = true;
@@ -936,8 +885,6 @@ try { els.sysPrompt.value = localStorage.getItem('sf_sys') || ''; } catch (_) {}
 els.sysPrompt.addEventListener('input', () => {
   try { localStorage.setItem('sf_sys', els.sysPrompt.value); } catch (_) {}
 });
-
-// ── settings modal ──────────────────────────────────────────────────
 
 function openSettings() {
   settingsEls.modal.hidden = false;
@@ -1143,8 +1090,6 @@ settingsEls.addApiBtn.onclick = async () => {
   }
 };
 
-// ── MCP tools ────────────────────────────────────────────────────────
-
 async function refreshMcpServerList() {
   try {
     const r = await fetch('/api/mcp/servers');
@@ -1154,7 +1099,7 @@ async function refreshMcpServerList() {
       settingsEls.mcpServerList.innerHTML = '<li class="settings-hint">none configured yet</li>';
       return;
     }
-    // Drop enabled-set entries for servers that no longer exist.
+
     const liveIds = new Set(servers.map(s => s.id));
     for (const id of [...enabledMcpServers]) if (!liveIds.has(id)) enabledMcpServers.delete(id);
     saveEnabledMcpServers();
@@ -1201,7 +1146,7 @@ async function addMcpPreset(preset, resultEl, path, env) {
     const server = await r.json();
     enabledMcpServers.add(server.id);
     saveEnabledMcpServers();
-    resultEl.textContent = `added — ${server.tool_count} tool(s) available`;
+    resultEl.textContent = `added - ${server.tool_count} tool(s) available`;
     resultEl.className = 'settings-hint ok';
     await refreshMcpServerList();
   } catch (e) {
@@ -1213,8 +1158,6 @@ async function addMcpPreset(preset, resultEl, path, env) {
 settingsEls.addFilesystemBtn.onclick = () =>
   addMcpPreset('filesystem', settingsEls.mcpQuickAddResult, settingsEls.filesystemPath.value.trim());
 
-// ── MCP server repository (broader catalog, each needs its own config) ──
-
 let mcpRepository = [];
 
 async function refreshMcpRepository() {
@@ -1222,7 +1165,7 @@ async function refreshMcpRepository() {
     const r = await fetch('/api/mcp/repository');
     const { repository = [] } = await r.json();
     mcpRepository = repository;
-    settingsEls.mcpRepoSelect.innerHTML = '<option value="">— choose a server —</option>';
+    settingsEls.mcpRepoSelect.innerHTML = '<option value="">- choose a server -</option>';
     for (const entry of repository) {
       const opt = document.createElement('option');
       opt.value = entry.id;
@@ -1268,11 +1211,6 @@ settingsEls.mcpRepoAddBtn.onclick = () => {
     settingsEls.mcpRepoConfigureBox.hidden = true;
   });
 };
-
-// ── directory browser (pick a folder by clicking, rather than typing an
-// absolute path from memory) — one factory, instantiated per field that
-// needs it (the filesystem MCP path, ComfyUI's checkpoints folder, Piper's
-// voices folder), each with its own independent browse state. ────────
 
 function setupDirBrowser({ browseBtn, box, pathLabel, list, selectBtn, targetInput }) {
   let current = '';
@@ -1351,7 +1289,7 @@ settingsEls.addMcpCustomBtn.onclick = async () => {
     const server = await r.json();
     enabledMcpServers.add(server.id);
     saveEnabledMcpServers();
-    settingsEls.mcpCustomResult.textContent = `added — ${server.tool_count} tool(s) available`;
+    settingsEls.mcpCustomResult.textContent = `added - ${server.tool_count} tool(s) available`;
     settingsEls.mcpCustomResult.className = 'settings-hint ok';
     settingsEls.mcpName.value = '';
     settingsEls.mcpCommand.value = '';
@@ -1362,8 +1300,6 @@ settingsEls.addMcpCustomBtn.onclick = async () => {
     settingsEls.mcpCustomResult.className = 'settings-hint error';
   }
 };
-
-// ── built-in tool toggles ───────────────────────────────────────────
 
 settingsEls.toggleManageMemory.checked = enabledBuiltinTools.has('manage_memory');
 settingsEls.toggleManageMemory.addEventListener('change', () => {
@@ -1473,8 +1409,6 @@ settingsEls.toggleRunShell.addEventListener('change', () => {
   saveEnabledBuiltinTools();
 });
 
-// ── saved chat sessions (Chats tab) ─────────────────────────────────
-
 async function refreshSessionList() {
   const q = settingsEls.chatSearchInput ? settingsEls.chatSearchInput.value.trim() : '';
   try {
@@ -1537,8 +1471,6 @@ async function openSession(id) {
   } catch (_) {}
 }
 
-// ── memory ───────────────────────────────────────────────────────────
-
 let memoryCategoryFilter = '';
 
 async function refreshMemoryList() {
@@ -1596,8 +1528,6 @@ settingsEls.addMemoryEntryBtn.onclick = async () => {
   await refreshMemoryList();
 };
 
-// ── documents ────────────────────────────────────────────────────────
-
 async function refreshDocumentList() {
   try {
     const r = await fetch('/api/documents');
@@ -1639,7 +1569,7 @@ settingsEls.uploadDocumentBtn.onclick = async () => {
       throw new Error(detail || 'upload failed');
     }
     const doc = await r.json();
-    settingsEls.documentUploadResult.textContent = `indexed — ${doc.chunk_count} chunk(s)`;
+    settingsEls.documentUploadResult.textContent = `indexed - ${doc.chunk_count} chunk(s)`;
     settingsEls.documentUploadResult.className = 'settings-hint ok';
     settingsEls.documentFile.value = '';
     await refreshDocumentList();
@@ -1648,8 +1578,6 @@ settingsEls.uploadDocumentBtn.onclick = async () => {
     settingsEls.documentUploadResult.className = 'settings-hint error';
   }
 };
-
-// ── automations (scheduled tasks) ───────────────────────────────────
 
 function refreshTaskEndpointOptions() {
   settingsEls.taskEndpointSelect.innerHTML = '';
@@ -1662,9 +1590,6 @@ function refreshTaskEndpointOptions() {
   }
 }
 
-// Same tool set the chat toggles offer, as checkboxes on the task-creation
-// form — a task is "send a prompt, with these tools available", so it needs
-// its own tool selection independent of what's enabled for live chat.
 const TASK_TOOL_OPTIONS = [
   ['manage_memory', 'memory'], ['search_documents', 'documents'], ['manage_tasks', 'tasks'],
   ['manage_email', 'email'], ['manage_notes', 'notes'], ['search_web', 'web search'],
@@ -1673,7 +1598,7 @@ const TASK_TOOL_OPTIONS = [
 
 function renderTaskToolCheckboxes() {
   const box = $('taskToolCheckboxes');
-  if (!box || box.childElementCount) return; // build once
+  if (!box || box.childElementCount) return;
   for (const [id, label] of TASK_TOOL_OPTIONS) {
     const wrap = document.createElement('label');
     wrap.className = 'theme-toggle';
@@ -1701,7 +1626,7 @@ async function refreshTaskList() {
       const scheduleLabel = t.schedule === 'cron' ? t.cron_expression : t.schedule + (t.scheduled_time ? ' ' + t.scheduled_time : '');
       li.innerHTML =
         `<span class="endpoint-label">${escapeHtml(t.name)}</span>` +
-        `<span class="endpoint-meta">${escapeHtml(scheduleLabel)} · ${escapeHtml(t.status)} · next ${t.next_run ? new Date(t.next_run).toLocaleString() : '—'}</span>` +
+        `<span class="endpoint-meta">${escapeHtml(scheduleLabel)} · ${escapeHtml(t.status)} · next ${t.next_run ? new Date(t.next_run).toLocaleString() : '-'}</span>` +
         `<button class="btn ghost" data-act="toggle">${t.status === 'active' ? 'pause' : 'resume'}</button>` +
         `<button class="btn ghost" data-act="run">run now</button>` +
         `<button class="endpoint-remove" title="Remove">×</button>`;
@@ -1781,8 +1706,6 @@ settingsEls.createTaskBtn.onclick = async () => {
     settingsEls.taskCreateResult.className = 'settings-hint error';
   }
 };
-
-// ── email ────────────────────────────────────────────────────────────
 
 let currentEmailAccountId = null;
 
@@ -1978,11 +1901,6 @@ async function runEmailAi(action, folder, uid, onResult) {
   }
 }
 
-// escapeHtml is already defined globally by streamingRenderer.js (loaded
-// before this script) — reused here rather than duplicated.
-
-// ── email rules ──────────────────────────────────────────────────────
-
 async function refreshEmailRules() {
   try {
     const accountsRes = await fetch('/api/email/accounts');
@@ -2077,8 +1995,6 @@ settingsEls.createRuleBtn.onclick = async () => {
   }
 };
 
-// ── notes (to-do list / checklists) ─────────────────────────────────
-
 let pendingNoteItems = [];
 
 function renderPendingNoteItems() {
@@ -2109,14 +2025,12 @@ settingsEls.noteAddItemBtn.onclick = () => {
   renderPendingNoteItems();
 };
 
-// ── note templates ───────────────────────────────────────────────────
-
 async function refreshNoteTemplateList() {
   try {
     const r = await fetch('/api/note-templates');
     const { templates = [] } = await r.json();
 
-    settingsEls.noteTemplateSelect.innerHTML = '<option value="">— start from a template —</option>';
+    settingsEls.noteTemplateSelect.innerHTML = '<option value="">- start from a template -</option>';
     for (const t of templates) {
       const opt = document.createElement('option');
       opt.value = t.id;
@@ -2349,10 +2263,6 @@ async function refreshNoteList() {
   }
 }
 
-// Recurring due-date advancement is client-side only, matching odysseus's
-// own real behavior (its backend never rewrites due_date either — only a
-// browser tab polling notes.js does). Runs on a timer while the Notes tab
-// (i.e. the settings modal) is open, same trigger condition odysseus uses.
 function advanceRecurringDate(dateStr, repeat) {
   const d = new Date(dateStr);
   if (isNaN(d)) return null;
@@ -2396,8 +2306,6 @@ async function checkRecurringNotes() {
     if (advanced) await refreshNoteList();
   } catch (_) {}
 }
-
-// ── presets ──────────────────────────────────────────────────────────
 
 async function refreshPresetList() {
   try {
@@ -2463,9 +2371,7 @@ function applyPreset(p) {
   enabledBuiltinTools = new Set(p.enabled_builtin_tools || []);
   saveEnabledMcpServers();
   saveEnabledBuiltinTools();
-  // Re-sync every tool checkbox's visible state to the newly-applied set —
-  // simplest way given each toggle owns its own checked-state elsewhere is
-  // to just re-run the same assignments openSettings() would do on load.
+
   settingsEls.toggleManageMemory.checked = enabledBuiltinTools.has('manage_memory');
   settingsEls.toggleSearchDocuments.checked = enabledBuiltinTools.has('search_documents');
   settingsEls.toggleManageTasks.checked = enabledBuiltinTools.has('manage_tasks');
@@ -2483,8 +2389,6 @@ function applyPreset(p) {
   settingsEls.toggleRunShell.checked = enabledBuiltinTools.has('run_shell');
   refreshMcpServerList();
 }
-
-// ── usage / cost ─────────────────────────────────────────────────────
 
 async function refreshUsage() {
   try {
@@ -2508,8 +2412,6 @@ async function refreshUsage() {
     settingsEls.usageSummary.innerHTML = '<p class="settings-hint error">failed to load usage</p>';
   }
 }
-
-// ── Ollama install/start status ─────────────────────────────────────
 
 async function refreshOllamaStatus() {
   try {
@@ -2545,7 +2447,7 @@ async function refreshOllamaStatus() {
       };
       return;
     }
-    // Not installed at all — show the platform-appropriate install step.
+
     const install = data.install || {};
     let html = '<p class="settings-hint">Not installed.</p>';
     if (install.method === 'command' && install.command) {
@@ -2562,15 +2464,13 @@ async function refreshOllamaStatus() {
   }
 }
 
-// ── hardware-aware model suggestions ────────────────────────────────
-
 async function refreshHardware() {
   try {
     const r = await fetch('/api/hardware');
     const data = await r.json();
     const memLine = data.vram_gb
       ? `${data.vram_gb} GB VRAM detected (GPU)`
-      : data.ram_gb ? `${data.ram_gb} GB system RAM (no GPU detected — CPU/unified-memory sizing)` : 'could not detect memory';
+      : data.ram_gb ? `${data.ram_gb} GB system RAM (no GPU detected - CPU/unified-memory sizing)` : 'could not detect memory';
     const cpuLine = data.cpu_model
       ? `CPU: ${escapeHtml(data.cpu_model)}${data.cpu_cores ? ` (${data.cpu_cores} threads` : ''}${data.cpu_max_mhz ? `, up to ${(data.cpu_max_mhz / 1000).toFixed(2)} GHz)` : (data.cpu_cores ? ')' : '')}`
       : '';
@@ -2589,7 +2489,7 @@ async function refreshHardware() {
       li.innerHTML =
         `<div class="endpoint-row" style="border:none;padding:0;">` +
           `<span class="endpoint-label">${c.fits ? '✓' : '✗'} ${c.name}</span>` +
-          `<span class="endpoint-meta">~${c.size_gb} GB${c.fits ? '' : ' — likely too large'}</span>` +
+          `<span class="endpoint-meta">~${c.size_gb} GB${c.fits ? '' : ' - likely too large'}</span>` +
           `<button class="btn ghost" data-act="pull">pull</button>` +
         `</div>` +
         `<progress class="pull-progress" max="100" hidden></progress>`;
@@ -2603,8 +2503,6 @@ async function refreshHardware() {
   }
 }
 
-// ── local generation: ComfyUI (image) ───────────────────────────────
-
 async function refreshComfyUI() {
   try {
     const cfgRes = await fetch('/api/comfyui/config');
@@ -2616,11 +2514,11 @@ async function refreshComfyUI() {
     const statusRes = await fetch('/api/comfyui/status');
     const status = await statusRes.json();
     settingsEls.comfyStatus.textContent = status.connected
-      ? `connected — ${status.checkpoints.length} checkpoint(s) available`
+      ? `connected - ${status.checkpoints.length} checkpoint(s) available`
       : 'not connected';
     settingsEls.comfyStatus.className = 'settings-hint ' + (status.connected ? 'ok' : '');
 
-    settingsEls.comfyCheckpointSelect.innerHTML = '<option value="">— default checkpoint —</option>';
+    settingsEls.comfyCheckpointSelect.innerHTML = '<option value="">- default checkpoint -</option>';
     for (const name of status.checkpoints) {
       const opt = document.createElement('option');
       opt.value = name; opt.textContent = name;
@@ -2683,9 +2581,6 @@ settingsEls.comfyPullBtn.onclick = async () => {
   }
 };
 
-// Visual bar to go with the text status on every pull — shows real percent
-// when the server reports a total size, otherwise an indeterminate
-// (unknown-length) animated bar rather than a bar frozen at 0%.
 function updateProgressBar(el, downloaded, total) {
   if (!el) return;
   el.hidden = false;
@@ -2694,10 +2589,6 @@ function updateProgressBar(el, downloaded, total) {
 }
 function hideProgressBar(el) { if (el) el.hidden = true; }
 
-// Shared SSE-stream reader for the various "download with progress" endpoints
-// (Ollama model pull, ComfyUI checkpoint pull, Piper voice pull) — same
-// frame parsing as everywhere else that reads an SSE stream, factored out
-// since three separate features now need exactly this.
 async function readProgressStream(response, onEvent) {
   const reader = response.body.getReader();
   const dec = new TextDecoder();
@@ -2717,15 +2608,13 @@ async function readProgressStream(response, onEvent) {
   }
 }
 
-// ── local generation: Piper (audio) ─────────────────────────────────
-
 async function refreshPiper() {
   try {
     const r = await fetch('/api/piper/config');
     const cfg = await r.json();
     settingsEls.piperVoicePath.value = cfg.voice_model_path || '';
     if (!cfg.installed) {
-      settingsEls.piperSaveResult.textContent = 'piper not installed yet — restart starfire.ai to trigger auto-install';
+      settingsEls.piperSaveResult.textContent = 'piper not installed yet - restart starfire.ai to trigger auto-install';
       settingsEls.piperSaveResult.className = 'settings-hint error';
     }
   } catch (_) {}
@@ -2784,8 +2673,6 @@ settingsEls.piperPullBtn.onclick = async () => {
     settingsEls.piperPullBtn.disabled = false;
   }
 };
-
-// ── local generation: custom ComfyUI workflows (video) ──────────────
 
 async function refreshWorkflowList() {
   try {
@@ -2855,8 +2742,6 @@ function refreshLocalGen() {
   refreshWorkflowList();
 }
 
-// ── backup / restore ─────────────────────────────────────────────────
-
 settingsEls.downloadBackupBtn.onclick = () => {
   window.location.href = '/api/backup';
 };
@@ -2872,7 +2757,7 @@ settingsEls.restoreBackupBtn.onclick = async () => {
     formData.append('file', file);
     const r = await fetch('/api/restore', { method: 'POST', body: formData });
     if (!r.ok) throw new Error('restore failed');
-    settingsEls.restoreResult.textContent = 'restored — reloading…';
+    settingsEls.restoreResult.textContent = 'restored - reloading…';
     settingsEls.restoreResult.className = 'settings-hint ok';
     setTimeout(() => window.location.reload(), 1200);
   } catch (e) {
@@ -2880,8 +2765,6 @@ settingsEls.restoreBackupBtn.onclick = async () => {
     settingsEls.restoreResult.className = 'settings-hint error';
   }
 };
-
-// ── compare mode ─────────────────────────────────────────────────────
 
 const compareEls = {
   modal: $('compareModal'), closeBtn: $('compareCloseBtn'), form: $('compareForm'),
@@ -2971,8 +2854,6 @@ compareEls.form.addEventListener('submit', e => {
   for (const col of compareEls.columns.children) runCompareColumn(col, prompt);
 });
 
-// ── command palette (Ctrl+K / Cmd+K) ────────────────────────────────
-
 const paletteEls = { overlay: $('paletteOverlay'), input: $('paletteInput'), list: $('paletteList') };
 let paletteActions = [];
 let paletteActiveIndex = 0;
@@ -3057,12 +2938,6 @@ document.addEventListener('keydown', e => {
   }
 });
 
-// ── voice input ──────────────────────────────────────────────────────
-//
-// Browser-native Speech Recognition (Chrome/Edge; not universally
-// supported — feature-detected, and the mic button stays hidden if it
-// isn't available rather than showing a button that would just error).
-
 const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
 if (SpeechRecognitionCtor && els.micBtn) {
   const recognition = new SpeechRecognitionCtor();
@@ -3088,8 +2963,6 @@ if (SpeechRecognitionCtor && els.micBtn) {
   };
 }
 
-// ── hardware tab: one-click model pull ──────────────────────────────
-
 async function pullModel(name, btn, statusEl, progressEl) {
   btn.disabled = true;
   statusEl.textContent = 'starting…';
@@ -3111,7 +2984,7 @@ async function pullModel(name, btn, statusEl, progressEl) {
           text += ' ' + Math.round(100 * obj.completed / obj.total) + '%';
           updateProgressBar(progressEl, obj.completed, obj.total);
         } else {
-          updateProgressBar(progressEl, 0, 0); // indeterminate — no size known yet (e.g. "verifying"/"pulling manifest" phases)
+          updateProgressBar(progressEl, 0, 0);
         }
         statusEl.textContent = text;
       }
@@ -3127,8 +3000,6 @@ async function pullModel(name, btn, statusEl, progressEl) {
   }
 }
 
-// ── chats tab: search + pin ──────────────────────────────────────────
-
 if (settingsEls.chatSearchInput) {
   let searchDebounce = null;
   settingsEls.chatSearchInput.addEventListener('input', () => {
@@ -3136,8 +3007,6 @@ if (settingsEls.chatSearchInput) {
     searchDebounce = setTimeout(() => refreshSessionList(), 250);
   });
 }
-
-// ── auto-titling a newly saved chat via the model itself ────────────
 
 async function generateSessionTitle(sessionId, model) {
   try {
@@ -3159,12 +3028,8 @@ async function generateSessionTitle(sessionId, model) {
     });
     if (sessionId === currentSessionId && !settingsEls.modal.hidden) refreshSessionList();
   } catch (_) {
-    // Best-effort — the session already has the truncated-first-message
-    // fallback title, so a failed rename here is cosmetic, not data loss.
   }
 }
-
-// ── theme ────────────────────────────────────────────────────────────
 
 function applyTheme(light) {
   document.documentElement.classList.toggle('light', light);
@@ -3178,8 +3043,4 @@ settingsEls.lightModeToggle.addEventListener('change', () => {
   try { localStorage.setItem('sf_light', settingsEls.lightModeToggle.checked ? '1' : '0'); } catch (_) {}
 });
 
-// restoreSession() rebuilds regenerate buttons' model dropdowns from the
-// `models` array, so it must run after loadModels() has actually populated
-// it — chained rather than fired in parallel, or a page-load restore would
-// build those dropdowns empty (loadModels()'s fetch hadn't resolved yet).
 loadModels().then(() => { restoreSession(); checkModelToolCapability(); });

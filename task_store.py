@@ -1,11 +1,3 @@
-"""Scheduled task automation: a task sends a prompt to a configured model on
-a schedule and records the response. Ported from odysseus-dev's
-core/database.py ScheduledTask/TaskRun tables, scoped to JSON-file storage
-(no DB) and LLM-prompt tasks only — no shell/SSH/webhook action types (see
-task_scheduler.py's module docstring for why that's a deliberate cut, not an
-oversight).
-"""
-
 from __future__ import annotations
 
 import json
@@ -17,17 +9,16 @@ from atomic_io import atomic_write_json
 
 VALID_SCHEDULES = {"once", "daily", "weekly", "cron"}
 
-
 @dataclass
 class ScheduledTask:
     id: str
     name: str
     prompt: str
-    schedule: str  # once | daily | weekly | cron
-    scheduled_time: str = ""   # "HH:MM", for once/daily/weekly
-    scheduled_day: str = ""    # weekday name (e.g. "monday"), for weekly
-    cron_expression: str = ""  # for cron
-    status: str = "active"     # active | paused
+    schedule: str
+    scheduled_time: str = ""
+    scheduled_day: str = ""
+    cron_expression: str = ""
+    status: str = "active"
     endpoint_id: str = ""
     model: str = ""
     enabled_mcp_servers: list[str] = field(default_factory=list)
@@ -36,16 +27,14 @@ class ScheduledTask:
     last_run: str = ""
     run_count: int = 0
 
-
 @dataclass
 class TaskRun:
     id: str
     task_id: str
     started: str
     finished: str = ""
-    status: str = "running"  # running | ok | error
+    status: str = "running"
     output: str = ""
-
 
 class TaskStore:
     def __init__(self, data_dir: str):
@@ -120,7 +109,6 @@ class TaskStore:
             return False
         self._save(remaining)
         return True
-
 
 class TaskRunStore:
     def __init__(self, data_dir: str):

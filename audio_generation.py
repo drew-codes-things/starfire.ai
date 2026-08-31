@@ -1,9 +1,3 @@
-"""Speech generation via OpenAI's TTS API — a real generated-audio upgrade
-over the browser's own built-in Speech Synthesis (used for the chat "listen"
-button), for when you specifically want an MP3 out of the conversation
-rather than just hearing a reply read aloud in-browser.
-"""
-
 from __future__ import annotations
 
 import httpx
@@ -11,9 +5,7 @@ import httpx
 TIMEOUT = 60.0
 VALID_VOICES = {"alloy", "echo", "fable", "onyx", "nova", "shimmer"}
 
-
 async def generate(text: str, base_url: str, api_key: str, voice: str = "alloy") -> bytes:
-    """Returns raw MP3 bytes, or raises RuntimeError with a readable message."""
     if voice not in VALID_VOICES:
         voice = "alloy"
     url = base_url.rstrip("/") + "/audio/speech"

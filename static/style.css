@@ -1,7 +1,3 @@
-/* Theme core: 5-variable pattern adapted from odysseus-dev's style.css
-   (--bg/--fg/--panel/--border/--red), with a .light override — a scoped
-   version of odysseus's much larger theme-preset system (theme.js), enough
-   for a light/dark toggle without dragging in 15 named presets. */
 :root {
   --bg:     #07090c;
   --fg:     #d7dbde;
@@ -191,7 +187,6 @@ select:focus, input:focus { border-color: var(--red); }
 .line.err::before { content: '! '; }
 .line.sep { color: var(--dim); user-select: none; white-space: pre-wrap; }
 
-/* markdown rendered inside .line.ai — keep it inheriting the terminal look */
 .line.ai p { margin-bottom: 0.6em; }
 .line.ai p:last-child { margin-bottom: 0; }
 .line.ai code { background: var(--panel); border: 1px solid var(--border); padding: 1px 4px; border-radius: 3px; font-size: 0.92em; }
@@ -206,8 +201,6 @@ select:focus, input:focus { border-color: var(--red); }
   animation: blink .7s step-end infinite;
 }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
-
-/* ── message row actions (copy / edit / regenerate) ────────────────── */
 
 .line-row {
   position: relative;
@@ -390,8 +383,6 @@ html.light .topbar-logo { filter: none; }
 }
 .topbar-title::after { content: "_"; color: var(--red); animation: blink 1.1s steps(1) infinite; margin-left: 2px; }
 
-/* ── settings modal ──────────────────────────────────────────────── */
-
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -402,10 +393,7 @@ html.light .topbar-logo { filter: none; }
   z-index: 200;
   padding: 20px;
 }
-/* .modal-overlay's own `display: flex` otherwise beats the browser's
-   built-in `[hidden] { display: none }` rule (a class selector always
-   outranks a bare attribute selector) — settingsModal.hidden = true was
-   silently doing nothing without this. */
+
 .modal-overlay[hidden] { display: none; }
 
 .modal {
@@ -563,8 +551,6 @@ html.light .topbar-logo { filter: none; }
 
 .settings-hint.warning-text { color: var(--amber); }
 
-/* ── compare mode ─────────────────────────────────────────────────── */
-
 .compare-modal { max-width: 92vw; width: 1100px; }
 .compare-body {
   display: flex;
@@ -617,8 +603,6 @@ html.light .topbar-logo { filter: none; }
   white-space: pre-wrap;
 }
 
-/* ── command palette ──────────────────────────────────────────────── */
-
 .palette-overlay {
   position: fixed;
   inset: 0;
@@ -663,11 +647,7 @@ html.light .topbar-logo { filter: none; }
 }
 .palette-box li.active { background: color-mix(in srgb, var(--red) 10%, transparent); color: var(--fg); }
 
-/* ── voice input ──────────────────────────────────────────────────── */
-
 #micBtn.recording { color: var(--red); border-color: var(--red); animation: blink 1s step-end infinite; }
-
-/* ── file-edit diff cards ─────────────────────────────────────────── */
 
 .diff-card {
   border: 1px solid var(--border);
@@ -724,8 +704,6 @@ html.light .topbar-logo { filter: none; }
 }
 .endpoint-row .endpoint-remove:hover { color: var(--red); }
 
-/* ── email two-pane inbox (the one genuinely new layout piece) ─────── */
-
 .email-layout {
   display: flex;
   gap: 10px;
@@ -772,8 +750,6 @@ html.light .topbar-logo { filter: none; }
   color: var(--muted);
   white-space: pre-wrap;
 }
-
-/* ── notes ────────────────────────────────────────────────────────── */
 
 .note-badge {
   font-size: 0.65rem;
