@@ -1010,7 +1010,16 @@ async def chat_stream_endpoint(body: ChatBody):
     num_ctx = (body.options or {}).get("num_ctx", DEFAULT_CONTEXT_BUDGET_TOKENS)
     messages = trim_to_budget(body.messages, num_ctx)
 
-    if body.enabled_mcp_servers or body.enabled_builtin_tools:
+    # Enforced here, not just warned about in the UI: a model
+    # model_capabilities flags as unreliable at tool use (either it doesn't
+    # support the tool-calling format at all, or it's small enough to
+    # frequently hallucinate a tool call instead of just answering — see
+    # model_capabilities.py) never gets a tools list at all, regardless of
+    # which tools are checked in Settings. The frontend's capability
+    # warning banner is advisory; this is what actually stops it.
+    tools_requested = bool(body.enabled_mcp_servers or body.enabled_builtin_tools)
+    tools_usable = tools_requested and model_capabilities.supports_tools(endpoint.provider, body.model)
+    if tools_usable:
         # Make sure every requested server is actually connected — a server
         # added earlier in this process lifetime already is (connect() below
         # is then a cheap no-op); one added in a previous process run needs
