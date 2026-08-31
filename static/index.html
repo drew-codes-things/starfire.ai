@@ -266,6 +266,26 @@
             </div>
 
             <div class="settings-card">
+              <h3>MCP server repository</h3>
+              <p class="settings-hint">A broader catalog beyond Filesystem/Fetch/Memory above. Each needs its own
+                credentials/config — pick one to see what it needs. Connection is tested live before it's saved,
+                same as everywhere else, so a wrong or outdated entry just fails cleanly.</p>
+              <div class="settings-row">
+                <select id="mcpRepoSelect"><option value="">— choose a server —</option></select>
+              </div>
+              <div id="mcpRepoConfigureBox" hidden>
+                <div class="settings-row" id="mcpRepoPathRow" hidden>
+                  <input id="mcpRepoPath" type="text" placeholder="path" autocomplete="off" spellcheck="false" />
+                </div>
+                <div id="mcpRepoEnvFields"></div>
+                <div class="settings-row">
+                  <button class="btn send" id="mcpRepoAddBtn" type="button">add</button>
+                </div>
+              </div>
+              <p class="settings-hint" id="mcpRepoResult"></p>
+            </div>
+
+            <div class="settings-card">
               <h3>Custom MCP server (stdio)</h3>
               <div class="settings-row">
                 <input id="mcpName" type="text" placeholder="name" autocomplete="off" spellcheck="false" />
@@ -590,6 +610,7 @@
               <div class="settings-row">
                 <button class="btn send" id="comfyPullBtn" type="button">pull</button>
               </div>
+              <progress id="comfyPullProgress" class="pull-progress" max="100" hidden></progress>
               <p class="settings-hint" id="comfyPullStatus"></p>
             </div>
 
@@ -622,6 +643,7 @@
               <div class="settings-row">
                 <button class="btn send" id="piperPullBtn" type="button">pull voice</button>
               </div>
+              <progress id="piperPullProgress" class="pull-progress" max="100" hidden></progress>
               <p class="settings-hint" id="piperPullStatus"></p>
             </div>
 

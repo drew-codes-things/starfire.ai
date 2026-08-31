@@ -64,6 +64,13 @@ const settingsEls = {
   dirBrowserList: $('dirBrowserList'),
   dirBrowserSelectBtn: $('dirBrowserSelectBtn'),
   addFilesystemBtn: $('addFilesystemBtn'),
+  mcpRepoSelect: $('mcpRepoSelect'),
+  mcpRepoConfigureBox: $('mcpRepoConfigureBox'),
+  mcpRepoPathRow: $('mcpRepoPathRow'),
+  mcpRepoPath: $('mcpRepoPath'),
+  mcpRepoEnvFields: $('mcpRepoEnvFields'),
+  mcpRepoAddBtn: $('mcpRepoAddBtn'),
+  mcpRepoResult: $('mcpRepoResult'),
   mcpQuickAddResult: $('mcpQuickAddResult'),
   mcpName:        $('mcpName'),
   mcpCommand:     $('mcpCommand'),
@@ -155,6 +162,7 @@ const settingsEls = {
   comfyPullUrl: $('comfyPullUrl'),
   comfyPullFilename: $('comfyPullFilename'),
   comfyPullBtn: $('comfyPullBtn'),
+  comfyPullProgress: $('comfyPullProgress'),
   comfyPullStatus: $('comfyPullStatus'),
   piperVoicePath: $('piperVoicePath'),
   piperSaveBtn: $('piperSaveBtn'),
@@ -163,6 +171,7 @@ const settingsEls = {
   piperVoiceQuality: $('piperVoiceQuality'),
   piperVoicesDirForPull: $('piperVoicesDirForPull'),
   piperPullBtn: $('piperPullBtn'),
+  piperPullProgress: $('piperPullProgress'),
   piperPullStatus: $('piperPullStatus'),
   workflowName: $('workflowName'),
   workflowJson: $('workflowJson'),
@@ -934,6 +943,7 @@ function openSettings() {
   refreshSessionList();
   refreshEndpointList();
   refreshMcpServerList();
+  refreshMcpRepository();
   refreshMemoryList();
   refreshDocumentList();
   refreshTaskEndpointOptions();
@@ -1173,14 +1183,14 @@ async function refreshMcpServerList() {
   }
 }
 
-async function addMcpPreset(preset, resultEl, path) {
+async function addMcpPreset(preset, resultEl, path, env) {
   resultEl.textContent = 'starting…';
   resultEl.className = 'settings-hint';
   try {
     const r = await fetch('/api/mcp/servers', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ preset, path: path || undefined }),
+      body: JSON.stringify({ preset, path: path || undefined, env: env || undefined }),
     });
     if (!r.ok) {
       const { detail } = await r.json().catch(() => ({}));
@@ -1200,6 +1210,62 @@ async function addMcpPreset(preset, resultEl, path) {
 
 settingsEls.addFilesystemBtn.onclick = () =>
   addMcpPreset('filesystem', settingsEls.mcpQuickAddResult, settingsEls.filesystemPath.value.trim());
+
+// ── MCP server repository (broader catalog, each needs its own config) ──
+
+let mcpRepository = [];
+
+async function refreshMcpRepository() {
+  try {
+    const r = await fetch('/api/mcp/repository');
+    const { repository = [] } = await r.json();
+    mcpRepository = repository;
+    settingsEls.mcpRepoSelect.innerHTML = '<option value="">— choose a server —</option>';
+    for (const entry of repository) {
+      const opt = document.createElement('option');
+      opt.value = entry.id;
+      opt.textContent = entry.name;
+      settingsEls.mcpRepoSelect.appendChild(opt);
+    }
+  } catch (_) {}
+}
+
+settingsEls.mcpRepoSelect.addEventListener('change', () => {
+  const entry = mcpRepository.find(e => e.id === settingsEls.mcpRepoSelect.value);
+  settingsEls.mcpRepoConfigureBox.hidden = !entry;
+  settingsEls.mcpRepoResult.textContent = '';
+  if (!entry) return;
+
+  settingsEls.mcpRepoPathRow.hidden = !entry.needs_path;
+  settingsEls.mcpRepoPath.value = '';
+  settingsEls.mcpRepoPath.placeholder = 'path';
+
+  settingsEls.mcpRepoEnvFields.innerHTML = '';
+  for (const field of entry.env_fields) {
+    const row = document.createElement('div');
+    row.className = 'settings-row';
+    const input = document.createElement('input');
+    input.type = 'password';
+    input.placeholder = field.label;
+    input.dataset.envKey = field.key;
+    input.autocomplete = 'off';
+    row.appendChild(input);
+    settingsEls.mcpRepoEnvFields.appendChild(row);
+  }
+});
+
+settingsEls.mcpRepoAddBtn.onclick = () => {
+  const entry = mcpRepository.find(e => e.id === settingsEls.mcpRepoSelect.value);
+  if (!entry) return;
+  const env = {};
+  settingsEls.mcpRepoEnvFields.querySelectorAll('input').forEach(input => {
+    env[input.dataset.envKey] = input.value;
+  });
+  addMcpPreset(entry.id, settingsEls.mcpRepoResult, settingsEls.mcpRepoPath.value.trim(), env).then(() => {
+    settingsEls.mcpRepoSelect.value = '';
+    settingsEls.mcpRepoConfigureBox.hidden = true;
+  });
+};
 
 // ── directory browser (pick a folder by clicking, rather than typing an
 // absolute path from memory) — one factory, instantiated per field that
@@ -2456,12 +2522,18 @@ async function refreshHardware() {
     for (const c of data.all_candidates || []) {
       const li = document.createElement('li');
       li.className = 'endpoint-row';
+      li.style.flexDirection = 'column';
+      li.style.alignItems = 'stretch';
       li.innerHTML =
-        `<span class="endpoint-label">${c.fits ? '✓' : '✗'} ${c.name}</span>` +
-        `<span class="endpoint-meta">~${c.size_gb} GB${c.fits ? '' : ' — likely too large'}</span>` +
-        `<button class="btn ghost" data-act="pull">pull</button>`;
+        `<div class="endpoint-row" style="border:none;padding:0;">` +
+          `<span class="endpoint-label">${c.fits ? '✓' : '✗'} ${c.name}</span>` +
+          `<span class="endpoint-meta">~${c.size_gb} GB${c.fits ? '' : ' — likely too large'}</span>` +
+          `<button class="btn ghost" data-act="pull">pull</button>` +
+        `</div>` +
+        `<progress class="pull-progress" max="100" hidden></progress>`;
       const statusEl = li.querySelector('.endpoint-meta');
-      li.querySelector('[data-act="pull"]').onclick = e => pullModel(c.name, e.target, statusEl);
+      const progressEl = li.querySelector('.pull-progress');
+      li.querySelector('[data-act="pull"]').onclick = e => pullModel(c.name, e.target, statusEl, progressEl);
       settingsEls.hardwareModelList.appendChild(li);
     }
   } catch (_) {
@@ -2534,18 +2606,31 @@ settingsEls.comfyPullBtn.onclick = async () => {
     });
     if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || 'failed to start'); }
     await readProgressStream(r, (obj) => {
-      if (obj.error) { settingsEls.comfyPullStatus.textContent = 'error: ' + obj.error; return; }
-      if (obj.done) { settingsEls.comfyPullStatus.textContent = 'done'; return; }
+      if (obj.error) { settingsEls.comfyPullStatus.textContent = 'error: ' + obj.error; hideProgressBar(settingsEls.comfyPullProgress); return; }
+      if (obj.done) { settingsEls.comfyPullStatus.textContent = 'done'; hideProgressBar(settingsEls.comfyPullProgress); return; }
+      updateProgressBar(settingsEls.comfyPullProgress, obj.downloaded, obj.total);
       const pct = obj.total ? Math.round(100 * obj.downloaded / obj.total) + '%' : (obj.downloaded / 1e6).toFixed(1) + ' MB';
       settingsEls.comfyPullStatus.textContent = 'downloading… ' + pct;
     });
     await refreshComfyUI();
   } catch (e) {
     settingsEls.comfyPullStatus.textContent = 'error: ' + e.message;
+    hideProgressBar(settingsEls.comfyPullProgress);
   } finally {
     settingsEls.comfyPullBtn.disabled = false;
   }
 };
+
+// Visual bar to go with the text status on every pull — shows real percent
+// when the server reports a total size, otherwise an indeterminate
+// (unknown-length) animated bar rather than a bar frozen at 0%.
+function updateProgressBar(el, downloaded, total) {
+  if (!el) return;
+  el.hidden = false;
+  if (total) el.value = Math.min(100, Math.round(100 * downloaded / total));
+  else el.removeAttribute('value');
+}
+function hideProgressBar(el) { if (el) el.hidden = true; }
 
 // Shared SSE-stream reader for the various "download with progress" endpoints
 // (Ollama model pull, ComfyUI checkpoint pull, Piper voice pull) — same
@@ -2617,8 +2702,9 @@ settingsEls.piperPullBtn.onclick = async () => {
     if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.detail || 'failed to start'); }
     let finalPath = '';
     await readProgressStream(r, (obj) => {
-      if (obj.error) { settingsEls.piperPullStatus.textContent = 'error: ' + obj.error; return; }
-      if (obj.done) { settingsEls.piperPullStatus.textContent = 'done'; finalPath = obj.path; return; }
+      if (obj.error) { settingsEls.piperPullStatus.textContent = 'error: ' + obj.error; hideProgressBar(settingsEls.piperPullProgress); return; }
+      if (obj.done) { settingsEls.piperPullStatus.textContent = 'done'; hideProgressBar(settingsEls.piperPullProgress); finalPath = obj.path; return; }
+      updateProgressBar(settingsEls.piperPullProgress, obj.downloaded, obj.total);
       const pct = obj.total ? Math.round(100 * obj.downloaded / obj.total) + '%' : (obj.downloaded / 1e6).toFixed(1) + ' MB';
       settingsEls.piperPullStatus.textContent = 'downloading… ' + pct;
     });
@@ -2631,6 +2717,7 @@ settingsEls.piperPullBtn.onclick = async () => {
     }
   } catch (e) {
     settingsEls.piperPullStatus.textContent = 'error: ' + e.message;
+    hideProgressBar(settingsEls.piperPullProgress);
   } finally {
     settingsEls.piperPullBtn.disabled = false;
   }
@@ -2941,7 +3028,7 @@ if (SpeechRecognitionCtor && els.micBtn) {
 
 // ── hardware tab: one-click model pull ──────────────────────────────
 
-async function pullModel(name, btn, statusEl) {
+async function pullModel(name, btn, statusEl, progressEl) {
   btn.disabled = true;
   statusEl.textContent = 'starting…';
   try {
@@ -2955,19 +3042,26 @@ async function pullModel(name, btn, statusEl) {
     }
     let sawError = null;
     await readProgressStream(r, (obj) => {
-      if (obj.error) { sawError = obj.error; }
-      else if (obj.status) {
+      if (obj.error) { sawError = obj.error; return; }
+      if (obj.status) {
         let text = obj.status;
-        if (obj.total && obj.completed) text += ' ' + Math.round(100 * obj.completed / obj.total) + '%';
+        if (obj.total && obj.completed) {
+          text += ' ' + Math.round(100 * obj.completed / obj.total) + '%';
+          updateProgressBar(progressEl, obj.completed, obj.total);
+        } else {
+          updateProgressBar(progressEl, 0, 0); // indeterminate — no size known yet (e.g. "verifying"/"pulling manifest" phases)
+        }
         statusEl.textContent = text;
       }
     });
     if (sawError) throw new Error(sawError);
     statusEl.textContent = 'done';
     btn.textContent = 'pulled';
+    hideProgressBar(progressEl);
   } catch (e) {
     statusEl.textContent = 'error: ' + e.message;
     btn.disabled = false;
+    hideProgressBar(progressEl);
   }
 }
 
