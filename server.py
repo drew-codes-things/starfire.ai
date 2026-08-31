@@ -57,7 +57,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 import routes
@@ -123,6 +124,31 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="starfire.ai", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def require_client_header(request: Request, call_next):
+    """CSRF guard for a no-auth app: any state-changing request to /api/*
+    must carry a custom header this app's own frontend always sends (see
+    app.js's fetch wrapper). This app sets no CORS headers anywhere, so a
+    cross-origin request that needs a preflight (any custom header, or a
+    non-"simple" method/content-type) already fails before it's ever sent —
+    that already covered every JSON POST/PUT/DELETE here. It did NOT cover
+    multipart/form-data POSTs (/api/documents, /api/restore): browsers treat
+    that content type as CORS-"simple" and skip preflight entirely, so a
+    malicious page the user has open in another tab could otherwise
+    auto-submit a <form> straight to /api/restore and silently overwrite
+    the whole data/ directory. Requiring this header closes that gap
+    uniformly (forces a preflight regardless of content type) rather than
+    patching those two routes individually — and covers anything mutating
+    added here later without needing to remember to do it again.
+    """
+    if request.method not in ("GET", "HEAD", "OPTIONS") and request.url.path.startswith("/api/"):
+        if "x-starfire-client" not in request.headers:
+            return JSONResponse({"detail": "missing required client header"}, status_code=403)
+    return await call_next(request)
+
+
 app.include_router(routes.router)
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
 

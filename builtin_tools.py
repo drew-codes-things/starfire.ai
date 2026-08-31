@@ -549,5 +549,5 @@ def _manage_notes(args: dict, notes: NoteStore) -> str:
         if not note_id or index is None:
             return "error: note_id and item_index are required for action=toggle_item"
         ok = notes.toggle_item(note_id, index)
-        return "toggled" if ok else f"error: no note/item at that index"
+        return "toggled" if ok else "error: no note/item at that index"
     return f"error: unknown action '{action}'"

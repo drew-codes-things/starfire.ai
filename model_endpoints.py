@@ -14,7 +14,7 @@ non-secret connection metadata.
 import json
 import os
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 
 from atomic_io import atomic_write_json
 from providers import _detect_provider
