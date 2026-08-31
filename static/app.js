@@ -2516,8 +2516,15 @@ async function refreshHardware() {
     const memLine = data.vram_gb
       ? `${data.vram_gb} GB VRAM detected (GPU)`
       : data.ram_gb ? `${data.ram_gb} GB system RAM (no GPU detected — CPU/unified-memory sizing)` : 'could not detect memory';
+    const cpuLine = data.cpu_model
+      ? `CPU: ${escapeHtml(data.cpu_model)}${data.cpu_cores ? ` (${data.cpu_cores} threads` : ''}${data.cpu_max_mhz ? `, up to ${(data.cpu_max_mhz / 1000).toFixed(2)} GHz)` : (data.cpu_cores ? ')' : '')}`
+      : '';
+    const gpuLine = data.gpu_name ? `GPU: ${escapeHtml(data.gpu_name)}` : '';
+    const ramLine = data.ram_speed_mts ? `RAM: ${escapeHtml(data.ram_type || '')} @ ${data.ram_speed_mts} MT/s` : '';
     settingsEls.hardwareInfo.innerHTML =
-      `<p class="settings-hint">${memLine}, ~${data.budget_gb} GB usable budget for a model.</p>`;
+      `<p class="settings-hint">${memLine}, ~${data.budget_gb} GB usable budget for a model.</p>` +
+      [cpuLine, gpuLine, ramLine].filter(Boolean).map(l => `<p class="settings-hint">${l}</p>`).join('') +
+      (data.speed_note ? `<p class="settings-hint">${escapeHtml(data.speed_note)}</p>` : '');
     settingsEls.hardwareModelList.innerHTML = '';
     for (const c of data.all_candidates || []) {
       const li = document.createElement('li');
