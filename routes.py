@@ -32,8 +32,7 @@ from email_store import EmailAccountStore, EmailRuleStore
 from mcp_manager import McpConnectionError, mcp_manager
 from mcp_servers_store import MCP_SERVER_REPOSITORY, REFERENCE_SERVERS, McpServerStore
 from memory_store import MemoryStore
-from model_discovery import detect_ollama, discover_servers
-from model_endpoints import ModelEndpointStore
+from model_endpoints import ModelEndpointStore, detect_ollama, discover_servers
 from note_store import NoteStore, NoteTemplateStore
 from preset_store import PresetStore
 from providers import build_models_url
@@ -186,7 +185,6 @@ async def warm(body: dict):
 
 @router.get("/config")
 async def get_config():
-    from model_discovery import detect_ollama
     detected = await detect_ollama(config.ollama_base_url)
     return {"ollama_base_url": detected or "http://localhost:11434"}
 

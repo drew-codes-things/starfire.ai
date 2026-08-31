@@ -3,15 +3,13 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-import audio_generation
 import comfyui_client
 import date_parsing
 import deep_research
-import document_generation
 import email_client
 import file_edit_tool
 import github_tool
-import image_generation
+import media_generation
 import piper_tts
 import shell_tool
 import web_search
@@ -206,7 +204,7 @@ TOOL_SCHEMAS = [
                 "type": "object",
                 "properties": {
                     "text": {"type": "string"},
-                    "voice": {"type": "string", "enum": sorted(audio_generation.VALID_VOICES),
+                    "voice": {"type": "string", "enum": sorted(media_generation.VALID_VOICES),
                                "description": "OpenAI fallback only"},
                 },
                 "required": ["text"],
@@ -241,7 +239,7 @@ TOOL_SCHEMAS = [
                 "type": "object",
                 "properties": {
                     "content": {"type": "string"},
-                    "format": {"type": "string", "enum": sorted(document_generation.VALID_FORMATS)},
+                    "format": {"type": "string", "enum": sorted(media_generation.VALID_FORMATS)},
                     "filename": {"type": "string", "description": "without extension, optional"},
                 },
                 "required": ["content", "format"],
@@ -378,7 +376,7 @@ async def _generate_image(args: dict, ctx: ToolContext) -> str:
                 "with an API key configured either - set up at least one")
     base_url, api_key = found
     try:
-        data = await image_generation.generate(prompt, base_url, api_key, args.get("size", "1024x1024"))
+        data = await media_generation.generate_image(prompt, base_url, api_key, args.get("size", "1024x1024"))
     except RuntimeError as e:
         return f"error: {e}"
     entry = ctx.generated_files.add("image", "generated.png", "image/png", data, source=prompt)
@@ -404,7 +402,7 @@ async def _generate_audio(args: dict, ctx: ToolContext) -> str:
                 "endpoint with an API key configured either - set up at least one")
     base_url, api_key = found
     try:
-        data = await audio_generation.generate(text, base_url, api_key, args.get("voice", "alloy"))
+        data = await media_generation.generate_audio(text, base_url, api_key, args.get("voice", "alloy"))
     except RuntimeError as e:
         return f"error: {e}"
     entry = ctx.generated_files.add("audio", "generated.mp3", "audio/mpeg", data, source=text[:200])
@@ -451,14 +449,14 @@ def _generate_document(args: dict, ctx: ToolContext) -> str:
     fmt = args.get("format", "md")
     if not content:
         return "error: content is required"
-    if fmt not in document_generation.VALID_FORMATS:
+    if fmt not in media_generation.VALID_FORMATS:
         return f"error: unsupported format '{fmt}'"
     try:
-        data = document_generation.generate(content, fmt)
+        data = media_generation.generate_document(content, fmt)
     except Exception as e:
         return f"error: could not generate document: {e}"
     filename = (args.get("filename") or "document").strip() + "." + fmt
-    entry = ctx.generated_files.add("document", filename, document_generation.CONTENT_TYPES[fmt],
+    entry = ctx.generated_files.add("document", filename, media_generation.CONTENT_TYPES[fmt],
                                       data, source=content[:200])
     return json.dumps({"kind": "document", "id": entry.id, "url": f"/api/generated/{entry.id}", "filename": filename})
 

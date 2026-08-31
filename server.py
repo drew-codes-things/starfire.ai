@@ -44,7 +44,7 @@ from config import config
 from mcp_manager import McpConnectionError, mcp_manager
 from mcp_servers_store import REFERENCE_SERVERS
 import ollama_manager
-from model_discovery import detect_ollama
+from model_endpoints import detect_ollama
 
 DEFAULT_MCP_PRESETS = ["fetch", "memory"]
 
