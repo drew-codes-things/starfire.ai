@@ -253,12 +253,35 @@ close.
 
 ## Docker
 
+The easiest way to run it in Docker is via the included compose file:
+
 ```bash
 cp .env.example .env
 docker compose up -d --build
 ```
 
 A host-run Ollama is reachable from inside the container via `host.docker.internal`.
+Data persists in `./data` on the host (mounted as a volume), so it survives container
+rebuilds and restarts.
+
+### Building the image manually
+
+If you don't want compose, build and run the image directly:
+
+```bash
+docker build -t starfire.ai .
+docker run -d -p 8080:8080 -v $(pwd)/data:/app/data --add-host host.docker.internal:host-gateway starfire.ai
+```
+
+To push the built image to a registry instead of just running it locally:
+
+```bash
+docker tag starfire.ai ghcr.io/<your-username>/starfire.ai:latest
+docker push ghcr.io/<your-username>/starfire.ai:latest
+```
+
+(swap `ghcr.io/<your-username>` for Docker Hub's `<your-username>/starfire.ai` if you'd
+rather use that instead)
 
 ## Configuration
 
