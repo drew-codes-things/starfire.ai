@@ -144,6 +144,7 @@ const settingsEls = {
   usageSummary: $('usageSummary'),
   hardwareInfo: $('hardwareInfo'),
   hardwareModelList: $('hardwareModelList'),
+  ollamaStatus: $('ollamaStatus'),
   downloadBackupBtn: $('downloadBackupBtn'),
   toggleGenerateVideo: $('toggleGenerateVideo'),
   comfyBaseUrl: $('comfyBaseUrl'),
@@ -957,6 +958,7 @@ function openSettings() {
   refreshPresetList();
   refreshUsage();
   refreshHardware();
+  refreshOllamaStatus();
   refreshLocalGen();
 }
 function closeSettings() {
@@ -2504,6 +2506,59 @@ async function refreshUsage() {
     settingsEls.usageSummary.innerHTML = html;
   } catch (_) {
     settingsEls.usageSummary.innerHTML = '<p class="settings-hint error">failed to load usage</p>';
+  }
+}
+
+// ── Ollama install/start status ─────────────────────────────────────
+
+async function refreshOllamaStatus() {
+  try {
+    const r = await fetch('/api/hardware/ollama');
+    const data = await r.json();
+    if (data.running) {
+      settingsEls.ollamaStatus.innerHTML = '<p class="settings-hint">✓ installed and running.</p>';
+      return;
+    }
+    if (data.installed) {
+      settingsEls.ollamaStatus.innerHTML =
+        '<p class="settings-hint">Installed, but not running.</p>' +
+        '<button class="btn ghost" id="ollamaStartBtn" type="button">start Ollama</button>' +
+        '<p class="settings-hint" id="ollamaStartMsg"></p>';
+      $('ollamaStartBtn').onclick = async (e) => {
+        e.target.disabled = true;
+        e.target.textContent = 'starting…';
+        try {
+          const res = await fetch('/api/hardware/ollama/start', { method: 'POST' });
+          const body = await res.json().catch(() => ({}));
+          if (res.ok) {
+            $('ollamaStartMsg').textContent = body.message || 'started.';
+            await refreshOllamaStatus();
+            await refreshHardware();
+            return;
+          }
+          $('ollamaStartMsg').textContent = body.detail || 'failed to start.';
+        } catch (_) {
+          $('ollamaStartMsg').textContent = 'failed to start.';
+        }
+        e.target.disabled = false;
+        e.target.textContent = 'start Ollama';
+      };
+      return;
+    }
+    // Not installed at all — show the platform-appropriate install step.
+    const install = data.install || {};
+    let html = '<p class="settings-hint">Not installed.</p>';
+    if (install.method === 'command' && install.command) {
+      html += `<p class="settings-hint"><code>${escapeHtml(install.command)}</code></p>`;
+    } else if (install.url) {
+      html += `<p class="settings-hint"><a href="${escapeHtml(install.url)}" target="_blank" rel="noopener">download Ollama</a></p>`;
+    }
+    if (install.note) {
+      html += `<p class="settings-hint">${escapeHtml(install.note)}</p>`;
+    }
+    settingsEls.ollamaStatus.innerHTML = html;
+  } catch (_) {
+    settingsEls.ollamaStatus.innerHTML = '<p class="settings-hint error">failed to check Ollama status</p>';
   }
 }
 
