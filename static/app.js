@@ -1,5 +1,21 @@
 'use strict';
 
+// CSRF guard: every mutating request this page makes carries a custom
+// header the server requires (see server.py's require_client_header
+// middleware) — setting a custom header cross-origin forces a CORS
+// preflight, which fails since this app grants no other origin CORS
+// permission, so a malicious page open in another tab can't forge these
+// requests. Patched onto the global fetch once here rather than passed to
+// every one of this file's ~60 call sites individually.
+const _rawFetch = window.fetch.bind(window);
+window.fetch = (input, init = {}) => {
+  const method = (init.method || 'GET').toUpperCase();
+  if (method !== 'GET' && method !== 'HEAD') {
+    init = { ...init, headers: { ...(init.headers || {}), 'X-Starfire-Client': '1' } };
+  }
+  return _rawFetch(input, init);
+};
+
 const $ = id => document.getElementById(id);
 
 const els = {
@@ -175,7 +191,16 @@ function printSep() {
 }
 
 function markdownRender(text) {
-  if (window.marked) return window.marked.parse(text);
+  // Sanitized with DOMPurify before it ever reaches innerHTML — marked.parse()
+  // on its own passes raw HTML straight through, and the model's own output
+  // isn't trustworthy input: prompt injection from a fetched web page, an
+  // email body, a document, or a search result can land literal <script>/
+  // onerror= payloads in the reply text, and this app has no auth boundary
+  // stopping injected JS from calling any of its own APIs (memory, email,
+  // shell if enabled, etc.) once it runs in this page's origin.
+  if (window.marked && window.DOMPurify) return window.DOMPurify.sanitize(window.marked.parse(text));
+  // Either CDN script failed to load — fail toward plain-escaped text
+  // rather than ever rendering raw, unsanitized model output as HTML.
   return text.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 }
 
@@ -320,7 +345,7 @@ function renderDiffCard(resultJson) {
   card.className = 'diff-card';
   const status = data.staged ? 'proposed edit — awaiting approval' : data.applied ? 'applied edit' : 'edit failed';
   card.innerHTML =
-    `<div class="diff-card-header">${status} — ${data.path}${data.error ? ' — ' + data.error : ''}</div>` +
+    `<div class="diff-card-header">${status} — ${escapeHtml(data.path || '')}${data.error ? ' — ' + escapeHtml(data.error) : ''}</div>` +
     `<pre>${diffToHtml(data.diff || '')}</pre>`;
 
   if (data.staged && data.pending_id) {
@@ -794,8 +819,8 @@ async function refreshEndpointList() {
       const li = document.createElement('li');
       li.className = 'endpoint-row';
       li.innerHTML =
-        `<span class="endpoint-label">${ep.label || ep.base_url}</span>` +
-        `<span class="endpoint-meta">${ep.provider}</span>` +
+        `<span class="endpoint-label">${escapeHtml(ep.label || ep.base_url)}</span>` +
+        `<span class="endpoint-meta">${escapeHtml(ep.provider)}</span>` +
         `<button class="endpoint-remove" title="Remove">×</button>`;
       li.querySelector('.endpoint-remove').onclick = async () => {
         await fetch('/api/model-endpoints/' + ep.id, { method: 'DELETE' });
@@ -966,7 +991,7 @@ async function refreshMcpServerList() {
       const checked = enabledMcpServers.has(s.id) ? 'checked' : '';
       li.innerHTML =
         `<label class="theme-toggle"><input type="checkbox" ${checked} /></label>` +
-        `<span class="endpoint-label">${s.name}</span>` +
+        `<span class="endpoint-label">${escapeHtml(s.name)}</span>` +
         `<span class="endpoint-meta">${s.tool_count} tool(s)${s.connected ? '' : ' · not running'}</span>` +
         `<button class="endpoint-remove" title="Remove">×</button>`;
       li.querySelector('input[type="checkbox"]').onchange = e => {
@@ -1041,7 +1066,7 @@ async function loadDirBrowser(path) {
     for (const entry of data.entries) {
       const li = document.createElement('li');
       li.className = 'endpoint-row';
-      li.innerHTML = `<span class="endpoint-label">📁 ${entry.name}</span>`;
+      li.innerHTML = `<span class="endpoint-label">📁 ${escapeHtml(entry.name)}</span>`;
       li.onclick = () => loadDirBrowser(entry.path);
       settingsEls.dirBrowserList.appendChild(li);
     }
@@ -1193,7 +1218,7 @@ async function refreshSessionList() {
       li.className = 'endpoint-row' + (s.id === currentSessionId ? ' active-session' : '');
       const pinIcon = s.pinned ? '📌 ' : '';
       li.innerHTML =
-        `<span class="endpoint-label">${pinIcon}${s.title || '(untitled)'}</span>` +
+        `<span class="endpoint-label">${pinIcon}${escapeHtml(s.title || '(untitled)')}</span>` +
         `<span class="endpoint-meta">${s.message_count} msg &middot; ${new Date(s.updated).toLocaleString()}</span>` +
         `<button class="btn ghost" data-act="pin">${s.pinned ? 'unpin' : 'pin'}</button>` +
         `<button class="btn ghost" data-act="open">open</button>` +
@@ -1249,8 +1274,8 @@ async function refreshMemoryList() {
       const pinChecked = m.pinned ? 'checked' : '';
       li.innerHTML =
         `<label class="theme-toggle" title="pin"><input type="checkbox" ${pinChecked} /></label>` +
-        `<span class="endpoint-label">${m.text}</span>` +
-        `<span class="endpoint-meta">${m.category}</span>` +
+        `<span class="endpoint-label">${escapeHtml(m.text)}</span>` +
+        `<span class="endpoint-meta">${escapeHtml(m.category)}</span>` +
         `<button class="endpoint-remove" title="Remove">×</button>`;
       li.querySelector('input[type="checkbox"]').onchange = async e => {
         await fetch('/api/memory/' + m.id + '/pin', {
@@ -1295,7 +1320,7 @@ async function refreshDocumentList() {
       const li = document.createElement('li');
       li.className = 'endpoint-row';
       li.innerHTML =
-        `<span class="endpoint-label">${d.filename}</span>` +
+        `<span class="endpoint-label">${escapeHtml(d.filename)}</span>` +
         `<span class="endpoint-meta">${d.chunk_count} chunk(s)</span>` +
         `<button class="endpoint-remove" title="Remove">×</button>`;
       li.querySelector('.endpoint-remove').onclick = async () => {
@@ -1384,8 +1409,8 @@ async function refreshTaskList() {
       li.className = 'endpoint-row';
       const scheduleLabel = t.schedule === 'cron' ? t.cron_expression : t.schedule + (t.scheduled_time ? ' ' + t.scheduled_time : '');
       li.innerHTML =
-        `<span class="endpoint-label">${t.name}</span>` +
-        `<span class="endpoint-meta">${scheduleLabel} · ${t.status} · next ${t.next_run ? new Date(t.next_run).toLocaleString() : '—'}</span>` +
+        `<span class="endpoint-label">${escapeHtml(t.name)}</span>` +
+        `<span class="endpoint-meta">${escapeHtml(scheduleLabel)} · ${escapeHtml(t.status)} · next ${t.next_run ? new Date(t.next_run).toLocaleString() : '—'}</span>` +
         `<button class="btn ghost" data-act="toggle">${t.status === 'active' ? 'pause' : 'resume'}</button>` +
         `<button class="btn ghost" data-act="run">run now</button>` +
         `<button class="endpoint-remove" title="Remove">×</button>`;
@@ -1423,8 +1448,8 @@ async function refreshTaskRunList() {
       li.className = 'endpoint-row';
       const summary = (run.output || '').slice(0, 80);
       li.innerHTML =
-        `<span class="endpoint-label">${summary}</span>` +
-        `<span class="endpoint-meta">${run.status} · ${new Date(run.started).toLocaleString()}</span>`;
+        `<span class="endpoint-label">${escapeHtml(summary)}</span>` +
+        `<span class="endpoint-meta">${escapeHtml(run.status)} · ${new Date(run.started).toLocaleString()}</span>`;
       settingsEls.taskRunList.appendChild(li);
     }
   } catch (_) {
@@ -1484,8 +1509,8 @@ async function refreshEmailAccountList() {
       const li = document.createElement('li');
       li.className = 'endpoint-row';
       li.innerHTML =
-        `<span class="endpoint-label">${a.label}</span>` +
-        `<span class="endpoint-meta">${a.email_address}</span>` +
+        `<span class="endpoint-label">${escapeHtml(a.label)}</span>` +
+        `<span class="endpoint-meta">${escapeHtml(a.email_address)}</span>` +
         `<button class="btn ghost" data-act="open">open</button>` +
         `<button class="endpoint-remove" title="Remove">×</button>`;
       li.querySelector('[data-act="open"]').onclick = () => openEmailInbox(a.id);
@@ -1577,13 +1602,13 @@ async function loadEmailMessages() {
       const li = document.createElement('li');
       li.className = 'endpoint-row' + (m.unread ? ' unread' : '');
       li.innerHTML =
-        `<span class="endpoint-label">${m.subject || '(no subject)'}</span>` +
-        `<span class="endpoint-meta">${m.from}</span>`;
+        `<span class="endpoint-label">${escapeHtml(m.subject || '(no subject)')}</span>` +
+        `<span class="endpoint-meta">${escapeHtml(m.from || '')}</span>`;
       li.onclick = () => openEmailMessage(folder, m.uid);
       settingsEls.emailMessageList.appendChild(li);
     }
   } catch (e) {
-    settingsEls.emailMessageList.innerHTML = `<li class="settings-hint error">${e.message}</li>`;
+    settingsEls.emailMessageList.innerHTML = `<li class="settings-hint error">${escapeHtml(e.message)}</li>`;
   }
 }
 
@@ -1594,8 +1619,8 @@ async function openEmailMessage(folder, uid) {
     if (!r.ok) throw new Error('failed to load message');
     const msg = await r.json();
     settingsEls.emailReadingPane.innerHTML =
-      `<div class="email-subject">${msg.subject || '(no subject)'}</div>` +
-      `<div class="email-meta">from ${msg.from} · ${msg.date}</div>` +
+      `<div class="email-subject">${escapeHtml(msg.subject || '(no subject)')}</div>` +
+      `<div class="email-meta">from ${escapeHtml(msg.from || '')} · ${escapeHtml(msg.date || '')}</div>` +
       `<div class="email-actions">` +
         `<button class="btn ghost" data-act="summarize">summarize</button>` +
         `<button class="btn ghost" data-act="urgency">check urgency</button>` +
@@ -1637,7 +1662,7 @@ async function openEmailMessage(folder, uid) {
       showAi('reply sent');
     };
   } catch (e) {
-    settingsEls.emailReadingPane.innerHTML = `<p class="settings-hint error">${e.message}</p>`;
+    settingsEls.emailReadingPane.innerHTML = `<p class="settings-hint error">${escapeHtml(e.message)}</p>`;
   }
 }
 
@@ -1673,7 +1698,7 @@ function renderPendingNoteItems() {
   pendingNoteItems.forEach((item, idx) => {
     const li = document.createElement('li');
     li.className = 'note-item-row';
-    li.innerHTML = `<span class="note-item-text">${item.text}</span><button class="endpoint-remove" title="Remove">×</button>`;
+    li.innerHTML = `<span class="note-item-text">${escapeHtml(item.text)}</span><button class="endpoint-remove" title="Remove">×</button>`;
     li.querySelector('.endpoint-remove').onclick = () => {
       pendingNoteItems.splice(idx, 1);
       renderPendingNoteItems();
@@ -1761,8 +1786,8 @@ async function refreshNoteList() {
 
       const doneCount = n.items.filter(i => i.done).length;
       const progress = n.note_type === 'checklist' ? `<span class="endpoint-meta">${doneCount}/${n.items.length} done</span>` : '';
-      const repeatBadge = n.repeat && n.repeat !== 'none' ? `<span class="note-badge">${n.repeat}</span>` : '';
-      const labelBadge = n.label ? `<span class="note-badge">${n.label}</span>` : '';
+      const repeatBadge = n.repeat && n.repeat !== 'none' ? `<span class="note-badge">${escapeHtml(n.repeat)}</span>` : '';
+      const labelBadge = n.label ? `<span class="note-badge">${escapeHtml(n.label)}</span>` : '';
 
       const header = document.createElement('div');
       header.className = 'endpoint-row';
@@ -1770,7 +1795,7 @@ async function refreshNoteList() {
       header.style.padding = '0';
       const aiButton = n.note_type === 'note' ? `<button class="btn ghost" data-act="ai-improve">improve w/ AI</button>` : '';
       header.innerHTML =
-        `<span class="endpoint-label">${n.title || '(untitled)'}</span>` +
+        `<span class="endpoint-label">${escapeHtml(n.title || '(untitled)')}</span>` +
         progress + noteDueBadge(n.due_date) + repeatBadge + labelBadge +
         aiButton +
         `<button class="btn ghost" data-act="pin">${n.pinned ? 'unpin' : 'pin'}</button>` +
@@ -1822,7 +1847,7 @@ async function refreshNoteList() {
           const itemLi = document.createElement('li');
           itemLi.className = 'note-item-row' + (item.done ? ' done' : '');
           const checked = item.done ? 'checked' : '';
-          itemLi.innerHTML = `<input type="checkbox" ${checked} /><span class="note-item-text">${item.text}</span>`;
+          itemLi.innerHTML = `<input type="checkbox" ${checked} /><span class="note-item-text">${escapeHtml(item.text)}</span>`;
           itemLi.querySelector('input').onchange = async () => {
             await fetch(`/api/notes/${n.id}/items/${idx}/toggle`, { method: 'POST' });
             await refreshNoteList();
@@ -1920,8 +1945,8 @@ async function refreshPresetList() {
       const li = document.createElement('li');
       li.className = 'endpoint-row';
       li.innerHTML =
-        `<span class="endpoint-label">${p.name}</span>` +
-        `<span class="endpoint-meta">${p.model || 'no model set'}</span>` +
+        `<span class="endpoint-label">${escapeHtml(p.name)}</span>` +
+        `<span class="endpoint-meta">${escapeHtml(p.model || 'no model set')}</span>` +
         `<button class="btn ghost" data-act="apply">apply</button>` +
         `<button class="endpoint-remove" title="Remove">×</button>`;
       li.querySelector('[data-act="apply"]').onclick = () => applyPreset(p);
@@ -2076,7 +2101,7 @@ const compareEls = {
 
 function compareModelOptionsHtml() {
   return models.map(m =>
-    `<option value="${m.id}" data-endpoint-id="${m.endpoint_id}">${m.id} (${window.providerLabel ? window.providerLabel(m.provider) : m.provider})</option>`
+    `<option value="${escapeHtml(m.id)}" data-endpoint-id="${escapeHtml(m.endpoint_id)}">${escapeHtml(m.id)} (${escapeHtml(window.providerLabel ? window.providerLabel(m.provider) : m.provider)})</option>`
   ).join('');
 }
 

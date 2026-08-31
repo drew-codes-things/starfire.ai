@@ -11,8 +11,11 @@ servers, other builtin tools) instead of duplicating the chat UI.
 
 from __future__ import annotations
 
+import ipaddress
 import re
+import socket
 from html.parser import HTMLParser
+from urllib.parse import urlparse
 
 import httpx
 
@@ -21,6 +24,37 @@ import web_search
 MAX_SOURCES = 4
 MAX_CHARS_PER_SOURCE = 3000
 FETCH_TIMEOUT = 8.0
+
+
+def _resolves_to_public_address(url: str) -> bool:
+    """SSRF guard: reject a URL whose host resolves to a private/loopback/
+    link-local/reserved address (RFC1918 ranges, 169.254.169.254 cloud
+    metadata, localhost, etc.). This tool fetches URLs automatically with no
+    user review in between — search results are external content this app
+    doesn't control, and with follow_redirects on, even an initially
+    external-looking URL could redirect into the home network this app
+    typically runs on. Checked as an httpx request event hook (below) so it
+    re-validates every redirect hop, not just the first request. Not
+    airtight against a DNS-rebind between this check and the actual
+    connection — that would need pinning the resolved IP on the connection
+    itself — but it closes the ordinary case.
+    """
+    try:
+        host = urlparse(url).hostname
+        if not host:
+            return False
+        for _family, _type, _proto, _canon, sockaddr in socket.getaddrinfo(host, None):
+            ip = ipaddress.ip_address(sockaddr[0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+                return False
+        return True
+    except (socket.gaierror, ValueError, UnicodeError):
+        return False
+
+
+async def _block_unsafe_redirects(request: httpx.Request) -> None:
+    if not _resolves_to_public_address(str(request.url)):
+        raise httpx.RequestError(f"blocked request to non-public address: {request.url}", request=request)
 
 
 class _TextExtractor(HTMLParser):
@@ -76,7 +110,8 @@ async def research(query: str, chat_fn) -> str:
     if not results:
         return "No search results found for that query — can't do research without sources."
 
-    async with httpx.AsyncClient(timeout=FETCH_TIMEOUT, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=FETCH_TIMEOUT, follow_redirects=True,
+                                   event_hooks={"request": [_block_unsafe_redirects]}) as client:
         pages = [await _fetch_page(client, r["url"]) for r in results]
 
     sources_block = "\n\n".join(

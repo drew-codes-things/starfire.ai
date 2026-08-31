@@ -190,7 +190,6 @@ class MemoryStore:
         query_vec = await embeddings_module.embed(query, ollama_url)
         semantic_scores = {}
         if query_vec:
-            by_id = {e.id: e for e in unpinned}
             semantic_scores = {
                 e.id: embeddings_module.cosine_similarity(query_vec, e.embedding)
                 for e in unpinned if e.embedding
