@@ -81,7 +81,7 @@ The same Tools tab also has several built-in (non-MCP) tools - see Memory, Docum
 Automations, and Email below for most of them, plus:
 
 - **Search the web** - a single no-API-key backend (DuckDuckGo's HTML results page); see
-  `web_search.py`. Swapping in a proper provider later is a one-function change.
+  `server_configs/web_search.py`. Swapping in a proper provider later is a one-function change.
 - **⚠️ Run shell commands** - off by default. One general-purpose shell tool the model can call
   directly, the same way Claude Code itself uses one Bash tool rather than a curated command
   set. **There is no sandbox under it** - it runs as your own user on your own machine, with
