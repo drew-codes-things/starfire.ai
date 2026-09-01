@@ -1,4 +1,19 @@
+<div align="center">
+
 # starfire.ai
+
+**A terminal-themed local AI chat interface - runs local models through Ollama and optionally talks to hosted providers, with tool-calling, memory, documents, notes, automations, and email built in.**
+
+[![Python](https://img.shields.io/badge/python-3.12+-blue?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/fastapi-web-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Ollama](https://img.shields.io/badge/ollama-local%20models-000000?style=flat-square)](https://ollama.com/)
+[![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
+
+</div>
+
+---
+
+## Overview
 
 A terminal-themed AI chat interface. Runs local models through [Ollama](https://ollama.com)
 (auto-detected on startup - and started automatically if it's installed but not already
@@ -350,4 +365,4 @@ one-click backup/restore); deleting `data/.key` makes any stored keys unrecovera
 
 ## License
 
-MIT
+MIT - made by [Drew](https://github.com/drew-codes-things)
