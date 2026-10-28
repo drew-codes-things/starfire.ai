@@ -38,10 +38,15 @@ cd starfire.ai-main
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-uvicorn server:app --reload
+python server.py
 ```
 
 Then open [http://localhost:8080](http://localhost:8080).
+
+It listens on `127.0.0.1` only. There's no login, and the browser decides which tools a
+chat can use - including the shell tool - so anyone who can reach the port could run
+commands on this machine. Only set `BIND_HOST=0.0.0.0` (or publish the Docker port beyond
+loopback) behind your own authentication, e.g. a reverse proxy or Cloudflare Access.
 
 If Ollama is already running on its default port, it's detected automatically on startup
 and appears in the model list with no setup. Otherwise, open **Settings → Providers** and
@@ -285,7 +290,7 @@ If you don't want compose, build and run the image directly:
 
 ```bash
 docker build -t starfire.ai .
-docker run -d -p 8080:8080 -v $(pwd)/data:/app/data --add-host host.docker.internal:host-gateway starfire.ai
+docker run -d -p 127.0.0.1:8080:8080 -v $(pwd)/data:/app/data --add-host host.docker.internal:host-gateway starfire.ai
 ```
 
 To push the built image to a registry instead of just running it locally:

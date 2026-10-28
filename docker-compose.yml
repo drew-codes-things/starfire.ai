@@ -2,7 +2,8 @@ services:
   starfire:
     build: .
     ports:
-      - "${PORT:-8080}:8080"
+      # Published on loopback only - see BIND_HOST in .env.example before exposing it.
+      - "127.0.0.1:${PORT:-8080}:8080"
     environment:
       - PORT=8080
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-}
