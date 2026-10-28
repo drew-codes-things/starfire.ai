@@ -201,6 +201,15 @@ async def _iter_openai(client: httpx.AsyncClient, url: str, headers: dict, paylo
                 calls.append({"id": slot["id"] or f"call-{i}", "name": slot["name"], "arguments": args})
             yield ("tool_calls", calls)
 
+_HOSTED_PARAM_NAMES = {
+    "anthropic": {"temperature": "temperature", "top_p": "top_p", "top_k": "top_k"},
+    "openai": {"temperature": "temperature", "top_p": "top_p", "seed": "seed", "num_predict": "max_tokens"},
+}
+
+def _hosted_params(provider: str, options: dict | None) -> dict:
+    names = _HOSTED_PARAM_NAMES.get(provider, _HOSTED_PARAM_NAMES["openai"])
+    return {names[key]: value for key, value in (options or {}).items() if key in names and value is not None}
+
 async def stream_chat_once(base_url: str, api_key: str | None, model: str, messages: list[dict],
                             system: str | None, options: dict | None, tools: list[dict] | None = None):
     provider = _detect_provider(base_url)
@@ -222,8 +231,9 @@ async def stream_chat_once(base_url: str, api_key: str | None, model: str, messa
             elif provider == "anthropic":
                 payload = {
                     "model": model, "stream": True,
-                    "max_tokens": (options or {}).get("max_tokens", 4096),
+                    "max_tokens": (options or {}).get("num_predict") or (options or {}).get("max_tokens", 4096),
                     "messages": _to_anthropic_messages(messages),
+                    **_hosted_params("anthropic", options),
                     **({"system": system} if system else {}),
                     **({"tools": tools_param} if tools_param else {}),
                 }
@@ -233,6 +243,7 @@ async def stream_chat_once(base_url: str, api_key: str | None, model: str, messa
                 payload = {
                     "model": model, "stream": True,
                     "messages": _build_messages(messages, system),
+                    **_hosted_params("openai", options),
                     **({"tools": tools_param} if tools_param else {}),
                 }
                 async for item in _iter_openai(client, url, headers, payload):

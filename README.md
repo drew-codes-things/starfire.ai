@@ -59,15 +59,42 @@ Settings → Providers → "Add API provider": pick OpenAI, Anthropic, or "Other
 (OpenAI-compatible)", paste an API key, Test, then Add. The key is encrypted at rest - see
 below.
 
+## Interface
+
+The layout follows [Open WebUI](https://github.com/open-webui/open-webui) - sidebar of chats
+on the left, model picker at the top, a centred conversation and a rounded chat box at the
+bottom - in starfire's terminal look.
+
+- **Sidebar**: new chat, search (`tag:name` searches by tag), pinned chats, folders (drag a
+  chat onto one; "new chat here" from a folder's menu), and chats grouped by date. Each chat's
+  `···` menu has pin, rename, clone, tags, move to folder, download (.json/.md), archive and
+  delete. **archived** at the bottom lists archived chats.
+- **Model picker**: searchable; the star sets the default model. Presets show up under it as
+  workspace models. A chat reopens on the model it was last used with.
+- **Chat box**: `/` inserts a saved prompt, `#` attaches a Knowledge document, `@` sends the
+  next message to a different model. **+** uploads files (text files are attached inline; PDFs
+  are added to Knowledge and attached) and toggles tools - web search, deep research, image
+  generation and the rest - with the active ones shown as chips. Files can also be dropped or
+  pasted in. **mic** dictates; **call** is a hands-free voice conversation (browser speech
+  recognition and speech synthesis).
+- **controls**: system prompt plus temperature, top p, top k, max tokens, context length,
+  repeat penalty and seed. Ollama takes all of them; OpenAI-compatible APIs and Anthropic take
+  the ones they support.
+- **temporary**: a chat that is never saved to history.
+- **download**: the current chat as .json (re-importable), .md or .txt.
+- `Ctrl+Shift+O` new chat, `Ctrl+Shift+S` sidebar, `Ctrl+Shift+C` copy last reply,
+  `Ctrl+Shift+;` copy last code block, `Shift+Esc` focus the chat box, `Ctrl+K` command palette.
+
 ## Chat
 
-Every message has a small hover toolbar: **copy** (assistant replies, your own messages, and
-each individual code block), **edit**, and **regenerate**. Both edit and regenerate branch the
-conversation - rather than mutating history in place, they create a new chat session pointing
-back at the original up to that point, so you can follow either version afterward (see Chats
-below). A **stop** button appears while a reply is streaming. Every conversation autosaves as
-you go, and the history sent to the model is trimmed to a fixed token budget automatically -
-there's no per-chat context-size control to configure.
+Every reply has a toolbar: **edit** (in place), **copy**, **listen**, **info** (model, time,
+estimated size), **+1 / -1** rating, **continue** (extends the reply), **regenerate** (with any
+model) and **delete**. Your own messages have **edit**, **copy** and **delete**. Editing your
+message or regenerating branches the conversation - rather than mutating history in place,
+they create a new chat pointing back at the original up to that point (marked `↪` in the
+sidebar). A **stop** button appears while a reply is streaming. Every conversation autosaves
+as you go, and the history sent to the model is trimmed to the context length (8192 tokens
+unless set in controls).
 
 If a model likely doesn't support tool-calling (or is small enough - under ~3B parameters -
 to be unreliable about *when* to use a tool rather than just answering directly), a banner
@@ -76,10 +103,17 @@ model's requests either way.
 
 ## Chats
 
-Settings → Chats lists every saved conversation (autosaved after each exchange - nothing to
-click to save). Click one to reopen it; "new chat" in the header starts a fresh one. A
-conversation you haven't sent a message in yet is also kept as a local draft (browser
-`localStorage`) so a crash or an offline moment before the first backend save doesn't lose it.
+Chats are saved automatically after each exchange. Settings → Chats exports every chat as
+JSON, imports a starfire export or an Open WebUI chat export, archives all chats, lists tags,
+and has a delete-all (you type "delete all" to confirm). A conversation you haven't sent a
+message in yet is also kept as a local draft (browser `localStorage`) so a crash or an
+offline moment before the first backend save doesn't lose it.
+
+## Prompts
+
+Workspace → Prompts stores reusable prompts under a `/command`. Typing `/command` in the chat
+box inserts it, filling in `{{CURRENT_DATE}}`, `{{CURRENT_TIME}}`, `{{CURRENT_WEEKDAY}}` and
+`{{CLIPBOARD}}`.
 
 ## Tools (MCP servers)
 
@@ -218,7 +252,7 @@ Two more builtin tools in Settings → Tools:
 
 ## Presets
 
-Settings → Presets saves the current (model + system prompt + enabled tools) as a named preset
+Workspace → Models (presets) saves the current (model + system prompt + enabled tools) as a named preset
 you can reapply with one click, instead of reconfiguring the header and toggles every time.
 
 ## Usage
@@ -345,8 +379,12 @@ one-click backup/restore); deleting `data/.key` makes any stored keys unrecovera
   OpenAI-compatible server, over one unified streaming UI
 - Ollama auto-detected and auto-started on startup; one-click install guidance, manual add,
   or network-scan for anything else
+- Open WebUI-style layout: chat sidebar with folders, pins, tags, archive and date groups;
+  searchable model picker with a default model; `/` prompts, `#` knowledge, `@` model
+  mentions; file attachments; chat controls (system prompt + sampling params); temporary
+  chats; hands-free voice call; reply rating, info, continue and in-place edit
 - Conversation branching (edit/regenerate fork into a new session rather than overwriting
-  history), autosaved chats with search
+  history), autosaved chats with search, JSON export/import (including Open WebUI exports)
 - Encrypted local API-key storage, no plaintext secrets on disk
 - Tool-calling via MCP servers (filesystem, fetch, memory, a repository of common servers with
   per-server configure forms, or any custom stdio server), with a warning - and server-side
@@ -365,7 +403,7 @@ one-click backup/restore); deleting `data/.key` makes any stored keys unrecovera
   model-fit suggestions and one-click pulls with progress bars
 - Incremental markdown rendering while responses stream
 - Light/dark theme toggle
-- Optional system prompt (saved in browser), export chat as markdown
+- Optional system prompt (saved in browser), export chat as JSON, markdown or text
 - Runs 100% locally unless you opt in to a hosted provider - no telemetry, no accounts
 
 ## License

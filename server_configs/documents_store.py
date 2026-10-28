@@ -110,6 +110,24 @@ class DocumentStore:
         self._save_raw(data)
         return True
 
+    def full_text(self, document_id: str) -> tuple[str, str] | None:
+        data = self._load_raw()
+        doc = next((d for d in data["documents"] if d["id"] == document_id), None)
+        if not doc:
+            return None
+        chunks = sorted((c for c in data["chunks"] if c["document_id"] == document_id),
+                        key=lambda c: c["chunk_index"])
+        parts: list[str] = []
+        previous = ""
+        for chunk in chunks:
+            text = chunk["text"]
+            overlap = previous[-CHUNK_OVERLAP:].strip() if previous else ""
+            if overlap and text.startswith(overlap):
+                text = text[len(overlap):].lstrip()
+            parts.append(text)
+            previous = chunk["text"]
+        return doc["filename"], " ".join(p for p in parts if p)
+
     async def search(self, query: str, k: int = 5) -> list[dict]:
         data = self._load_raw()
         chunks = data["chunks"]

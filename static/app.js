@@ -26,7 +26,6 @@ const els = {
   dot:         $('dot'),
   statusText:  $('statusText'),
   sysPrompt:   $('sysPrompt'),
-  noModelsHint:$('noModelsHint'),
 };
 
 const settingsEls = {
@@ -47,8 +46,6 @@ const settingsEls = {
   addApiBtn:      $('addApiBtn'),
   apiTestResult:  $('apiTestResult'),
   endpointList:   $('endpointList'),
-  chatSessionList: $('chatSessionList'),
-  chatSearchInput: $('chatSearchInput'),
   lightModeToggle:$('lightModeToggle'),
   filesystemPath: $('filesystemPath'),
   browseDirBtn: $('browseDirBtn'),
@@ -237,14 +234,6 @@ function printLine(text, cls) {
   return div;
 }
 
-function printSep() {
-  const div       = document.createElement('div');
-  div.className   = 'line sep';
-  div.textContent = '-'.repeat(72);
-  els.output.appendChild(div);
-  els.output.scrollTop = els.output.scrollHeight;
-}
-
 function markdownRender(text) {
 
   if (window.marked && window.DOMPurify) return window.DOMPurify.sanitize(window.marked.parse(text));
@@ -252,12 +241,25 @@ function markdownRender(text) {
   return text.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 }
 
-function appendMessageRow(role, idx) {
+function appendMessageRow(role, idx, modelName, files) {
   const w = $('welcome');
   if (w) w.remove();
 
+  els.output.querySelectorAll('.line-row.last').forEach(r => r.classList.remove('last'));
   const row = document.createElement('div');
-  row.className = 'line-row';
+  row.className = 'line-row role-' + role + ' last' + (role === 'user' && !prefs.userBubbles ? ' no-bubble' : '');
+  if (role === 'ai') {
+    const head = document.createElement('div');
+    head.className = 'msg-head';
+    head.innerHTML = `<span class="msg-model">${escapeHtml(modelName || 'assistant')}</span>`;
+    row.appendChild(head);
+  }
+  if (files && files.length) {
+    const fileRow = document.createElement('div');
+    fileRow.className = 'msg-files';
+    fileRow.innerHTML = files.map(name => `<span class="chip"><span class="chip-label">${escapeHtml(name)}</span></span>`).join('');
+    row.appendChild(fileRow);
+  }
   const content = document.createElement('div');
   content.className = 'line ' + role;
   content.dataset.msgIndex = idx;
@@ -466,7 +468,7 @@ function renderGeneratedVideoCard(resultJson) {
 
 function startEdit(idx) {
   if (busy) return;
-  const original = messages[idx].content;
+  const original = messages[idx].display ?? messages[idx].content;
   const contentEl = els.output.querySelector(`[data-msg-index="${idx}"]`);
   if (!contentEl) return;
   contentEl.innerHTML = '';
@@ -521,36 +523,137 @@ async function forkSession(uptoIdx) {
   messages = forkedMessages;
 }
 
-function renderStaticMessage(role, text, idx) {
-  const { content, actions } = appendMessageRow(role, idx);
-  if (role === 'ai') {
-    content.innerHTML = markdownRender(text);
-    if (window.hljs) content.querySelectorAll('pre code').forEach(b => window.hljs.highlightElement(b));
-    addCodeBlockCopyButtons(content);
-  } else {
-    content.textContent = text;
+function renderAiContent(content, text) {
+  content.innerHTML = markdownRender(text);
+  if (window.hljs) content.querySelectorAll('pre code').forEach(b => window.hljs.highlightElement(b));
+  addCodeBlockCopyButtons(content);
+}
+
+function addActionButton(actions, label, title, onClick) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'line-action-btn';
+  btn.textContent = label;
+  btn.title = title;
+  btn.onclick = onClick;
+  actions.appendChild(btn);
+  return btn;
+}
+
+function addRatingButtons(actions, idx) {
+  const up = addActionButton(actions, '+1', 'Good response', () => rateMessage(idx, 1));
+  const down = addActionButton(actions, '-1', 'Bad response', () => rateMessage(idx, -1));
+  const rating = messages[idx] ? messages[idx].rating : 0;
+  up.classList.toggle('active', rating === 1);
+  down.classList.toggle('active', rating === -1);
+  down.classList.add('down');
+}
+
+function rateMessage(idx, value) {
+  if (!messages[idx] || busy) return;
+  messages[idx].rating = messages[idx].rating === value ? 0 : value;
+  rerenderAll();
+  persistSession();
+}
+
+function toggleMessageInfo(row, idx) {
+  const existing = row.querySelector('.msg-info');
+  if (existing) { existing.remove(); return; }
+  const m = messages[idx];
+  if (!m) return;
+  const info = document.createElement('div');
+  info.className = 'msg-info';
+  const approxTokens = Math.ceil((m.content || '').length / CHARS_PER_TOKEN_ESTIMATE);
+  info.textContent = [
+    m.model ? 'model: ' + m.model : '',
+    m.created ? new Date(m.created).toLocaleString() : '',
+    '~' + approxTokens + ' tokens (estimated)',
+  ].filter(Boolean).join(' · ');
+  row.appendChild(info);
+}
+
+function deleteMessage(idx) {
+  if (busy || !messages[idx]) return;
+  const count = messages[idx].role === 'user' && messages[idx + 1] && messages[idx + 1].role === 'assistant' ? 2 : 1;
+  messages.splice(idx, count);
+  rerenderAll();
+  persistSession();
+}
+
+function startEditReply(idx) {
+  if (busy) return;
+  const contentEl = els.output.querySelector(`[data-msg-index="${idx}"]`);
+  if (!contentEl) return;
+  contentEl.innerHTML = '';
+  const ta = document.createElement('textarea');
+  ta.className = 'edit-textarea';
+  ta.value = messages[idx].content;
+  contentEl.appendChild(ta);
+  const controls = document.createElement('div');
+  controls.className = 'edit-controls';
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'button'; saveBtn.className = 'btn send'; saveBtn.textContent = 'save';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button'; cancelBtn.className = 'btn ghost'; cancelBtn.textContent = 'cancel';
+  controls.append(saveBtn, cancelBtn);
+  contentEl.appendChild(controls);
+  ta.focus();
+  cancelBtn.onclick = () => rerenderAll();
+  saveBtn.onclick = () => {
+    messages[idx].content = ta.value;
+    rerenderAll();
+    persistSession();
+  };
+}
+
+function renderStaticMessage(role, msg, idx) {
+  const text = role === 'user' ? (msg.display ?? msg.content) : msg.content;
+  const { row, content, actions } = appendMessageRow(role, idx, msg.model, msg.files);
+  if (role === 'ai') renderAiContent(content, text);
+  else content.textContent = text;
+  addActionButtons(role, row, actions, idx);
+}
+
+function addActionButtons(role, row, actions, idx) {
+  if (role === 'user') {
+    addEditButton(actions, idx);
+    addCopyButton(actions, () => messages[idx] ? (messages[idx].display ?? messages[idx].content) : '');
+    addActionButton(actions, 'delete', 'Delete this message and its reply', () => deleteMessage(idx));
+    return;
   }
-  addCopyButton(actions, () => messages[idx] ? messages[idx].content : text);
-  if (role === 'user') addEditButton(actions, idx);
-  if (role === 'ai') {
-    addListenButton(actions, () => messages[idx] ? messages[idx].content : text);
-    addRegenerateButton(actions, idx);
-  }
+  addActionButton(actions, 'edit', 'Edit this reply', () => startEditReply(idx));
+  addCopyButton(actions, () => messages[idx] ? messages[idx].content : '');
+  addListenButton(actions, () => messages[idx] ? messages[idx].content : '');
+  addActionButton(actions, 'info', 'Model, time and size', () => toggleMessageInfo(row, idx));
+  addRatingButtons(actions, idx);
+  addActionButton(actions, 'continue', 'Continue this reply', () => continueResponse(idx));
+  addRegenerateButton(actions, idx);
+  addActionButton(actions, 'delete', 'Delete this reply', () => deleteMessage(idx));
 }
 
 function rerenderAll() {
   els.output.innerHTML = '';
   messages.forEach((m, idx) => {
-    if (m.role === 'user') renderStaticMessage('user', m.content, idx);
-    else if (m.role === 'assistant') renderStaticMessage('ai', m.content, idx);
+    if (m.role === 'user') renderStaticMessage('user', m, idx);
+    else if (m.role === 'assistant') renderStaticMessage('ai', m, idx);
   });
-  if (!messages.length) {
-    els.output.innerHTML =
-      '<div class="welcome" id="welcome">' +
-      '<div class="welcome-brand">starfire<span class="dim">.ai</span></div>' +
-      '<p class="info-line">// local-first AI chat</p>' +
-      '</div>';
-  }
+  if (!messages.length) renderWelcome();
+}
+
+function renderWelcome() {
+  const model = currentModel();
+  const modelLine = models.length
+    ? `<p class="welcome-model">${escapeHtml(model ? model.id : '')}</p>` +
+      '<p class="info-line">// local-first AI chat · how can I help?</p>'
+    : '<p class="info-line">// no models yet - open settings → connections to add Ollama or an API provider</p>';
+  els.output.innerHTML =
+    '<div class="welcome" id="welcome">' +
+    '<img src="assets/logo.svg" alt="" class="welcome-logo" />' +
+    '<div class="welcome-brand">starfire<span class="dim">.ai</span></div>' +
+    modelLine +
+    '<div class="suggestions" id="suggestions"></div>' +
+    '</div>';
+  if (window.renderSuggestions) window.renderSuggestions($('suggestions'));
 }
 
 function saveDraft() {
@@ -558,6 +661,7 @@ function saveDraft() {
 }
 
 async function persistSession() {
+  if (isTemporaryChat()) return;
   const model = currentModel();
   const isNewSession = !currentSessionId;
   try {
@@ -570,15 +674,20 @@ async function persistSession() {
       const session = await r.json();
       currentSessionId = session.id;
       try { localStorage.setItem('sf_current_session', currentSessionId); } catch (_) {}
+      onChatChanged();
     }
+    const folderId = isNewSession ? takePendingFolderId() : '';
     await fetch('/api/chat/sessions/' + currentSessionId, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages, endpoint_id: model ? model.endpoint_id : '', model: model ? model.id : '' }),
+      body: JSON.stringify({
+        messages, endpoint_id: model ? model.endpoint_id : '', model: model ? model.id : '',
+        ...(folderId ? { folder_id: folderId } : {}),
+      }),
     });
     try { localStorage.removeItem('sf_draft_messages'); } catch (_) {}
-    if (!settingsEls.modal.hidden) refreshSessionList();
+    refreshSidebar();
 
-    if (isNewSession && model && messages.length >= 2) generateSessionTitle(currentSessionId, model);
+    if (isNewSession && model && messages.length >= 2 && prefs.autoTitle) generateSessionTitle(currentSessionId, model);
   } catch (_) {
 
   }
@@ -591,7 +700,9 @@ async function restoreSession() {
       if (r.ok) {
         const session = await r.json();
         messages = session.messages || [];
+        selectModel(session.endpoint_id, session.model);
         rerenderAll();
+        onChatChanged();
         return;
       }
     } catch (_) {}
@@ -637,15 +748,17 @@ async function loadModels() {
       els.modelList.appendChild(opt);
     }
 
+    selectDefaultModel();
+    renderModelPicker();
+    if (!messages.length) renderWelcome();
+
     if (!models.length) {
       setStatus('error', 'no models configured');
-      if (els.noModelsHint) els.noModelsHint.style.display = '';
       els.input.disabled   = true;
       els.sendBtn.disabled = true;
       return;
     }
 
-    if (els.noModelsHint) els.noModelsHint.style.display = 'none';
     setStatus('ready', els.modelList.value);
     warmModel(currentModel());
     els.input.disabled   = false;
@@ -657,7 +770,11 @@ async function loadModels() {
   }
 }
 
-async function send(text, overrideModel) {
+function apiMessages(list) {
+  return list.map(m => ({ role: m.role, content: m.content }));
+}
+
+async function send(text, overrideModel, extra = {}) {
   if (busy) return;
   const model = overrideModel || currentModel();
   if (!model) return;
@@ -669,15 +786,17 @@ async function send(text, overrideModel) {
   abortController       = new AbortController();
 
   const userIdx = messages.length;
-  messages.push({ role: 'user', content: text });
-  const userRow = appendMessageRow('user', userIdx);
+  const userMessage = { role: 'user', content: extra.content || text, created: new Date().toISOString() };
+  if (extra.content) Object.assign(userMessage, { display: text, files: extra.files || [] });
+  messages.push(userMessage);
+  const userRow = appendMessageRow('user', userIdx, null, userMessage.files);
   userRow.content.textContent = text;
-  addCopyButton(userRow.actions, () => messages[userIdx] ? messages[userIdx].content : text);
-  addEditButton(userRow.actions, userIdx);
+  addActionButtons('user', userRow.row, userRow.actions, userIdx);
   saveDraft();
 
   let aiLine = null;
   let aiActions = null;
+  let aiRow = null;
   let renderer = null;
   let gotToken = false;
   const aiIdx = messages.length;
@@ -693,8 +812,9 @@ async function send(text, overrideModel) {
       body:    JSON.stringify({
         endpoint_id: model.endpoint_id,
         model:       model.id,
-        messages:    messages.slice(),
+        messages:    apiMessages(messages),
         system:      els.sysPrompt.value.trim() || undefined,
+        options:     chatOptions(),
         enabled_mcp_servers: [...enabledMcpServers],
         enabled_builtin_tools: [...enabledBuiltinTools],
         require_edit_approval: requireEditApproval,
@@ -726,8 +846,8 @@ async function send(text, overrideModel) {
           if (obj.delta) {
             if (!gotToken) { gotToken = true; setStatus('ready', model.id); }
             if (!aiLine) {
-              const created = appendMessageRow('ai', aiIdx);
-              aiLine = created.content; aiActions = created.actions;
+              const created = appendMessageRow('ai', aiIdx, model.id);
+              aiLine = created.content; aiActions = created.actions; aiRow = created.row;
               aiLine.classList.add('streaming');
               renderer = createStreamRenderer(aiLine, { render: markdownRender });
             }
@@ -763,14 +883,11 @@ async function send(text, overrideModel) {
     setStatus('ready', model.id);
     const fullText = renderer ? renderer.text() : '';
     if (fullText) {
-      messages.push({ role: 'assistant', content: fullText });
-      if (aiActions) {
-        addCopyButton(aiActions, () => messages[aiIdx] ? messages[aiIdx].content : fullText);
-        addListenButton(aiActions, () => messages[aiIdx] ? messages[aiIdx].content : fullText);
-        addRegenerateButton(aiActions, aiIdx);
-      }
+      messages.push({ role: 'assistant', content: fullText, model: model.id, created: new Date().toISOString() });
+      if (aiActions) addActionButtons('ai', aiRow, aiActions, aiIdx);
+      if (callModeActive()) speakThenListen(fullText);
+      else if (prefs.autoSpeak) speakText(fullText);
     }
-    printSep();
     persistSession();
   } catch (e) {
     const aborted = e.name === 'AbortError';
@@ -780,11 +897,8 @@ async function send(text, overrideModel) {
       addCodeBlockCopyButtons(aiLine);
       const fullText = renderer.text();
       if (fullText) {
-        messages.push({ role: 'assistant', content: fullText });
-        if (aiActions) {
-          addCopyButton(aiActions, () => messages[aiIdx] ? messages[aiIdx].content : fullText);
-          addRegenerateButton(aiActions, aiIdx);
-        }
+        messages.push({ role: 'assistant', content: fullText, model: model.id, created: new Date().toISOString() });
+        if (aiActions) addActionButtons('ai', aiRow, aiActions, aiIdx);
       }
     } else if (!aborted) {
       messages.splice(userIdx, 1);
@@ -810,13 +924,87 @@ async function send(text, overrideModel) {
   }
 }
 
-function exportChat() {
-  if (!messages.length) return;
-  const text = messages.map(m => '### ' + m.role + '\n\n' + m.content).join('\n\n---\n\n');
-  const url  = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
-  const a    = Object.assign(document.createElement('a'), { href: url, download: 'starfire-' + Date.now() + '.md' });
+const CONTINUE_INSTRUCTION = 'Continue your previous reply exactly where it stopped. Do not repeat anything or add a preamble.';
+const CHARS_PER_TOKEN_ESTIMATE = 4;
+const COMPOSER_MAX_HEIGHT_PX = 240;
+
+async function continueResponse(idx) {
+  const target = messages[idx];
+  const model = currentModel();
+  if (busy || !target || target.role !== 'assistant' || !model) return;
+  const contentEl = els.output.querySelector(`[data-msg-index="${idx}"]`);
+  if (!contentEl) return;
+
+  busy = true;
+  els.sendBtn.disabled = true;
+  els.stopBtn.hidden = false;
+  abortController = new AbortController();
+  contentEl.classList.add('streaming');
+  setStatus('loading', 'continuing...');
+  let streamError = null;
+  const separator = /\s$/.test(target.content) ? '' : ' ';
+  let added = '';
+  try {
+    const r = await fetch('/api/chat_stream', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      signal: abortController.signal,
+      body: JSON.stringify({
+        endpoint_id: model.endpoint_id, model: model.id,
+        messages: [...apiMessages(messages.slice(0, idx + 1)), { role: 'user', content: CONTINUE_INSTRUCTION }],
+        system: els.sysPrompt.value.trim() || undefined,
+        options: chatOptions(),
+      }),
+    });
+    if (!r.ok) {
+      const { detail } = await r.json().catch(() => ({}));
+      throw new Error(detail || 'server error ' + r.status);
+    }
+    await readProgressStream(r, obj => {
+      if (obj.error) { streamError = obj.error; return; }
+      if (!obj.delta) return;
+      added += obj.delta;
+      contentEl.innerHTML = markdownRender(target.content + separator + added);
+    });
+    if (streamError) throw new Error(streamError);
+    setStatus('ready', model.id);
+  } catch (e) {
+    if (e.name !== 'AbortError') {
+      setStatus('error', 'error');
+      printLine('error: ' + e.message, 'err');
+    } else {
+      setStatus('ready', model.id);
+    }
+  } finally {
+    if (added) target.content += separator + added;
+    busy = false;
+    abortController = null;
+    els.sendBtn.disabled = false;
+    els.stopBtn.hidden = true;
+    rerenderAll();
+    persistSession();
+  }
+}
+
+function downloadText(filename, text, type) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a   = Object.assign(document.createElement('a'), { href: url, download: filename });
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 100);
+}
+
+function exportChat(format = 'md') {
+  if (!messages.length) return;
+  const base = 'starfire-' + Date.now();
+  if (format === 'json') {
+    const model = currentModel();
+    const chat = { title: currentChatTitle(), messages, model: model ? model.id : '' };
+    downloadText(base + '.json', JSON.stringify([chat], null, 2), 'application/json');
+    return;
+  }
+  const separator = format === 'md' ? '\n\n---\n\n' : '\n\n';
+  const heading = m => format === 'md' ? '### ' + m.role : m.role.toUpperCase() + ':';
+  const text = messages.map(m => heading(m) + '\n\n' + (m.display ?? m.content)).join(separator);
+  downloadText(base + '.' + format, text, 'text/plain');
 }
 
 function clearChat() {
@@ -827,13 +1015,15 @@ function clearChat() {
     localStorage.removeItem('sf_draft_messages');
   } catch (_) {}
   rerenderAll();
+  onChatChanged();
 }
 
 els.stopBtn.onclick = () => { if (abortController) abortController.abort(); };
 
 els.modelList.addEventListener('change', () => {
-  clearChat();
   warmModel(currentModel());
+  renderModelPicker();
+  if (!messages.length) renderWelcome();
   setStatus('ready', els.modelList.value);
   checkModelToolCapability();
 });
@@ -860,25 +1050,27 @@ async function checkModelToolCapability() {
   }
 }
 
-els.exportBtn.onclick = exportChat;
 els.clearBtn.onclick  = clearChat;
 
 els.form.addEventListener('submit', e => {
   e.preventDefault();
   const t = els.input.value.trim();
-  if (t) send(t);
+  if (!t || busy) return;
+  const { overrideModel, extra } = takeComposerExtras(t);
+  send(t, overrideModel, extra);
 });
 
 els.input.addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    els.form.requestSubmit();
-  }
+  if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return;
+  const wantsSend = prefs.ctrlEnterSends ? (e.ctrlKey || e.metaKey) : !(e.ctrlKey || e.metaKey);
+  if (!wantsSend) return;
+  e.preventDefault();
+  els.form.requestSubmit();
 });
 
 els.input.addEventListener('input', () => {
   els.input.style.height = 'auto';
-  els.input.style.height = Math.min(els.input.scrollHeight, 140) + 'px';
+  els.input.style.height = Math.min(els.input.scrollHeight, COMPOSER_MAX_HEIGHT_PX) + 'px';
 });
 
 try { els.sysPrompt.value = localStorage.getItem('sf_sys') || ''; } catch (_) {}
@@ -886,9 +1078,12 @@ els.sysPrompt.addEventListener('input', () => {
   try { localStorage.setItem('sf_sys', els.sysPrompt.value); } catch (_) {}
 });
 
-function openSettings() {
+function openSettings(tabName) {
   settingsEls.modal.hidden = false;
-  refreshSessionList();
+  if (tabName) {
+    const tab = [...settingsEls.tabs].find(t => t.dataset.tab === tabName);
+    if (tab) tab.click();
+  }
   refreshEndpointList();
   refreshMcpServerList();
   refreshMcpRepository();
@@ -907,13 +1102,15 @@ function openSettings() {
   refreshHardware();
   refreshOllamaStatus();
   refreshLocalGen();
+  refreshChatManagement();
+  refreshPromptList();
 }
 function closeSettings() {
   settingsEls.modal.hidden = true;
   stopNoteReminderTimer();
 }
 
-els.settingsBtn.onclick        = openSettings;
+els.settingsBtn.onclick        = () => openSettings();
 settingsEls.closeBtn.onclick   = closeSettings;
 settingsEls.modal.addEventListener('click', e => {
   if (e.target === settingsEls.modal) closeSettings();
@@ -1409,54 +1606,6 @@ settingsEls.toggleRunShell.addEventListener('change', () => {
   saveEnabledBuiltinTools();
 });
 
-async function refreshSessionList() {
-  const q = settingsEls.chatSearchInput ? settingsEls.chatSearchInput.value.trim() : '';
-  try {
-    const url = '/api/chat/sessions' + (q ? '?q=' + encodeURIComponent(q) : '');
-    const r = await fetch(url);
-    const { sessions = [] } = await r.json();
-    settingsEls.chatSessionList.innerHTML = '';
-    if (!sessions.length) {
-      settingsEls.chatSessionList.innerHTML = `<li class="settings-hint">${q ? 'no matching chats' : 'no saved chats yet'}</li>`;
-      return;
-    }
-    const byId = Object.fromEntries(sessions.map(s => [s.id, s]));
-    for (const s of sessions) {
-      const li = document.createElement('li');
-      li.className = 'endpoint-row' + (s.id === currentSessionId ? ' active-session' : '');
-      const pinIcon = s.pinned ? '📌 ' : '';
-      const parent = s.parent_session_id ? byId[s.parent_session_id] : null;
-      const branchLine = parent
-        ? `<button class="btn ghost branch-link" data-act="parent">&#8618; forked from "${escapeHtml(parent.title || '(untitled)')}"</button>`
-        : '';
-      li.innerHTML =
-        `<span class="endpoint-label">${pinIcon}${escapeHtml(s.title || '(untitled)')}</span>` +
-        `<span class="endpoint-meta">${s.message_count} msg &middot; ${new Date(s.updated).toLocaleString()}</span>` +
-        branchLine +
-        `<button class="btn ghost" data-act="pin">${s.pinned ? 'unpin' : 'pin'}</button>` +
-        `<button class="btn ghost" data-act="open">open</button>` +
-        `<button class="endpoint-remove" title="Remove">×</button>`;
-      if (parent) li.querySelector('[data-act="parent"]').onclick = () => openSession(parent.id);
-      li.querySelector('[data-act="pin"]').onclick = async () => {
-        await fetch('/api/chat/sessions/' + s.id, {
-          method: 'PUT', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pinned: !s.pinned }),
-        });
-        await refreshSessionList();
-      };
-      li.querySelector('[data-act="open"]').onclick = () => openSession(s.id);
-      li.querySelector('.endpoint-remove').onclick = async () => {
-        await fetch('/api/chat/sessions/' + s.id, { method: 'DELETE' });
-        if (currentSessionId === s.id) clearChat();
-        await refreshSessionList();
-      };
-      settingsEls.chatSessionList.appendChild(li);
-    }
-  } catch (_) {
-    settingsEls.chatSessionList.innerHTML = '<li class="settings-hint error">failed to load chats</li>';
-  }
-}
-
 async function openSession(id) {
   if (busy) return;
   try {
@@ -1466,9 +1615,13 @@ async function openSession(id) {
     currentSessionId = id;
     try { localStorage.setItem('sf_current_session', id); } catch (_) {}
     messages = session.messages || [];
+    selectModel(session.endpoint_id, session.model);
     rerenderAll();
     closeSettings();
-  } catch (_) {}
+    onChatChanged();
+  } catch (e) {
+    printLine('error: could not open chat - ' + e.message, 'err');
+  }
 }
 
 let memoryCategoryFilter = '';
@@ -2861,7 +3014,13 @@ let paletteActiveIndex = 0;
 function buildPaletteActions() {
   paletteActions = [
     { label: 'New chat', run: clearChat },
-    { label: 'Export chat as markdown', run: exportChat },
+    { label: 'Export chat as markdown', run: () => exportChat('md') },
+    { label: 'Export chat as JSON', run: () => exportChat('json') },
+    { label: 'Toggle sidebar', run: toggleSidebar },
+    { label: 'Toggle chat controls', run: toggleControls },
+    { label: 'Toggle temporary chat', run: () => $('tempChatToggle').click() },
+    { label: 'Archived chats', run: openArchived },
+    { label: 'New folder', run: createFolder },
     { label: 'Open settings', run: openSettings },
     { label: 'Compare models', run: openCompare },
     { label: 'Toggle light/dark theme', run: () => settingsEls.lightModeToggle.click() },
@@ -3000,14 +3159,6 @@ async function pullModel(name, btn, statusEl, progressEl) {
   }
 }
 
-if (settingsEls.chatSearchInput) {
-  let searchDebounce = null;
-  settingsEls.chatSearchInput.addEventListener('input', () => {
-    clearTimeout(searchDebounce);
-    searchDebounce = setTimeout(() => refreshSessionList(), 250);
-  });
-}
-
 async function generateSessionTitle(sessionId, model) {
   try {
     const convo = messages.slice(0, 2).map(m => `${m.role}: ${m.content}`).join('\n').slice(0, 2000);
@@ -3026,7 +3177,7 @@ async function generateSessionTitle(sessionId, model) {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title }),
     });
-    if (sessionId === currentSessionId && !settingsEls.modal.hidden) refreshSessionList();
+    refreshSidebar();
   } catch (_) {
   }
 }

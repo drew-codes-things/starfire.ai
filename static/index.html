@@ -14,92 +14,183 @@
 <body>
   <div class="bg-grid" aria-hidden="true"></div>
 
-  <header class="topbar">
-    <a href="https://drew-gnr.xyz" class="topbar-link" aria-label="Drew's Realm">
-      <img src="assets/logo.svg" alt="Logo" class="topbar-logo">
-    </a>
-    <span class="topbar-title">starfire.ai</span>
-  </header>
+  <div class="app" id="app">
 
-  <div class="page-content">
-  <div class="terminal">
-
-    <div class="titlebar">
-      <span class="brand">starfire.ai</span>
-      <div class="status">
-        <span class="dot" id="dot"></span>
-        <span id="statusText">connecting…</span>
+    <aside class="sidebar" id="sidebar" aria-label="Chats">
+      <div class="sidebar-head">
+        <a href="https://drew-gnr.xyz" class="topbar-link" aria-label="Drew's Realm">
+          <img src="assets/logo.svg" alt="Logo" class="topbar-logo">
+        </a>
+        <span class="topbar-title">starfire.ai</span>
+        <button class="icon-btn" id="sidebarCloseBtn" type="button" title="Close sidebar (ctrl+shift+s)" aria-label="Close sidebar">&laquo;</button>
       </div>
-    </div>
 
-    <div class="toolbar">
-      <select id="modelList"></select>
-      <div class="spacer"></div>
-      <button class="btn ghost" id="compareBtn" title="Compare models side by side">compare</button>
-      <button class="btn ghost" id="settingsBtn" title="Providers &amp; appearance">settings</button>
-      <button class="btn ghost" id="exportBtn">export</button>
-      <button class="btn ghost" id="clearBtn" title="Start a new saved conversation">new chat</button>
-    </div>
+      <button class="btn new-chat-btn" id="newChatBtn" type="button" title="New chat (ctrl+shift+o)">+ new chat</button>
 
-    <div class="capability-warning" id="capabilityWarning" hidden></div>
-
-    <div class="output" id="output">
-      <div class="welcome" id="welcome">
-        <div class="welcome-brand">starfire<span class="dim">.ai</span></div>
-        <p class="info-line">// local-first AI chat</p>
-        <p class="info-line">// Ollama runs on your machine, nothing leaves it</p>
-        <p class="info-line">// hosted providers (OpenAI, Anthropic, ...) opt in via settings</p>
-        <br />
-        <p class="info-line" id="noModelsHint">// no models yet - open settings to add Ollama or an API provider</p>
-        <br />
-        <p class="info-line">&#x2192; select a model above and start typing</p>
+      <div class="sidebar-search">
+        <input id="sidebarSearch" type="search" placeholder="search chats… (tag:name)" autocomplete="off" spellcheck="false" />
       </div>
-    </div>
 
-    <div class="sysbar">
-      <span class="label">sys&gt;</span>
-      <input id="sysPrompt" type="text" placeholder="optional system prompt…" autocomplete="off" spellcheck="false" />
-    </div>
+      <nav class="sidebar-nav" aria-label="Workspace">
+        <button class="sidebar-link" type="button" data-open-tab="presets">&#9656; workspace</button>
+        <button class="sidebar-link" type="button" data-open-tab="notes">&#9656; notes</button>
+      </nav>
 
-    <form class="inputbar" id="form">
-      <span class="prompt-glyph">&gt;</span>
-      <textarea id="msgInput" rows="1" placeholder="type a message… (enter to send)" disabled spellcheck="false"></textarea>
-      <button class="btn ghost" type="button" id="micBtn" title="Voice input" hidden>&#127908;</button>
-      <button class="btn ghost" type="button" id="stopBtn" hidden>stop</button>
-      <button class="btn send" type="submit" id="sendBtn" disabled>send</button>
-    </form>
+      <div class="sidebar-scroll" id="sidebarScroll">
+        <section class="sidebar-section" id="pinnedSection" hidden>
+          <h4 class="sidebar-heading">// pinned</h4>
+          <ul class="chat-list" id="pinnedList"></ul>
+        </section>
+        <section class="sidebar-section">
+          <h4 class="sidebar-heading">// folders <button class="icon-btn small" id="newFolderBtn" type="button" title="New folder" aria-label="New folder">+</button></h4>
+          <ul class="folder-list" id="folderList"></ul>
+        </section>
+        <div id="chatGroups"></div>
+      </div>
 
-  </div>
+      <div class="sidebar-foot">
+        <div class="status">
+          <span class="dot" id="dot"></span>
+          <span id="statusText">connecting…</span>
+        </div>
+        <div class="sidebar-foot-actions">
+          <button class="btn ghost" id="archivedBtn" type="button">archived</button>
+          <button class="btn ghost" id="settingsBtn" type="button" title="Settings">settings</button>
+        </div>
+      </div>
+    </aside>
+    <div class="sidebar-scrim" id="sidebarScrim" hidden></div>
+
+    <main class="main">
+      <header class="chat-header">
+        <button class="icon-btn" id="sidebarOpenBtn" type="button" title="Open sidebar (ctrl+shift+s)" aria-label="Open sidebar">&equiv;</button>
+
+        <div class="model-picker" id="modelPicker">
+          <button class="model-picker-btn" id="modelPickerBtn" type="button" aria-haspopup="listbox" aria-expanded="false">
+            <span id="modelPickerLabel">select a model</span> <span class="caret">&#9662;</span>
+          </button>
+          <div class="model-menu" id="modelMenu" hidden>
+            <input id="modelSearch" type="search" placeholder="search models…" autocomplete="off" spellcheck="false" />
+            <ul id="modelMenuList" role="listbox" aria-label="Models"></ul>
+          </div>
+          <select id="modelList" hidden aria-hidden="true"></select>
+        </div>
+        <button class="icon-btn" id="setDefaultModelBtn" type="button" title="Set as default model" aria-label="Set as default model">&#9734;</button>
+
+        <div class="spacer"></div>
+
+        <label class="temp-toggle" title="Temporary chat: not saved to history">
+          <input type="checkbox" id="tempChatToggle" />
+          <span>temporary</span>
+        </label>
+        <button class="btn ghost hide-narrow" id="compareBtn" type="button" title="Compare models side by side">compare</button>
+        <div class="menu-wrap">
+          <button class="btn ghost hide-narrow" id="exportBtn" type="button" aria-haspopup="menu">download</button>
+          <div class="menu" id="exportMenu" role="menu" hidden>
+            <button type="button" role="menuitem" data-format="json">export chat (.json)</button>
+            <button type="button" role="menuitem" data-format="md">plain text (.md)</button>
+            <button type="button" role="menuitem" data-format="txt">plain text (.txt)</button>
+          </div>
+        </div>
+        <button class="btn ghost" id="controlsBtn" type="button" title="Chat controls: system prompt &amp; parameters">controls</button>
+        <button class="btn ghost hide-narrow" id="clearBtn" type="button" title="New chat (ctrl+shift+o)">new chat</button>
+      </header>
+
+      <div class="capability-warning" id="capabilityWarning" hidden></div>
+      <div class="temp-banner" id="tempBanner" hidden>// temporary chat - nothing here is saved to history</div>
+
+      <div class="chat-area">
+        <div class="output" id="output">
+          <div class="welcome" id="welcome">
+            <div class="welcome-brand">starfire<span class="dim">.ai</span></div>
+            <p class="info-line">// local-first AI chat</p>
+          </div>
+        </div>
+        <button class="scroll-bottom" id="scrollBottomBtn" type="button" title="Scroll to the newest message" aria-label="Scroll to bottom" hidden>&darr;</button>
+
+        <div class="composer-wrap">
+          <div class="composer-popup" id="composerPopup" hidden>
+            <div class="composer-popup-title" id="composerPopupTitle"></div>
+            <ul id="composerPopupList" role="listbox"></ul>
+          </div>
+          <form class="composer" id="form">
+            <div class="attach-chips" id="attachChips"></div>
+            <textarea id="msgInput" rows="1" placeholder="send a message…" disabled spellcheck="false"></textarea>
+            <div class="composer-row">
+              <div class="menu-wrap">
+                <button class="icon-btn" type="button" id="plusBtn" title="Attach files &amp; tools" aria-label="Attach files and tools" aria-haspopup="menu">+</button>
+                <div class="menu up" id="plusMenu" role="menu" hidden>
+                  <button type="button" role="menuitem" data-act="upload">upload files</button>
+                  <button type="button" role="menuitem" data-act="knowledge">attach knowledge (#)</button>
+                  <button type="button" role="menuitem" data-act="prompts">insert a prompt (/)</button>
+                  <div class="menu-heading">// tools</div>
+                  <div id="plusMenuTools"></div>
+                  <button type="button" role="menuitem" data-act="tool-settings">more tool settings…</button>
+                </div>
+                <input type="file" id="attachFileInput" multiple hidden />
+              </div>
+              <div class="active-tools" id="activeTools"></div>
+              <div class="spacer"></div>
+              <button class="icon-btn" type="button" id="micBtn" title="Voice input" aria-label="Voice input" hidden>mic</button>
+              <button class="icon-btn" type="button" id="callBtn" title="Voice call: talk, hear the reply, repeat" aria-label="Voice call" hidden>call</button>
+              <button class="btn ghost" type="button" id="stopBtn" hidden>stop</button>
+              <button class="btn send" type="submit" id="sendBtn" disabled>send</button>
+            </div>
+          </form>
+          <p class="composer-hint">// enter send &middot; shift+enter newline &middot; / prompts &middot; # knowledge &middot; @ model</p>
+        </div>
+      </div>
+    </main>
+
+    <aside class="controls-panel" id="controlsPanel" aria-label="Chat controls" hidden>
+      <div class="controls-head">
+        <span>// chat controls</span>
+        <button class="icon-btn" id="controlsCloseBtn" type="button" aria-label="Close chat controls">&times;</button>
+      </div>
+      <div class="controls-body">
+        <label class="controls-label" for="sysPrompt">system prompt</label>
+        <textarea id="sysPrompt" class="settings-textarea" rows="5" placeholder="optional system prompt…" spellcheck="false"></textarea>
+
+        <div class="controls-label">// advanced params</div>
+        <p class="settings-hint">Blank = the model's default. Ollama takes all of these; hosted APIs take the ones they support.</p>
+        <div class="param-grid" id="paramGrid"></div>
+        <button class="btn ghost" id="resetParamsBtn" type="button">reset params</button>
+      </div>
+    </aside>
   </div>
 
   <div class="modal-overlay" id="settingsModal" hidden>
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
       <div class="modal-header">
-        <span id="settingsTitle">settings</span>
+        <span id="settingsTitle">// settings</span>
         <button class="btn ghost modal-close" id="settingsCloseBtn" aria-label="Close settings">×</button>
       </div>
       <div class="settings-layout">
         <nav class="settings-sidebar">
-          <button class="settings-tab active" data-tab="providers">Providers</button>
-          <button class="settings-tab" data-tab="chats">Chats</button>
+          <div class="settings-group">// workspace</div>
+          <button class="settings-tab" data-tab="presets">Models</button>
+          <button class="settings-tab" data-tab="documents">Knowledge</button>
+          <button class="settings-tab" data-tab="prompts">Prompts</button>
           <button class="settings-tab" data-tab="tools">Tools</button>
+          <div class="settings-group">// personal</div>
           <button class="settings-tab" data-tab="memory">Memory</button>
-          <button class="settings-tab" data-tab="documents">Documents</button>
           <button class="settings-tab" data-tab="notes">Notes</button>
           <button class="settings-tab" data-tab="automations">Automations</button>
           <button class="settings-tab" data-tab="email">Email</button>
-          <button class="settings-tab" data-tab="presets">Presets</button>
+          <div class="settings-group">// settings</div>
+          <button class="settings-tab" data-tab="appearance">Interface</button>
+          <button class="settings-tab active" data-tab="providers">Connections</button>
+          <button class="settings-tab" data-tab="localgen">Audio &amp; Images</button>
+          <button class="settings-tab" data-tab="chats">Chats</button>
           <button class="settings-tab" data-tab="usage">Usage</button>
           <button class="settings-tab" data-tab="hardware">Hardware</button>
-          <button class="settings-tab" data-tab="localgen">Local Gen</button>
           <button class="settings-tab" data-tab="data">Data</button>
-          <button class="settings-tab" data-tab="appearance">Appearance</button>
         </nav>
         <div class="settings-panels">
 
           <div class="settings-panel" data-panel="providers">
             <div class="settings-card">
-              <h3>Add local (Ollama, LM Studio, llama.cpp, vLLM)</h3>
+              <h3>// Add local (Ollama, LM Studio, llama.cpp, vLLM)</h3>
               <div class="settings-row">
                 <input id="localBaseUrl" type="text" placeholder="http://localhost:11434" autocomplete="off" spellcheck="false" />
                 <button class="btn ghost" id="addOllamaBtn" title="Fill the default Ollama endpoint">add ollama</button>
@@ -113,7 +204,7 @@
             </div>
 
             <div class="settings-card">
-              <h3>Add API provider</h3>
+              <h3>// Add API provider</h3>
               <div class="settings-row">
                 <select id="apiProviderSelect">
                   <option value="openai" data-url="https://api.openai.com/v1">OpenAI</option>
@@ -135,25 +226,50 @@
             </div>
 
             <div class="settings-card">
-              <h3>Configured endpoints</h3>
+              <h3>// Configured endpoints</h3>
               <ul class="endpoint-list" id="endpointList"></ul>
             </div>
           </div>
 
           <div class="settings-panel" data-panel="chats" hidden>
             <div class="settings-card">
-              <h3>Saved conversations</h3>
-              <p class="settings-hint">Every conversation is saved automatically as you chat. Click one to reopen it.</p>
+              <h3>// import &amp; export</h3>
+              <p class="settings-hint">Exports every chat (archived ones too) as JSON. Import takes a starfire export or an Open WebUI chat export.</p>
               <div class="settings-row">
-                <input id="chatSearchInput" type="text" placeholder="search titles and messages…" autocomplete="off" spellcheck="false" />
+                <button class="btn ghost" id="exportAllChatsBtn" type="button">export all chats</button>
               </div>
-              <ul class="endpoint-list" id="chatSessionList"></ul>
+              <div class="settings-row">
+                <input id="importChatsFile" type="file" accept=".json,application/json" />
+                <button class="btn send" id="importChatsBtn" type="button">import</button>
+              </div>
+              <p class="settings-hint" id="importChatsResult"></p>
+            </div>
+            <div class="settings-card">
+              <h3>// archive</h3>
+              <div class="settings-row">
+                <button class="btn ghost" id="openArchivedBtn" type="button">view archived chats</button>
+                <button class="btn ghost" id="archiveAllChatsBtn" type="button">archive all chats</button>
+              </div>
+              <p class="settings-hint" id="archiveAllResult"></p>
+            </div>
+            <div class="settings-card">
+              <h3>// tags</h3>
+              <p class="settings-hint">Click a tag to filter the sidebar (same as searching tag:name).</p>
+              <div class="tag-cloud" id="tagCloud"></div>
+            </div>
+            <div class="settings-card">
+              <h3>// danger zone</h3>
+              <p class="settings-hint warning-text">&#9888;&#65039; Deletes every chat, archived ones included. Cannot be undone - export first if unsure.</p>
+              <div class="settings-row">
+                <button class="btn" id="deleteAllChatsBtn" type="button">delete all chats</button>
+              </div>
+              <p class="settings-hint" id="deleteAllResult"></p>
             </div>
           </div>
 
           <div class="settings-panel" data-panel="tools" hidden>
             <div class="settings-card">
-              <h3>Built-in tools</h3>
+              <h3>// Built-in tools</h3>
               <div class="settings-row">
                 <label class="theme-toggle">
                   <input type="checkbox" id="toggleManageMemory" />
@@ -248,7 +364,7 @@
             </div>
 
             <div class="settings-card">
-              <h3>Quick add (official MCP reference servers)</h3>
+              <h3>// Quick add (official MCP reference servers)</h3>
               <p class="settings-hint">Fetch and Memory are already installed and connected below - enable their checkbox to use them. Filesystem needs a directory choice, so it stays a manual add. Requires Node.js (npx) installed locally.</p>
               <div class="settings-row">
                 <input id="filesystemPath" type="text" placeholder="allowed directory (for filesystem)" autocomplete="off" spellcheck="false" />
@@ -266,7 +382,7 @@
             </div>
 
             <div class="settings-card">
-              <h3>MCP server repository</h3>
+              <h3>// MCP server repository</h3>
               <p class="settings-hint">A broader catalog beyond Filesystem/Fetch/Memory above. Each needs its own
                 credentials/config - pick one to see what it needs. Connection is tested live before it's saved,
                 same as everywhere else, so a wrong or outdated entry just fails cleanly.</p>
@@ -286,7 +402,7 @@
             </div>
 
             <div class="settings-card">
-              <h3>Custom MCP server (stdio)</h3>
+              <h3>// Custom MCP server (stdio)</h3>
               <div class="settings-row">
                 <input id="mcpName" type="text" placeholder="name" autocomplete="off" spellcheck="false" />
               </div>
@@ -303,14 +419,14 @@
             </div>
 
             <div class="settings-card">
-              <h3>Configured MCP servers</h3>
+              <h3>// Configured MCP servers</h3>
               <ul class="endpoint-list" id="mcpServerList"></ul>
             </div>
           </div>
 
           <div class="settings-panel" data-panel="memory" hidden>
             <div class="settings-card">
-              <h3>Add a memory</h3>
+              <h3>// Add a memory</h3>
               <div class="settings-row">
                 <input id="newMemoryText" type="text" placeholder="a fact to remember" autocomplete="off" spellcheck="false" />
                 <select id="newMemoryCategory">
@@ -325,7 +441,7 @@
               <p class="settings-hint">You can also just type "remember: ..." in the chat.</p>
             </div>
             <div class="settings-card">
-              <h3>Remembered facts</h3>
+              <h3>// Remembered facts</h3>
               <div class="settings-row" id="memoryCategoryTabs">
                 <button class="btn ghost active" data-category="">all</button>
                 <button class="btn ghost" data-category="fact">fact</button>
@@ -340,7 +456,7 @@
 
           <div class="settings-panel" data-panel="documents" hidden>
             <div class="settings-card">
-              <h3>Upload a document</h3>
+              <h3>// Upload a document</h3>
               <div class="settings-row">
                 <input id="documentFile" type="file" accept=".txt,.md,.pdf" />
                 <button class="btn send" id="uploadDocumentBtn">upload</button>
@@ -348,14 +464,14 @@
               <p class="settings-hint" id="documentUploadResult"></p>
             </div>
             <div class="settings-card">
-              <h3>Indexed documents</h3>
+              <h3>// Indexed documents</h3>
               <ul class="endpoint-list" id="documentList"></ul>
             </div>
           </div>
 
           <div class="settings-panel" data-panel="notes" hidden>
             <div class="settings-card">
-              <h3>New note</h3>
+              <h3>// New note</h3>
               <div class="settings-row">
                 <select id="noteTemplateSelect">
                   <option value="">- start from a template -</option>
@@ -402,11 +518,11 @@
               <p class="settings-hint" id="noteCreateResult"></p>
             </div>
             <div class="settings-card">
-              <h3>Templates</h3>
+              <h3>// Templates</h3>
               <ul class="endpoint-list" id="noteTemplateList"></ul>
             </div>
             <div class="settings-card">
-              <h3>Notes</h3>
+              <h3>// Notes</h3>
               <div class="settings-row">
                 <label class="theme-toggle"><input type="checkbox" id="showArchivedNotes" /><span>show archived</span></label>
               </div>
@@ -416,7 +532,7 @@
 
           <div class="settings-panel" data-panel="automations" hidden>
             <div class="settings-card">
-              <h3>New automation</h3>
+              <h3>// New automation</h3>
               <p class="settings-hint">Sends a prompt to a model on a schedule and records the reply. Any tools you enable below are available to that run too.</p>
               <div class="settings-row">
                 <input id="taskName" type="text" placeholder="name" autocomplete="off" spellcheck="false" />
@@ -445,18 +561,18 @@
               <p class="settings-hint" id="taskCreateResult"></p>
             </div>
             <div class="settings-card">
-              <h3>Scheduled tasks</h3>
+              <h3>// Scheduled tasks</h3>
               <ul class="endpoint-list" id="taskList"></ul>
             </div>
             <div class="settings-card">
-              <h3>Recent runs</h3>
+              <h3>// Recent runs</h3>
               <ul class="endpoint-list" id="taskRunList"></ul>
             </div>
           </div>
 
           <div class="settings-panel" data-panel="email" hidden>
             <div class="settings-card">
-              <h3>Add account (app password)</h3>
+              <h3>// Add account (app password)</h3>
               <div class="settings-row">
                 <input id="emailLabel" type="text" placeholder="label (optional)" autocomplete="off" spellcheck="false" />
               </div>
@@ -478,11 +594,11 @@
               <p class="settings-hint" id="emailAddResult"></p>
             </div>
             <div class="settings-card">
-              <h3>Accounts</h3>
+              <h3>// Accounts</h3>
               <ul class="endpoint-list" id="emailAccountList"></ul>
             </div>
             <div class="settings-card" id="emailInboxCard" hidden>
-              <h3>Inbox</h3>
+              <h3>// Inbox</h3>
               <div class="settings-row">
                 <select id="emailFolderSelect"></select>
                 <button class="btn ghost" id="emailRefreshBtn">refresh</button>
@@ -495,7 +611,7 @@
               </div>
             </div>
             <div class="settings-card">
-              <h3>Rules</h3>
+              <h3>// Rules</h3>
               <p class="settings-hint">Checked automatically in the background every couple of minutes for accounts with
                 at least one enabled rule - not just when you open the inbox.</p>
               <div class="settings-row">
@@ -533,7 +649,7 @@
 
           <div class="settings-panel" data-panel="presets" hidden>
             <div class="settings-card">
-              <h3>Save current setup as a preset</h3>
+              <h3>// Save current setup as a preset</h3>
               <p class="settings-hint">Captures the current model, system prompt, and enabled tools.</p>
               <div class="settings-row">
                 <input id="presetName" type="text" placeholder="preset name, e.g. \"coding\"" autocomplete="off" spellcheck="false" />
@@ -542,14 +658,37 @@
               <p class="settings-hint" id="presetSaveResult"></p>
             </div>
             <div class="settings-card">
-              <h3>Presets</h3>
+              <h3>// Presets</h3>
               <ul class="endpoint-list" id="presetList"></ul>
+            </div>
+          </div>
+
+          <div class="settings-panel" data-panel="prompts" hidden>
+            <div class="settings-card">
+              <h3 id="promptFormTitle">// new prompt</h3>
+              <p class="settings-hint">Type /command in the chat box to insert it. Variables: {{CURRENT_DATE}}, {{CURRENT_TIME}}, {{CURRENT_WEEKDAY}}, {{CLIPBOARD}}.</p>
+              <div class="settings-row">
+                <input id="promptCommand" type="text" placeholder="command, e.g. summarize" autocomplete="off" spellcheck="false" />
+                <input id="promptTitle" type="text" placeholder="title" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="settings-row">
+                <textarea id="promptContent" class="settings-textarea" rows="5" placeholder="prompt text…" spellcheck="false"></textarea>
+              </div>
+              <div class="settings-row">
+                <button class="btn send" id="savePromptBtn" type="button">save prompt</button>
+                <button class="btn ghost" id="cancelPromptEditBtn" type="button" hidden>cancel edit</button>
+              </div>
+              <p class="settings-hint" id="promptSaveResult"></p>
+            </div>
+            <div class="settings-card">
+              <h3>// prompts</h3>
+              <ul class="endpoint-list" id="promptList"></ul>
             </div>
           </div>
 
           <div class="settings-panel" data-panel="usage" hidden>
             <div class="settings-card">
-              <h3>Usage &amp; estimated cost</h3>
+              <h3>// Usage &amp; estimated cost</h3>
               <p class="settings-hint">Token counts are estimated (~4 chars/token), not exact. Cost is estimated for known
                 hosted models only; Ollama/local models always cost $0. Not a substitute for your provider's own billing page.</p>
               <div id="usageSummary"></div>
@@ -558,24 +697,24 @@
 
           <div class="settings-panel" data-panel="hardware" hidden>
             <div class="settings-card">
-              <h3>Ollama</h3>
+              <h3>// Ollama</h3>
               <div id="ollamaStatus"></div>
             </div>
             <div class="settings-card">
-              <h3>This machine</h3>
+              <h3>// This machine</h3>
               <p class="settings-hint">Detected once when this tab is opened. VRAM detection needs `nvidia-smi`; without it,
                 sizing falls back to system RAM (CPU/unified-memory inference).</p>
               <div id="hardwareInfo"></div>
             </div>
             <div class="settings-card">
-              <h3>Suggested Ollama models</h3>
+              <h3>// Suggested Ollama models</h3>
               <ul class="endpoint-list" id="hardwareModelList"></ul>
             </div>
           </div>
 
           <div class="settings-panel" data-panel="localgen" hidden>
             <div class="settings-card">
-              <h3>Local image generation (ComfyUI)</h3>
+              <h3>// Local image generation (ComfyUI)</h3>
               <p class="settings-hint">No API key - ComfyUI is a plain local server, same trust model as Ollama.
                 Content is entirely up to whatever checkpoint you load; nothing here filters it.</p>
               <div class="settings-row">
@@ -604,7 +743,7 @@
               <p class="settings-hint" id="comfySaveResult"></p>
             </div>
             <div class="settings-card">
-              <h3>Pull a checkpoint</h3>
+              <h3>// Pull a checkpoint</h3>
               <p class="settings-hint">Generic download by URL into your checkpoints folder above - works for any
                 checkpoint file (Hugging Face, Civitai, anywhere); nothing here curates or suggests specific ones.</p>
               <div class="settings-row">
@@ -619,7 +758,7 @@
             </div>
 
             <div class="settings-card">
-              <h3>Local speech generation (Piper)</h3>
+              <h3>// Local speech generation (Piper)</h3>
               <p class="settings-hint">No API key - runs as a local process, not a server.</p>
               <div class="settings-row">
                 <input id="piperVoicePath" type="text" placeholder="path to voice .onnx file - filled in automatically after a pull below" autocomplete="off" spellcheck="false" />
@@ -630,7 +769,7 @@
               <p class="settings-hint" id="piperSaveResult"></p>
             </div>
             <div class="settings-card">
-              <h3>Pull a voice</h3>
+              <h3>// Pull a voice</h3>
               <p class="settings-hint">Downloads from Piper's official voice repository (Hugging Face,
                 rhasspy/piper-voices) into the folder above - e.g. name "en_US-lessac", quality "medium".</p>
               <div class="settings-row">
@@ -652,7 +791,7 @@
             </div>
 
             <div class="settings-card">
-              <h3>Video generation (custom ComfyUI workflows)</h3>
+              <h3>// Video generation (custom ComfyUI workflows)</h3>
               <p class="settings-hint">No built-in default - export a working workflow from ComfyUI's own UI as JSON,
                 tell starfire which node/input holds the prompt text, and save it here. Runs against the ComfyUI
                 server configured above.</p>
@@ -676,13 +815,13 @@
 
           <div class="settings-panel" data-panel="data" hidden>
             <div class="settings-card">
-              <h3>Backup</h3>
+              <h3>// Backup</h3>
               <p class="settings-hint">Downloads a zip of the whole data/ directory - endpoints, encrypted keys, memory,
                 documents, notes, chat sessions, everything.</p>
               <button class="btn ghost" id="downloadBackupBtn">download backup</button>
             </div>
             <div class="settings-card">
-              <h3>Restore</h3>
+              <h3>// Restore</h3>
               <p class="settings-hint warning-text">&#9888;&#65039; Overwrites your current data with the contents of the
                 zip. This cannot be undone - back up first if you're unsure.</p>
               <div class="settings-row">
@@ -695,7 +834,7 @@
 
           <div class="settings-panel" data-panel="appearance" hidden>
             <div class="settings-card">
-              <h3>Theme</h3>
+              <h3>// theme</h3>
               <div class="settings-row">
                 <label class="theme-toggle">
                   <input type="checkbox" id="lightModeToggle" />
@@ -703,8 +842,58 @@
                 </label>
               </div>
             </div>
+            <div class="settings-card">
+              <h3>// chat</h3>
+              <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="userBubbles" /><span>Show my messages as chat bubbles</span></label></div>
+              <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="wideChat" /><span>Wide chat (use the full window width)</span></label></div>
+              <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="autoTitle" /><span>Auto-generate chat titles</span></label></div>
+              <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="ctrlEnterSends" /><span>Ctrl+Enter sends (Enter adds a new line)</span></label></div>
+              <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="autoSpeak" /><span>Read replies aloud automatically</span></label></div>
+              <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="showSuggestions" /><span>Show prompt suggestions on a new chat</span></label></div>
+            </div>
+            <div class="settings-card">
+              <h3>// keyboard shortcuts</h3>
+              <ul class="shortcut-list">
+                <li><kbd>ctrl</kbd>+<kbd>k</kbd> command palette</li>
+                <li><kbd>ctrl</kbd>+<kbd>shift</kbd>+<kbd>o</kbd> new chat</li>
+                <li><kbd>ctrl</kbd>+<kbd>shift</kbd>+<kbd>s</kbd> toggle sidebar</li>
+                <li><kbd>ctrl</kbd>+<kbd>shift</kbd>+<kbd>c</kbd> copy last reply</li>
+                <li><kbd>ctrl</kbd>+<kbd>shift</kbd>+<kbd>;</kbd> copy last code block</li>
+                <li><kbd>shift</kbd>+<kbd>esc</kbd> focus the chat box</li>
+                <li><kbd>/</kbd> prompts &middot; <kbd>#</kbd> knowledge &middot; <kbd>@</kbd> model, typed in the chat box</li>
+              </ul>
+            </div>
           </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
+  <div class="modal-overlay" id="archivedModal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="archivedTitle">
+      <div class="modal-header">
+        <span id="archivedTitle">// archived chats</span>
+        <button class="btn ghost modal-close" id="archivedCloseBtn" aria-label="Close archived chats">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="settings-row">
+          <input id="archivedSearch" type="search" placeholder="search archived chats…" autocomplete="off" spellcheck="false" />
+          <button class="btn ghost" id="unarchiveAllBtn" type="button">unarchive all</button>
+        </div>
+        <ul class="endpoint-list" id="archivedList"></ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="dialogModal" hidden>
+    <div class="modal dialog-modal" role="alertdialog" aria-modal="true" aria-labelledby="dialogTitle">
+      <div class="modal-header"><span id="dialogTitle"></span></div>
+      <div class="modal-body">
+        <p class="dialog-text" id="dialogText"></p>
+        <input id="dialogInput" type="text" autocomplete="off" spellcheck="false" hidden />
+        <div class="dialog-actions">
+          <button class="btn ghost" id="dialogCancelBtn" type="button">cancel</button>
+          <button class="btn send" id="dialogOkBtn" type="button">ok</button>
         </div>
       </div>
     </div>
@@ -734,9 +923,12 @@
     </div>
   </div>
 
+  <div class="context-menu" id="chatMenu" role="menu" hidden></div>
+
   <script src="streamingSegmenter.js"></script>
   <script src="streamingRenderer.js"></script>
   <script src="providers.js"></script>
   <script src="app.js"></script>
+  <script src="workspace.js"></script>
 </body>
 </html>

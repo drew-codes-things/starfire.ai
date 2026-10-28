@@ -24,6 +24,7 @@ from chat_stream import _sse_line, stream_chat
 from config import config
 from context_budget import trim_to_budget
 from documents_store import DocumentStore
+from folder_store import FolderStore
 import comfyui_client
 import piper_tts
 from local_gen_store import ComfyUIConfigStore, CustomWorkflowStore, GeneratedFileStore, PiperConfigStore
@@ -35,6 +36,7 @@ from memory_store import MemoryStore
 from model_endpoints import ModelEndpointStore, detect_ollama, discover_servers
 from note_store import NoteStore, NoteTemplateStore
 from preset_store import PresetStore
+from prompt_store import PromptStore
 from providers import build_models_url
 from task_scheduler import TaskScheduler, compute_next_run
 from task_store import ScheduledTask, TaskRunStore, TaskStore
@@ -62,6 +64,8 @@ usage = UsageStore(config.data_dir)
 notes = NoteStore(config.data_dir)
 note_templates = NoteTemplateStore(config.data_dir)
 chat_sessions = ChatSessionStore(config.data_dir)
+chat_folders = FolderStore(config.data_dir)
+prompts = PromptStore(config.data_dir)
 
 def _tool_context(base_url: str = "", api_key: str | None = None, model: str = "",
                    require_edit_approval: bool = False) -> builtin_tools.ToolContext:
@@ -334,6 +338,17 @@ async def add_document(file: UploadFile):
     except ValueError as e:
         raise HTTPException(400, str(e))
     return {"id": doc.id, "filename": doc.filename, "chunk_count": doc.chunk_count}
+
+MAX_DOCUMENT_CONTEXT_CHARS = 60_000
+
+@router.get("/documents/{document_id}/text")
+async def get_document_text(document_id: str):
+    found = documents.full_text(document_id)
+    if not found:
+        raise HTTPException(404, "document not found")
+    filename, text = found
+    truncated = len(text) > MAX_DOCUMENT_CONTEXT_CHARS
+    return {"filename": filename, "text": text[:MAX_DOCUMENT_CONTEXT_CHARS], "truncated": truncated}
 
 @router.delete("/documents/{document_id}")
 async def delete_document(document_id: str):
@@ -883,15 +898,57 @@ class UpdateChatSessionBody(BaseModel):
     endpoint_id: str | None = None
     model: str | None = None
     pinned: bool | None = None
+    folder_id: str | None = None
+    archived: bool | None = None
+    tags: list[str] | None = None
+
+class ImportChatsBody(BaseModel):
+    chats: list[dict]
+
+MAX_IMPORT_CHATS = 5000
 
 def _session_summary(s) -> dict:
     return {"id": s.id, "title": s.title, "endpoint_id": s.endpoint_id, "model": s.model,
             "pinned": s.pinned, "parent_session_id": s.parent_session_id, "branch_point": s.branch_point,
+            "folder_id": s.folder_id, "archived": s.archived, "tags": s.tags,
             "created": s.created, "updated": s.updated, "message_count": len(s.messages)}
 
+def _iso_timestamp(value) -> str:
+    from datetime import datetime, timezone
+    if isinstance(value, (int, float)) and value > 0:
+        return datetime.fromtimestamp(value, timezone.utc).isoformat()
+    return value if isinstance(value, str) else ""
+
+def _imported_chat(item: dict) -> dict | None:
+    if not isinstance(item, dict):
+        return None
+    inner = item.get("chat") if isinstance(item.get("chat"), dict) else item
+    raw_messages = inner.get("messages")
+    if not isinstance(raw_messages, list):
+        return None
+    messages = [
+        {"role": m["role"], "content": m["content"], **({"model": m["model"]} if isinstance(m.get("model"), str) else {})}
+        for m in raw_messages
+        if isinstance(m, dict) and m.get("role") in ("user", "assistant") and isinstance(m.get("content"), str)
+    ]
+    if not messages:
+        return None
+    raw_tags = item.get("tags") or inner.get("tags") or []
+    tags = [t.get("name", "") if isinstance(t, dict) else str(t) for t in raw_tags if isinstance(t, (dict, str))]
+    imported = {
+        "title": str(item.get("title") or inner.get("title") or "Imported chat")[:120],
+        "messages": messages, "pinned": bool(item.get("pinned")), "archived": bool(item.get("archived")),
+        "tags": tags, "model": str(item.get("model") or ""),
+    }
+    for key, source in (("created", "created"), ("updated", "updated"), ("created", "created_at"), ("updated", "updated_at")):
+        stamp = _iso_timestamp(item.get(source))
+        if stamp:
+            imported[key] = stamp
+    return imported
+
 @router.get("/chat/sessions")
-async def list_chat_sessions(q: str = ""):
-    return {"sessions": [_session_summary(s) for s in chat_sessions.list(query=q)]}
+async def list_chat_sessions(q: str = "", archived: bool = False):
+    return {"sessions": [_session_summary(s) for s in chat_sessions.list(query=q, archived=archived)]}
 
 @router.post("/chat/sessions")
 async def create_chat_session(body: CreateChatSessionBody):
@@ -899,9 +956,53 @@ async def create_chat_session(body: CreateChatSessionBody):
                                   parent_session_id=body.parent_session_id, branch_point=body.branch_point)
     return {**_session_summary(session), "messages": session.messages}
 
+@router.get("/chat/sessions/export")
+async def export_chat_sessions():
+    from dataclasses import asdict
+    from datetime import datetime, timezone
+    body = json.dumps([asdict(s) for s in chat_sessions.all()], indent=2)
+    filename = f"starfire-chats-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.json"
+    return StreamingResponse(iter([body.encode()]), media_type="application/json",
+                             headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+@router.post("/chat/sessions/import")
+async def import_chat_sessions(body: ImportChatsBody):
+    if len(body.chats) > MAX_IMPORT_CHATS:
+        raise HTTPException(400, f"too many chats in one import (max {MAX_IMPORT_CHATS})")
+    readable = [chat for chat in (_imported_chat(item) for item in body.chats) if chat]
+    if not readable:
+        raise HTTPException(400, "no chats with user/assistant messages found in that file")
+    chat_sessions.add_many(readable)
+    return {"imported": len(readable), "skipped": len(body.chats) - len(readable)}
+
+@router.post("/chat/sessions/archive-all")
+async def archive_all_chat_sessions():
+    return {"archived": chat_sessions.set_archived_all(True)}
+
+@router.post("/chat/sessions/unarchive-all")
+async def unarchive_all_chat_sessions():
+    return {"unarchived": chat_sessions.set_archived_all(False)}
+
+@router.delete("/chat/sessions")
+async def delete_all_chat_sessions(confirm: str = ""):
+    if confirm != "delete-all":
+        raise HTTPException(400, "pass confirm=delete-all to delete every chat")
+    return {"deleted": chat_sessions.delete_all()}
+
+@router.get("/chat/tags")
+async def list_chat_tags():
+    return {"tags": [{"name": name, "count": count} for name, count in chat_sessions.tag_counts().items()]}
+
 @router.get("/chat/sessions/{session_id}/branches")
 async def list_session_branches(session_id: str):
     return {"branches": [_session_summary(s) for s in chat_sessions.branches_of(session_id)]}
+
+@router.post("/chat/sessions/{session_id}/clone")
+async def clone_chat_session(session_id: str):
+    session = chat_sessions.clone(session_id)
+    if not session:
+        raise HTTPException(404, "session not found")
+    return _session_summary(session)
 
 @router.get("/chat/sessions/{session_id}")
 async def get_chat_session(session_id: str):
@@ -913,6 +1014,8 @@ async def get_chat_session(session_id: str):
 @router.put("/chat/sessions/{session_id}")
 async def update_chat_session(session_id: str, body: UpdateChatSessionBody):
     fields = body.model_dump(exclude_unset=True)
+    if fields.get("folder_id") and not chat_folders.get(fields["folder_id"]):
+        raise HTTPException(404, "folder not found")
     if not chat_sessions.update(session_id, **fields):
         raise HTTPException(404, "session not found")
     return {"ok": True}
@@ -921,6 +1024,72 @@ async def update_chat_session(session_id: str, body: UpdateChatSessionBody):
 async def delete_chat_session(session_id: str):
     if not chat_sessions.delete(session_id):
         raise HTTPException(404, "session not found")
+    return {"ok": True}
+
+class FolderBody(BaseModel):
+    name: str
+
+@router.get("/folders")
+async def list_folders():
+    return {"folders": [{"id": f.id, "name": f.name, "created": f.created} for f in chat_folders.list()]}
+
+@router.post("/folders")
+async def create_folder(body: FolderBody):
+    try:
+        folder = chat_folders.add(body.name)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"id": folder.id, "name": folder.name}
+
+@router.put("/folders/{folder_id}")
+async def rename_folder(folder_id: str, body: FolderBody):
+    try:
+        renamed = chat_folders.rename(folder_id, body.name)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if not renamed:
+        raise HTTPException(404, "folder not found")
+    return {"ok": True}
+
+@router.delete("/folders/{folder_id}")
+async def delete_folder(folder_id: str):
+    if not chat_folders.delete(folder_id):
+        raise HTTPException(404, "folder not found")
+    chat_sessions.clear_folder(folder_id)
+    return {"ok": True}
+
+class PromptBody(BaseModel):
+    command: str
+    title: str = ""
+    content: str
+
+@router.get("/prompts")
+async def list_prompts():
+    return {"prompts": [{"id": p.id, "command": p.command, "title": p.title, "content": p.content}
+                        for p in prompts.list()]}
+
+@router.post("/prompts")
+async def create_prompt(body: PromptBody):
+    try:
+        prompt = prompts.add(body.command, body.title, body.content)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"id": prompt.id, "command": prompt.command}
+
+@router.put("/prompts/{prompt_id}")
+async def update_prompt(prompt_id: str, body: PromptBody):
+    try:
+        updated = prompts.update(prompt_id, body.command, body.title, body.content)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if not updated:
+        raise HTTPException(404, "prompt not found")
+    return {"ok": True}
+
+@router.delete("/prompts/{prompt_id}")
+async def delete_prompt(prompt_id: str):
+    if not prompts.delete(prompt_id):
+        raise HTTPException(404, "prompt not found")
     return {"ok": True}
 
 class QuickCompleteBody(BaseModel):
