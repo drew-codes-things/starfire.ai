@@ -1,13 +1,31 @@
 'use strict';
 
 const _rawFetch = window.fetch.bind(window);
-window.fetch = (input, init = {}) => {
+window.fetch = async (input, init = {}) => {
   const method = (init.method || 'GET').toUpperCase();
   if (method !== 'GET' && method !== 'HEAD') {
     init = { ...init, headers: { ...(init.headers || {}), 'X-Starfire-Client': '1' } };
   }
-  return _rawFetch(input, init);
+  const response = await _rawFetch(input, init);
+  const path = new URL(typeof input === 'string' ? input : input.url, window.location.href).pathname;
+  if (response.status === 401 && path.startsWith('/api/') && !path.startsWith('/api/auth/')) {
+    window.location.replace('/login.html');
+  }
+  return response;
 };
+
+async function setUpLogout() {
+  const button = document.getElementById('logoutBtn');
+  const response = await fetch('/api/auth/me');
+  if (!response.ok) return;
+  const user = await response.json();
+  button.title = `Logged in as ${user.email}`;
+  button.hidden = false;
+  button.addEventListener('click', async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    window.location.replace('/login.html');
+  });
+}
 
 const $ = id => document.getElementById(id);
 
@@ -3195,3 +3213,5 @@ settingsEls.lightModeToggle.addEventListener('change', () => {
 });
 
 loadModels().then(() => { restoreSession(); checkModelToolCapability(); });
+
+setUpLogout().catch(error => console.error('starfire.ai: could not check the login', error));

@@ -9,6 +9,7 @@ class AppConfig(BaseSettings):
     bind_host: str = "127.0.0.1"
     data_dir: str = "./data"
     ollama_base_url: str | None = None
+    cookie_secure: bool = True
 
 config = AppConfig()
 

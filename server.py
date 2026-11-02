@@ -41,6 +41,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+import auth
+import auth_routes
 import routes
 from config import config
 from mcp_manager import McpConnectionError, mcp_manager
@@ -137,6 +139,10 @@ async def lifespan(app: FastAPI):
     for server in routes.mcp_servers.list():
         await mcp_manager.disconnect(server.id)
 
+if not auth.is_loopback(config.bind_host) and not auth_routes.users.has_users():
+    sys.exit(f"starfire.ai: BIND_HOST is {config.bind_host}, but no accounts exist, so anyone who can reach "
+             "the port could use it. Add one with import_openwebui_users.py, or set BIND_HOST=127.0.0.1.")
+
 app = FastAPI(title="starfire.ai", lifespan=lifespan)
 
 @app.middleware("http")
@@ -146,6 +152,8 @@ async def require_client_header(request: Request, call_next):
             return JSONResponse({"detail": "missing required client header"}, status_code=403)
     return await call_next(request)
 
+auth.install(app, auth_routes.users, auth_routes.sessions)
+app.include_router(auth_routes.router)
 app.include_router(routes.router)
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
