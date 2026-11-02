@@ -317,13 +317,13 @@ async function updateChat(sessionId, fields) {
 }
 
 async function renameChat(session) {
-  const title = await showDialog({ title: '// rename chat', input: session.title, okLabel: 'rename' });
+  const title = await showDialog({ title: 'rename chat', input: session.title, okLabel: 'rename' });
   if (title) updateChat(session.id, { title: title.slice(0, 120) });
 }
 
 async function editChatTags(session) {
   const raw = await showDialog({
-    title: '// tags',
+    title: 'tags',
     text: 'Comma-separated, e.g. work, python. Leave empty to clear.',
     input: (session.tags || []).join(', '),
     okLabel: 'save',
@@ -359,7 +359,7 @@ async function archiveChat(session, archived = true) {
 
 async function deleteChat(session) {
   const ok = await showDialog({
-    title: '// delete chat',
+    title: 'delete chat',
     text: `Delete "${session.title}"? This cannot be undone.`,
     okLabel: 'delete', danger: true,
   });
@@ -445,7 +445,7 @@ function openChatMenu(session, anchor) {
     { label: 'rename', run: () => renameChat(session) },
     { label: 'clone', run: () => cloneChat(session) },
     { label: 'tags…', run: () => editChatTags(session) },
-    ...(folderItems.length ? [{ heading: '// move to folder' }, ...folderItems] : []),
+    ...(folderItems.length ? [{ heading: 'move to folder' }, ...folderItems] : []),
     { separator: true },
     { label: 'download .json', run: () => downloadChat(session, 'json') },
     { label: 'download .md', run: () => downloadChat(session, 'md') },
@@ -455,7 +455,7 @@ function openChatMenu(session, anchor) {
 }
 
 async function createFolder() {
-  const name = await showDialog({ title: '// new folder', input: '', okLabel: 'create' });
+  const name = await showDialog({ title: 'new folder', input: '', okLabel: 'create' });
   if (!name) return;
   try {
     const folder = await apiJson('/api/folders', { method: 'POST', body: { name } });
@@ -471,7 +471,7 @@ function openFolderMenu(folder, anchor) {
   showContextMenu(anchor, [
     { label: 'new chat here', run: () => startChatInFolder(folder.id) },
     { label: 'rename', run: async () => {
-      const name = await showDialog({ title: '// rename folder', input: folder.name, okLabel: 'rename' });
+      const name = await showDialog({ title: 'rename folder', input: folder.name, okLabel: 'rename' });
       if (!name) return;
       try { await apiJson('/api/folders/' + folder.id, { method: 'PUT', body: { name } }); }
       catch (e) { printLine('error: ' + e.message, 'err'); }
@@ -479,7 +479,7 @@ function openFolderMenu(folder, anchor) {
     } },
     { label: 'delete folder', danger: true, run: async () => {
       const ok = await showDialog({
-        title: '// delete folder',
+        title: 'delete folder',
         text: `Delete "${folder.name}"? Its chats are kept and move back to the main list.`,
         okLabel: 'delete', danger: true,
       });
@@ -605,7 +605,7 @@ $('importChatsBtn').onclick = async () => {
 };
 
 $('archiveAllChatsBtn').onclick = async () => {
-  const ok = await showDialog({ title: '// archive all chats', text: 'Move every chat to the archive? You can unarchive them later.', okLabel: 'archive all' });
+  const ok = await showDialog({ title: 'archive all chats', text: 'Move every chat to the archive? You can unarchive them later.', okLabel: 'archive all' });
   if (!ok) return;
   try {
     const { archived } = await apiJson('/api/chat/sessions/archive-all', { method: 'POST' });
@@ -619,7 +619,7 @@ $('archiveAllChatsBtn').onclick = async () => {
 
 $('deleteAllChatsBtn').onclick = async () => {
   const typed = await showDialog({
-    title: '// delete all chats',
+    title: 'delete all chats',
     text: 'This permanently deletes every chat, archived ones included. Type "delete all" to confirm.',
     input: '', okLabel: 'delete everything', danger: true,
   });
@@ -654,7 +654,7 @@ function resetPromptForm() {
   $('promptCommand').value = '';
   $('promptTitle').value = '';
   $('promptContent').value = '';
-  $('promptFormTitle').textContent = '// new prompt';
+  $('promptFormTitle').textContent = 'new prompt';
   $('cancelPromptEditBtn').hidden = true;
 }
 
@@ -675,11 +675,11 @@ async function refreshPromptList() {
       $('promptCommand').value = p.command;
       $('promptTitle').value = p.title;
       $('promptContent').value = p.content;
-      $('promptFormTitle').textContent = '// edit /' + p.command;
+      $('promptFormTitle').textContent = 'edit /' + p.command;
       $('cancelPromptEditBtn').hidden = false;
     };
     li.querySelector('.endpoint-remove').onclick = async () => {
-      const ok = await showDialog({ title: '// delete prompt', text: `Delete /${p.command}?`, okLabel: 'delete', danger: true });
+      const ok = await showDialog({ title: 'delete prompt', text: `Delete /${p.command}?`, okLabel: 'delete', danger: true });
       if (!ok) return;
       try { await apiJson('/api/prompts/' + p.id, { method: 'DELETE' }); }
       catch (e) { setHint($('promptSaveResult'), e.message, 'error'); }
@@ -776,7 +776,7 @@ function renderModelMenu() {
   if (presets.length) {
     const heading = document.createElement('li');
     heading.className = 'model-menu-heading';
-    heading.textContent = '// workspace models (presets)';
+    heading.textContent = 'workspace models (presets)';
     list.appendChild(heading);
     for (const p of presets) {
       const li = document.createElement('li');
@@ -1140,7 +1140,7 @@ async function updateComposerPopup() {
   let items = [];
   if (trigger.char === '/') {
     if (!promptCache.length) await loadPrompts();
-    popupEls.title.textContent = '// prompts';
+    popupEls.title.textContent = 'prompts';
     items = promptCache
       .filter(p => p.command.startsWith(trigger.query) || p.title.toLowerCase().includes(trigger.query))
       .map(p => ({ key: '/' + p.command, sub: p.title, pick: () => pickPrompt(p) }));
@@ -1149,13 +1149,13 @@ async function updateComposerPopup() {
     if (!documentCache) {
       try { ({ documents: documentCache = [] } = await apiJson('/api/documents')); } catch (_) { documentCache = []; }
     }
-    popupEls.title.textContent = '// knowledge';
+    popupEls.title.textContent = 'knowledge';
     items = documentCache
       .filter(d => d.filename.toLowerCase().includes(trigger.query))
       .map(d => ({ key: '#' + d.filename, sub: d.chunk_count + ' chunk(s)', pick: () => pickDocument(d) }));
     if (!documentCache.length) items = [{ key: 'no documents yet', sub: 'upload some in workspace → knowledge', pick: () => openSettings('documents') }];
   } else {
-    popupEls.title.textContent = '// models';
+    popupEls.title.textContent = 'models';
     items = models
       .filter(m => m.id.toLowerCase().includes(trigger.query))
       .map(m => ({ key: '@' + m.id, sub: window.providerLabel ? window.providerLabel(m.provider) : m.provider, pick: () => pickMention(m) }));
