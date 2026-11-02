@@ -88,3 +88,33 @@ def test_import_copies_open_webui_chats_and_notes_once(tmp_path):
     assert session.created.startswith("2025-10-20")
     [note] = NoteStore(str(data_dir)).list()
     assert (note.title, note.content) == ("Guide", "# Guide")
+
+
+def test_import_follows_open_webui_history_thread(tmp_path):
+    database = tmp_path / "webui.db"
+    connection = sqlite3.connect(database)
+    connection.executescript("""
+        create table chat (id text, title text, chat text, created_at integer, updated_at integer,
+                           archived integer, pinned integer);
+        create table note (id text, title text, data text);
+    """)
+    history = {"currentId": "a2", "messages": {
+        "u1": {"id": "u1", "parentId": None, "role": "user", "content": "first"},
+        "a1": {"id": "a1", "parentId": "u1", "role": "assistant", "content": "reply one", "model": "arty"},
+        "old": {"id": "old", "parentId": "u1", "role": "assistant", "content": "abandoned branch"},
+        "u2": {"id": "u2", "parentId": "a1", "role": "user", "content": "second"},
+        "a2": {"id": "a2", "parentId": "u2", "role": "assistant", "content": ""}}}
+    chat = {"messages": [{"role": "user", "content": "first"}], "history": history}
+    connection.execute("insert into chat values (?, ?, ?, ?, ?, ?, ?)",
+                       ("c1", "Thread", json.dumps(chat), 1761000000, 1761000100, 0, 0))
+    connection.commit()
+    connection.close()
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    result = run_script("import_openwebui_data.py", database, data_dir, tmp_path)
+    assert result.returncode == 0, result.stderr
+
+    [session] = ChatSessionStore(str(data_dir)).list()
+    assert [(m["role"], m["content"]) for m in session.messages] == [
+        ("user", "first"), ("assistant", "reply one"), ("user", "second")]

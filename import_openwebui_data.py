@@ -28,11 +28,23 @@ def iso_time(seconds: float | int | None) -> str:
     return datetime.fromtimestamp(seconds, timezone.utc).isoformat()
 
 
+def history_thread(chat: dict) -> list[dict]:
+    history = chat.get("history") or {}
+    by_id = history.get("messages") or {}
+    thread, seen = [], set()
+    message_id = history.get("currentId")
+    while message_id in by_id and message_id not in seen:
+        seen.add(message_id)
+        thread.append(by_id[message_id])
+        message_id = by_id[message_id].get("parentId")
+    return thread[::-1]
+
+
 def chat_messages(chat: dict, created: str) -> list[dict]:
     messages = []
-    for message in chat.get("messages") or []:
+    for message in history_thread(chat) or chat.get("messages") or []:
         content = message.get("content")
-        if message.get("role") not in CHAT_ROLES or not isinstance(content, str):
+        if message.get("role") not in CHAT_ROLES or not isinstance(content, str) or not content.strip():
             continue
         entry = {"role": message["role"], "content": content,
                  "created": iso_time(message.get("timestamp")) if message.get("timestamp") else created}
