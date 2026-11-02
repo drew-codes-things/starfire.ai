@@ -1183,7 +1183,7 @@ body.login-page {
   backdrop-filter: blur(12px);
 }
 
-.login-logo { width: 40px; height: 40px; margin-bottom: 14px; }
+.login-logo { width: 40px; height: 40px; margin-bottom: 14px; filter: invert(1); }
 .login-card h1 { font-size: 1.35rem; font-weight: 500; }
 .login-sub { color: var(--muted); margin: 4px 0 22px; }
 
