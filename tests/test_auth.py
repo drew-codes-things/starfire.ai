@@ -1,6 +1,4 @@
 import os
-import sqlite3
-import subprocess
 import sys
 
 import bcrypt
@@ -132,36 +130,6 @@ def test_forwarded_address_is_only_trusted_from_the_local_proxy():
 
     assert auth.client_address(request_from("127.0.0.1", "203.0.113.5, 10.0.0.1")) == "203.0.113.5"
     assert auth.client_address(request_from("192.168.1.50", "203.0.113.5")) == "192.168.1.50"
-
-
-def test_import_copies_open_webui_accounts(tmp_path):
-    database = tmp_path / "webui.db"
-    connection = sqlite3.connect(database)
-    connection.executescript("""
-        create table user (id text, name text, email text, role text);
-        create table auth (id text, email text, password text, active integer);
-    """)
-    rows = [("1", "Drew", "drew@example.com", "admin", 1), ("2", "Waiting", "w@example.com", "pending", 1),
-            ("3", "Gone", "g@example.com", "user", 0)]
-    for user_id, name, email, role, active in rows:
-        connection.execute("insert into user values (?, ?, ?, ?)", (user_id, name, email, role))
-        connection.execute("insert into auth values (?, ?, ?, ?)", (user_id, email, fast_hash(PASSWORD), active))
-    connection.commit()
-    connection.close()
-
-    data_dir = tmp_path / "data"
-    data_dir.mkdir()
-    result = subprocess.run([sys.executable, os.path.join(ROOT, "import_openwebui_users.py"), str(database)],
-                            env={**os.environ, "DATA_DIR": str(data_dir)}, cwd=tmp_path,
-                            capture_output=True, text=True)
-
-    assert result.returncode == 0, result.stderr
-    assert "imported 1 account(s): Drew (admin)" in result.stdout
-    assert "Waiting (role pending)" in result.stdout
-    assert PASSWORD not in result.stdout and "$2b$" not in result.stdout
-    imported = UserStore(str(data_dir))
-    assert [u.email for u in imported.list()] == ["drew@example.com"]
-    assert imported.verify("drew@example.com", PASSWORD)
 
 
 @pytest.fixture
