@@ -3,6 +3,8 @@
 const PREF_DEFAULTS = {
   wideChat: false,
   autoTitle: true,
+  autoTags: true,
+  followUps: true,
   ctrlEnterSends: false,
   autoSpeak: false,
   showSuggestions: true,

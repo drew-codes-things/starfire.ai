@@ -451,6 +451,20 @@ html.light .welcome-logo { filter: none; }
 .suggestion-title { display: block; font-weight: 600; margin-bottom: 2px; }
 .suggestion-sub { display: block; color: var(--muted); font-size: 0.68rem; }
 
+.follow-ups { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.follow-up {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 6px 12px;
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 0.74rem;
+  text-align: left;
+  cursor: pointer;
+}
+.follow-up:hover { border-color: color-mix(in srgb, var(--red) 50%, transparent); }
+
 .info-line {
   color: var(--muted);
   font-size: 0.76rem;

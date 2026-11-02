@@ -117,6 +117,14 @@ to be unreliable about *when* to use a tool rather than just answering directly)
 warns you before you enable tools for it, and the backend withholds the tools list from that
 model's requests either way.
 
+New chats get a title and up to three tags, and each reply can be followed by three suggested
+follow-up questions you can click to send (all three can be switched off in Settings → chat).
+These small jobs go to the chat's own model unless `TASK_MODEL` is set, in which case they go
+straight to that Ollama model instead. That keeps them out of an assistant's history and tool
+loop (Arty's brain, for example): point it at the model the assistant already has loaded, with
+`TASK_NUM_CTX` matching its context size, so Ollama doesn't load a second copy. Qwen3 models
+are asked not to think for these.
+
 ## Chats
 
 Chats are saved automatically after each exchange. Settings → Chats exports every chat as
@@ -360,6 +368,8 @@ rather use that instead)
 | `PORT` | `8080` | Port the server listens on |
 | `OLLAMA_BASE_URL` | _(auto-detect)_ | Override auto-detection with a specific Ollama URL |
 | `DATA_DIR` | `./data` | Where endpoint config and encrypted API keys are stored |
+| `TASK_MODEL` | _(chat's model)_ | Ollama model for titles, tags and follow-up suggestions |
+| `TASK_NUM_CTX` | _(model default)_ | Context size for `TASK_MODEL`; match the loaded model's to avoid a reload |
 
 Hosted-provider API keys are **not** set via environment variables - add them through the
 Settings UI so they're encrypted at rest rather than sitting in plaintext in `.env`.

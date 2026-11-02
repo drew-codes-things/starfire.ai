@@ -10,6 +10,8 @@ class AppConfig(BaseSettings):
     data_dir: str = "./data"
     ollama_base_url: str | None = None
     cookie_secure: bool = True
+    task_model: str = ""
+    task_num_ctx: int = 0
 
 config = AppConfig()
 

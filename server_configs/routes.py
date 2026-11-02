@@ -15,6 +15,7 @@ import date_parsing
 import email_client
 import file_edit_tool
 import hardware_probe
+import helper_tasks
 import model_capabilities
 import ollama_manager
 from agent_loop import run_chat_with_tools
@@ -1125,21 +1126,31 @@ class QuickCompleteBody(BaseModel):
     endpoint_id: str
     model: str
     prompt: str
+    helper: bool = False
+
+def _quick_target(body: QuickCompleteBody):
+    helper_endpoint = helper_tasks.ollama_endpoint(endpoints.list()) if body.helper and config.task_model else None
+    if helper_endpoint:
+        return (helper_endpoint, config.task_model, helper_tasks.helper_prompt(body.prompt, config.task_model),
+                helper_tasks.helper_options(config.task_num_ctx))
+    endpoint = endpoints.get(body.endpoint_id)
+    if not endpoint:
+        raise HTTPException(404, "endpoint not found")
+    return endpoint, body.model, body.prompt, None
 
 @router.post("/quick-complete")
 async def quick_complete(body: QuickCompleteBody):
     from agent_loop import run_chat_collected
 
-    endpoint = endpoints.get(body.endpoint_id)
-    if not endpoint:
-        raise HTTPException(404, "endpoint not found")
+    endpoint, model, prompt, options = _quick_target(body)
     api_key = _api_key_for(endpoint.id, endpoint.provider)
     try:
-        text = await run_chat_collected(endpoint.base_url, api_key, body.model,
-                                          [{"role": "user", "content": body.prompt}])
+        text = await run_chat_collected(endpoint.base_url, api_key, model,
+                                          [{"role": "user", "content": prompt}], options=options)
     except RuntimeError as e:
         raise HTTPException(502, str(e))
-    usage.record(endpoint.provider, body.model, body.prompt, text)
+    text = helper_tasks.clean_reply(text)
+    usage.record(endpoint.provider, model, prompt, text)
     return {"text": text}
 
 @router.get("/usage")
