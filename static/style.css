@@ -484,9 +484,9 @@ html.light .welcome-logo { filter: none; }
 }
 .line.user { color: var(--fg); white-space: pre-wrap; }
 .line.ai { white-space: normal; }
-.line.info { color: var(--muted); font-size: 0.73rem; white-space: pre-wrap; margin: 2px 0; }
+.line.info { color: var(--muted); font-size: 0.73rem; white-space: pre-wrap; margin-block: 2px; }
 .line.info::before { content: '# '; }
-.line.err { color: var(--red); white-space: pre-wrap; margin: 4px 0; }
+.line.err { color: var(--red); white-space: pre-wrap; margin-block: 4px; }
 .line.err::before { content: '! '; }
 
 .line.ai p { margin-bottom: 0.7em; }
@@ -510,7 +510,8 @@ html.light .welcome-logo { filter: none; }
 .line-row {
   display: flex;
   flex-direction: column;
-  margin: 10px 0 14px;
+  margin-top: 10px;
+  margin-bottom: 14px;
 }
 .line-row.role-user { align-items: flex-end; }
 .line-row.role-user .line {
@@ -1050,7 +1051,7 @@ kbd {
 .diff-card {
   border: 1px solid var(--border);
   border-radius: 4px;
-  margin: 6px 0;
+  margin-block: 6px;
   overflow: hidden;
   font-size: 0.72rem;
 }
