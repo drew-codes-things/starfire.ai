@@ -585,10 +585,47 @@ async function forkSession(uptoIdx) {
   messages = forkedMessages;
 }
 
+const ARTY_MEDIA = { image: /\.(png|jpe?g|gif|webp)$/i, video: /\.(mp4|webm|mov|m4v)$/i };
+
+function artyFilePath(href) {
+  try {
+    const url = new URL(href, location.href);
+    return url.pathname.startsWith('/arty-files/') ? url.pathname : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function showInlineMedia(container) {
+  for (const link of container.querySelectorAll('a[href]')) {
+    if (link.dataset.media) continue;
+    const path = artyFilePath(link.getAttribute('href'));
+    if (!path) continue;
+    const kind = ARTY_MEDIA.video.test(path) ? 'video' : ARTY_MEDIA.image.test(path) ? 'image' : null;
+    if (!kind) continue;
+    link.dataset.media = kind;
+    link.href = path;
+    link.setAttribute('download', '');
+    const media = document.createElement(kind === 'video' ? 'video' : 'img');
+    media.className = 'inline-media';
+    media.src = path;
+    if (kind === 'video') {
+      media.controls = true;
+      media.preload = 'metadata';
+    } else {
+      media.alt = link.textContent || 'picture from Arty';
+      media.loading = 'lazy';
+      media.onclick = () => window.open(path, '_blank', 'noopener');
+    }
+    link.before(media);
+  }
+}
+
 function renderAiContent(content, text) {
   content.innerHTML = markdownRender(text);
   if (window.hljs) content.querySelectorAll('pre code').forEach(b => window.hljs.highlightElement(b));
   addCodeBlockCopyButtons(content);
+  showInlineMedia(content);
 }
 
 function addActionButton(actions, label, title, onClick) {
@@ -883,8 +920,8 @@ async function send(text, overrideModel, extra = {}) {
         messages:    apiMessages(messages),
         system:      els.sysPrompt.value.trim() || undefined,
         options:     chatOptions(),
-        enabled_mcp_servers: [...enabledMcpServers],
-        enabled_builtin_tools: [...enabledBuiltinTools],
+        enabled_mcp_servers: modelHasOwnTools(model) ? [] : [...enabledMcpServers],
+        enabled_builtin_tools: modelHasOwnTools(model) ? [] : [...enabledBuiltinTools],
         require_edit_approval: requireEditApproval,
       }),
     });
@@ -947,6 +984,7 @@ async function send(text, overrideModel, extra = {}) {
       renderer.finish();
       aiLine.classList.remove('streaming');
       addCodeBlockCopyButtons(aiLine);
+      showInlineMedia(aiLine);
     }
     setStatus('ready', model.id);
     const fullText = renderer ? renderer.text() : '';
@@ -964,6 +1002,7 @@ async function send(text, overrideModel, extra = {}) {
       renderer.finish();
       aiLine.classList.remove('streaming');
       addCodeBlockCopyButtons(aiLine);
+      showInlineMedia(aiLine);
       const fullText = renderer.text();
       if (fullText) {
         messages.push({ role: 'assistant', content: fullText, model: model.id, created: new Date().toISOString() });
@@ -981,6 +1020,7 @@ async function send(text, overrideModel, extra = {}) {
       setStatus('error', 'error');
       printLine('error: ' + e.message, 'err');
     }
+    if (callModeActive()) setTimeout(() => speakThenListen("Sorry, that didn't work. Try again."), 0);
   } finally {
     busy                   = false;
     abortController        = null;
@@ -1034,6 +1074,7 @@ async function continueResponse(idx) {
       added += obj.delta;
       contentEl.innerHTML = markdownRender(target.content + separator + added);
     });
+    showInlineMedia(contentEl);
     if (streamError) throw new Error(streamError);
     setStatus('ready', model.id);
   } catch (e) {
@@ -1097,10 +1138,16 @@ els.modelList.addEventListener('change', () => {
   checkModelToolCapability();
 });
 
+function modelHasOwnTools(model) {
+  return !!model && (model.id === 'assistant-core' || model.id.startsWith('arty/'));
+}
+
 async function checkModelToolCapability() {
   const model = currentModel();
+  const ownTools = modelHasOwnTools(model);
+  document.body.classList.toggle('own-tools', ownTools);
   const anyToolsEnabled = enabledMcpServers.size > 0 || enabledBuiltinTools.size > 0;
-  if (!model || !anyToolsEnabled) {
+  if (!model || ownTools || !anyToolsEnabled) {
     els.capabilityWarning.hidden = true;
     return;
   }

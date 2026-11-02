@@ -1247,3 +1247,60 @@ body.login-page {
 
 .msg-images { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin-bottom: 6px; }
 .msg-image { max-width: 220px; max-height: 220px; border-radius: 12px; border: 1px solid var(--border); object-fit: cover; }
+
+.own-tools-only { display: none; }
+body.own-tools .own-tools-only { display: block; }
+body.own-tools .tools-only, body.own-tools #activeTools { display: none; }
+.menu-note { color: var(--muted); font-size: 0.72rem; padding: 6px 10px; }
+
+.inline-media { display: block; max-width: 100%; max-height: 420px; margin: 8px 0 4px; border-radius: 12px; border: 1px solid var(--border); background: #000; }
+img.inline-media { cursor: zoom-in; object-fit: contain; }
+a[data-media] { font-size: 0.75rem; }
+a[data-media]::before { content: 'save '; color: var(--muted); }
+
+.call-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 24px 16px;
+  background: radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--red) 22%, transparent) 0%, rgba(5, 5, 6, 0.96) 58%);
+  backdrop-filter: blur(8px);
+}
+.call-orb { position: relative; width: min(240px, 60vw); aspect-ratio: 1; }
+.call-ring, .call-core { position: absolute; inset: 0; border-radius: 50%; }
+.call-ring {
+  border: 2px solid color-mix(in srgb, var(--red) 70%, transparent);
+  box-shadow: 0 0 40px color-mix(in srgb, var(--red) 55%, transparent), inset 0 0 30px color-mix(in srgb, var(--red) 35%, transparent);
+}
+.call-core {
+  inset: 14%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle, color-mix(in srgb, var(--red) 35%, #000) 0%, #0b0b0c 70%);
+  box-shadow: 0 0 60px color-mix(in srgb, var(--red) 40%, transparent);
+}
+.call-core img { width: 42%; filter: invert(1); opacity: 0.92; }
+.call-state { color: var(--fg); font-size: 1rem; letter-spacing: 0.06em; text-transform: lowercase; }
+.call-heard { color: var(--muted); font-size: 0.85rem; max-width: 520px; text-align: center; min-height: 1.3em; }
+.call-end { background: var(--red); color: #fff; border: none; padding: 10px 22px; font-weight: 600; cursor: pointer; }
+.call-end:hover { filter: brightness(1.15); }
+
+.call-overlay[data-state="listening"] .call-ring { animation: call-breathe 2.4s ease-in-out infinite; }
+.call-overlay[data-state="thinking"] .call-ring { border-style: dashed; animation: call-spin 1.6s linear infinite; }
+.call-overlay[data-state="speaking"] .call-ring { animation: call-talk 0.45s ease-in-out infinite alternate; }
+.call-overlay[data-state="speaking"] .call-core { animation: call-talk 0.6s ease-in-out infinite alternate; }
+
+@keyframes call-breathe { 0%, 100% { transform: scale(0.96); opacity: 0.75; } 50% { transform: scale(1.04); opacity: 1; } }
+@keyframes call-spin { to { transform: rotate(360deg); } }
+@keyframes call-talk { from { transform: scale(0.97); } to { transform: scale(1.06); } }
+
+@media (prefers-reduced-motion: reduce) {
+  .call-overlay .call-ring, .call-overlay .call-core { animation: none !important; }
+}
+

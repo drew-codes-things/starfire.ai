@@ -106,6 +106,15 @@
             <p class="info-line">local-first AI chat</p>
           </div>
         </div>
+        <div class="call-overlay" id="callOverlay" data-state="listening" role="dialog" aria-modal="true" aria-labelledby="callState" hidden>
+          <div class="call-orb" aria-hidden="true">
+            <div class="call-ring"></div>
+            <div class="call-core"><img src="assets/logo.svg" alt="" /></div>
+          </div>
+          <p class="call-state" id="callState" aria-live="polite">listening…</p>
+          <p class="call-heard" id="callHeard"></p>
+          <button type="button" class="call-end" id="callEnd">end call</button>
+        </div>
         <button class="scroll-bottom" id="scrollBottomBtn" type="button" title="Scroll to the newest message" aria-label="Scroll to bottom" hidden>&darr;</button>
 
         <div class="composer-wrap">
@@ -123,9 +132,10 @@
                   <button type="button" role="menuitem" data-act="upload">upload files</button>
                   <button type="button" role="menuitem" data-act="knowledge">attach knowledge (#)</button>
                   <button type="button" role="menuitem" data-act="prompts">insert a prompt (/)</button>
-                  <div class="menu-heading">tools</div>
-                  <div id="plusMenuTools"></div>
-                  <button type="button" role="menuitem" data-act="tool-settings">more tool settings…</button>
+                  <div class="menu-heading tools-only">tools</div>
+                  <div id="plusMenuTools" class="tools-only"></div>
+                  <button type="button" role="menuitem" data-act="tool-settings" class="tools-only">more tool settings…</button>
+                  <p class="menu-note own-tools-only">Arty has its tools built in.</p>
                 </div>
                 <input type="file" id="attachFileInput" multiple hidden />
               </div>
