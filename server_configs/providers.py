@@ -1,5 +1,7 @@
 from urllib.parse import urlparse
 
+from config import config
+
 def _host_match(url: str, *domains: str) -> bool:
     if not url:
         return False
@@ -8,6 +10,10 @@ def _host_match(url: str, *domains: str) -> bool:
     except Exception:
         return False
     return bool(host) and any(host == d or host.endswith("." + d) for d in domains)
+
+def _is_configured_ollama(parsed) -> bool:
+    configured = urlparse(config.ollama_base_url or "")
+    return bool(configured.netloc) and parsed.netloc.lower() == configured.netloc.lower()
 
 def _is_ollama_native_url(url: str) -> bool:
     try:
@@ -20,7 +26,8 @@ def _is_ollama_native_url(url: str) -> bool:
         return True
     if path.startswith("/v1"):
         return False
-    local_ollama_host = host in {"localhost", "127.0.0.1", "0.0.0.0", "::1"} or parsed.port == 11434
+    local_ollama_host = (host in {"localhost", "127.0.0.1", "0.0.0.0", "::1"} or parsed.port == 11434
+                         or _is_configured_ollama(parsed))
     return local_ollama_host and (path == "" or path == "/api" or path.startswith("/api/"))
 
 def _detect_provider(url: str) -> str:
@@ -48,6 +55,9 @@ def _ollama_api_root(url: str) -> str:
             return root.rstrip("/") + "/api"
         return url + "/api"
     return url
+
+def is_embedding_model(name: str) -> bool:
+    return "embed" in (name or "").lower()
 
 def build_chat_url(base: str) -> str:
     base = (base or "").strip().rstrip("/")

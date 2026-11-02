@@ -39,7 +39,7 @@ from model_endpoints import ModelEndpointStore, detect_ollama, discover_servers
 from note_store import NoteStore, NoteTemplateStore
 from preset_store import PresetStore
 from prompt_store import PromptStore
-from providers import build_models_url
+from providers import build_models_url, is_embedding_model
 from task_scheduler import TaskScheduler, compute_next_run
 from task_store import ScheduledTask, TaskRunStore, TaskStore
 from usage_store import UsageStore
@@ -166,6 +166,8 @@ async def list_models():
                 continue
             if e.provider == "ollama":
                 for m in data.get("models", []):
+                    if is_embedding_model(m.get("name")):
+                        continue
                     result.append({"id": m.get("name"), "endpoint_id": e.id, "provider": "ollama",
                                     "size": m.get("size")})
             else:
