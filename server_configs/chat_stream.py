@@ -217,7 +217,7 @@ async def stream_chat_once(base_url: str, api_key: str | None, model: str, messa
     headers = build_headers(api_key, base_url)
     tools_param = build_tools_param(tools or [], base_url)
 
-    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0)) as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=10.0)) as client:
         try:
             if provider == "ollama":
                 payload = {

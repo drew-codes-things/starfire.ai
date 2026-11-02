@@ -121,6 +121,10 @@ async def lifespan(app: FastAPI):
         except McpConnectionError as e:
             print(f"  starfire.ai  ->  could not start MCP server '{server.name}': {e}")
 
+    pruned = routes.attachment_store.prune()
+    if pruned:
+        print(f"  starfire.ai  ->  removed {pruned} attachment(s) older than 30 days")
+
     scheduler_task = asyncio.create_task(routes.scheduler.run_loop())
     email_rule_task = asyncio.create_task(routes.email_rule_checker.run_loop())
 

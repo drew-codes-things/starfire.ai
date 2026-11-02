@@ -1026,9 +1026,14 @@ function limitText(text) {
   return { text: text.slice(0, MAX_ATTACHMENT_CHARS), truncated: true };
 }
 
+const MEDIA_TYPE = /^(image|audio|video)\//;
+
 async function readAttachment(file) {
-  if (file.type.startsWith('image/')) {
-    throw new Error('images are not supported in chat yet');
+  if (MEDIA_TYPE.test(file.type)) {
+    const form = new FormData();
+    form.append('file', file);
+    const media = await apiJson('/api/attachments', { method: 'POST', body: form });
+    return { media: { id: media.id, kind: media.kind, name: media.name }, text: '', note: media.kind };
   }
   if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
     const form = new FormData();
@@ -1100,14 +1105,15 @@ function takeComposerExtras(text) {
   mentionModel = null;
   renderAttachments();
   if (!ready.length) return { overrideModel, extra: {} };
-  const blocks = ready.map(a => `<file name="${a.name.replace(/"/g, "'")}">\n${a.text}\n</file>`).join('\n\n');
-  return {
-    overrideModel,
-    extra: {
-      content: `${text}\n\nAttached files:\n\n${blocks}`,
-      files: ready.map(a => a.name),
-    },
-  };
+  const textFiles = ready.filter(a => !a.media);
+  const media = ready.filter(a => a.media).map(a => a.media);
+  const extra = { files: ready.filter(a => !a.media || a.media.kind !== 'image').map(a => a.name) };
+  if (textFiles.length) {
+    const blocks = textFiles.map(a => `<file name="${a.name.replace(/"/g, "'")}">\n${a.text}\n</file>`).join('\n\n');
+    extra.content = `${text}\n\nAttached files:\n\n${blocks}`;
+  }
+  if (media.length) extra.attachments = media;
+  return { overrideModel, extra };
 }
 
 const popupEls = { box: $('composerPopup'), title: $('composerPopupTitle'), list: $('composerPopupList') };

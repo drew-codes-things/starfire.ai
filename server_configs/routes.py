@@ -7,7 +7,7 @@ import zipfile
 
 import httpx
 from fastapi import APIRouter, HTTPException, UploadFile
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 import builtin_tools
@@ -18,6 +18,7 @@ import hardware_probe
 import model_capabilities
 import ollama_manager
 from agent_loop import run_chat_with_tools
+from attachments import AttachmentError, AttachmentStore, expand_attachments
 from api_key_manager import APIKeyManager
 from chat_session_store import ChatSessionStore
 from chat_stream import _sse_line, stream_chat
@@ -51,6 +52,7 @@ endpoints = ModelEndpointStore(config.data_dir)
 mcp_servers = McpServerStore(config.data_dir)
 memory = MemoryStore(config.data_dir)
 documents = DocumentStore(config.data_dir)
+attachment_store = AttachmentStore(config.data_dir)
 tasks = TaskStore(config.data_dir)
 task_runs = TaskRunStore(config.data_dir)
 email_accounts = EmailAccountStore(config.data_dir)
@@ -338,6 +340,28 @@ async def add_document(file: UploadFile):
     except ValueError as e:
         raise HTTPException(400, str(e))
     return {"id": doc.id, "filename": doc.filename, "chunk_count": doc.chunk_count}
+
+async def _upload_chunks(file: UploadFile):
+    while chunk := await file.read(1024 * 1024):
+        yield chunk
+
+@router.post("/attachments")
+async def add_attachment(file: UploadFile):
+    try:
+        attachment = await attachment_store.save(file.filename or "attachment", file.content_type or "",
+                                                 _upload_chunks(file))
+    except AttachmentError as e:
+        raise HTTPException(400, str(e))
+    return attachment.public()
+
+@router.get("/attachments/{attachment_id}")
+async def get_attachment(attachment_id: str):
+    try:
+        attachment = attachment_store.get(attachment_id)
+    except AttachmentError as e:
+        raise HTTPException(404, str(e))
+    return FileResponse(attachment_store.data_path(attachment.id), media_type=attachment.mime,
+                        filename=attachment.name, content_disposition_type="inline")
 
 MAX_DOCUMENT_CONTEXT_CHARS = 60_000
 
@@ -855,6 +879,12 @@ async def chat_stream_endpoint(body: ChatBody):
     DEFAULT_CONTEXT_BUDGET_TOKENS = 8192
     num_ctx = (body.options or {}).get("num_ctx", DEFAULT_CONTEXT_BUDGET_TOKENS)
     messages = trim_to_budget(body.messages, num_ctx)
+    input_text = "\n".join(m.get("content") or "" for m in messages)
+    try:
+        messages = await expand_attachments(messages, attachment_store, endpoint.base_url, api_key,
+                                            endpoint.label or endpoint.base_url)
+    except AttachmentError as e:
+        raise HTTPException(400, str(e))
 
     tools_requested = bool(body.enabled_mcp_servers or body.enabled_builtin_tools)
     tools_usable = tools_requested and model_capabilities.supports_tools(endpoint.provider, body.model)
@@ -877,7 +907,6 @@ async def chat_stream_endpoint(body: ChatBody):
     else:
         generator = stream_chat(endpoint.base_url, api_key, body.model, messages, body.system, body.options)
 
-    input_text = "\n".join(m.get("content") or "" for m in messages)
     generator = _track_usage(generator, endpoint.provider, body.model, input_text)
 
     return StreamingResponse(

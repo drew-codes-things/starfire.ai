@@ -1225,3 +1225,6 @@ body.login-page {
 }
 .login-submit:hover { filter: brightness(1.12); }
 .login-submit:disabled { opacity: .6; cursor: default; filter: none; }
+
+.msg-images { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; margin-bottom: 6px; }
+.msg-image { max-width: 220px; max-height: 220px; border-radius: 12px; border: 1px solid var(--border); object-fit: cover; }

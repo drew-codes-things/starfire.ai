@@ -259,7 +259,7 @@ function markdownRender(text) {
   return text.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 }
 
-function appendMessageRow(role, idx, modelName, files) {
+function appendMessageRow(role, idx, modelName, files, media = []) {
   const w = $('welcome');
   if (w) w.remove();
 
@@ -277,6 +277,14 @@ function appendMessageRow(role, idx, modelName, files) {
     fileRow.className = 'msg-files';
     fileRow.innerHTML = files.map(name => `<span class="chip"><span class="chip-label">${escapeHtml(name)}</span></span>`).join('');
     row.appendChild(fileRow);
+  }
+  const images = media.filter(m => m.kind === 'image');
+  if (images.length) {
+    const imageRow = document.createElement('div');
+    imageRow.className = 'msg-images';
+    imageRow.innerHTML = images.map(m =>
+      `<img class="msg-image" src="/api/attachments/${encodeURIComponent(m.id)}" alt="${escapeHtml(m.name)}" loading="lazy" />`).join('');
+    row.appendChild(imageRow);
   }
   const content = document.createElement('div');
   content.className = 'line ' + role;
@@ -626,7 +634,7 @@ function startEditReply(idx) {
 
 function renderStaticMessage(role, msg, idx) {
   const text = role === 'user' ? (msg.display ?? msg.content) : msg.content;
-  const { row, content, actions } = appendMessageRow(role, idx, msg.model, msg.files);
+  const { row, content, actions } = appendMessageRow(role, idx, msg.model, msg.files, msg.attachments);
   if (role === 'ai') renderAiContent(content, text);
   else content.textContent = text;
   addActionButtons(role, row, actions, idx);
@@ -789,7 +797,11 @@ async function loadModels() {
 }
 
 function apiMessages(list) {
-  return list.map(m => ({ role: m.role, content: m.content }));
+  return list.map(m => {
+    const message = { role: m.role, content: m.content };
+    if (m.attachments && m.attachments.length) message.attachments = m.attachments.map(a => a.id);
+    return message;
+  });
 }
 
 async function send(text, overrideModel, extra = {}) {
@@ -805,9 +817,10 @@ async function send(text, overrideModel, extra = {}) {
 
   const userIdx = messages.length;
   const userMessage = { role: 'user', content: extra.content || text, created: new Date().toISOString() };
-  if (extra.content) Object.assign(userMessage, { display: text, files: extra.files || [] });
+  if (extra.content || extra.files) Object.assign(userMessage, { display: text, files: extra.files || [] });
+  if (extra.attachments && extra.attachments.length) userMessage.attachments = extra.attachments;
   messages.push(userMessage);
-  const userRow = appendMessageRow('user', userIdx, null, userMessage.files);
+  const userRow = appendMessageRow('user', userIdx, null, userMessage.files, userMessage.attachments);
   userRow.content.textContent = text;
   addActionButtons('user', userRow.row, userRow.actions, userIdx);
   saveDraft();
