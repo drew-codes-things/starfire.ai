@@ -154,6 +154,15 @@ async def require_client_header(request: Request, call_next):
             return JSONResponse({"detail": "missing required client header"}, status_code=403)
     return await call_next(request)
 
+REVALIDATED_SUFFIXES = (".html", ".js", ".css", "/")
+
+@app.middleware("http")
+async def revalidate_app_files(request: Request, call_next):
+    response = await call_next(request)
+    if not request.url.path.startswith("/api/") and request.url.path.endswith(REVALIDATED_SUFFIXES):
+        response.headers.setdefault("Cache-Control", "no-cache")
+    return response
+
 auth.install(app, auth_routes.users, auth_routes.sessions)
 app.include_router(auth_routes.router)
 app.include_router(routes.router)

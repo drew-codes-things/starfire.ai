@@ -2,6 +2,7 @@
   --bg: #0a0a0b;
   --fg: #ececec;
   --panel: rgba(255, 255, 255, .045);
+  --surface: #151517;
   --panel-2:#1a1a1d;
   --border: rgba(255, 255, 255, .08);
   --red: #e5383b;
@@ -22,6 +23,7 @@ html.light {
   --bg:     #f7f7f8;
   --fg:     #1a1a1a;
   --panel:  #ffffff;
+  --surface: #ffffff;
   --panel-2:#f0f0f2;
   --border: #dcdcdf;
   --red:    #d13a3a;
@@ -321,7 +323,7 @@ select:focus, input:focus, textarea:focus { border-color: var(--red); }
 
 .model-menu, .menu, .context-menu {
   position: absolute;
-  background: var(--panel);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
@@ -600,7 +602,7 @@ html.light .welcome-logo { filter: none; }
   height: 30px;
   border-radius: 50%;
   border: 1px solid var(--border);
-  background: var(--panel);
+  background: var(--surface);
   color: var(--fg);
   cursor: pointer;
   z-index: 5;
@@ -676,7 +678,7 @@ html.light .welcome-logo { filter: none; }
   left: 18px;
   right: 18px;
   bottom: calc(100% - 2px);
-  background: var(--panel);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
@@ -784,6 +786,7 @@ kbd {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -798,7 +801,7 @@ kbd {
   max-width: 640px;
   border-radius: 8px;
   max-height: 85vh;
-  background: var(--panel);
+  background: var(--surface);
   border: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -1007,13 +1010,14 @@ kbd {
   align-items: flex-start;
   justify-content: center;
   padding-top: 12vh;
+  backdrop-filter: blur(6px);
   z-index: 300;
 }
 .palette-overlay[hidden] { display: none; }
 .palette-box {
   width: 100%;
   max-width: 560px;
-  background: var(--panel);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
   overflow: hidden;
