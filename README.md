@@ -47,18 +47,21 @@ It listens on `127.0.0.1` only by default.
 
 ### Logging in
 
-Once at least one account exists, every page and API call needs a login (email and
-password, kept for 30 days in an HttpOnly cookie; 5 wrong passwords lock that email from
-that address for 15 minutes). With no accounts it stays open, which is only safe on
-`127.0.0.1` - starfire refuses to start on any other `BIND_HOST` until an account exists.
+The first time you open starfire it shows a setup page: choose your name, email and a
+password (at least 10 characters). That makes the admin account, and the setup page closes
+for good. Until then, every other page and API call is locked, so set it up straight away
+on a new install. After that, every page and API call needs a login (kept for 30 days in an
+HttpOnly cookie; 5 wrong passwords lock that email from that address for 15 minutes).
+Change your password under **Settings → account**; that logs out every other browser.
 
-To reuse your Open WebUI login (same email and password - only the bcrypt hash is copied):
+To copy logins from Open WebUI instead (same email and password - only the bcrypt hash is
+copied):
 
 ```bash
 python import_openwebui_users.py /path/to/open-webui/data/webui.db
 ```
 
-Run it again whenever you change your password in Open WebUI. Accounts are kept in
+Accounts are kept in
 `data/users.json`. The cookie is `Secure`, so serve it over HTTPS (or `localhost`), or set
 `COOKIE_SECURE=false` for plain HTTP on a trusted network. Everyone who logs in shares the
 same chats and settings - it's still a single-user app with a lock on the door. The shell

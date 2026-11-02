@@ -21,10 +21,31 @@ SESSION_LIFETIME_SECONDS = 30 * 24 * 3600
 MAX_FAILED_LOGINS = 5
 LOCKOUT_SECONDS = 15 * 60
 LOGIN_PAGE = "/login.html"
-PUBLIC_PATHS = frozenset({LOGIN_PAGE, "/login.js", "/style.css", "/api/auth/login"})
+SETUP_PAGE = "/setup.html"
+PUBLIC_PATHS = frozenset({LOGIN_PAGE, "/login.js", "/style.css", "/api/auth/login", "/api/auth/status"})
+SETUP_PATHS = frozenset({SETUP_PAGE, "/setup.js", "/api/auth/setup"})
+MIN_PASSWORD_CHARS = 10
+MAX_FIELD_CHARS = 256
 PUBLIC_PREFIXES = ("/assets/",)
 ROLES = ("admin", "user")
 UNUSED_HASH = bcrypt.hashpw(b"starfire-timing-equaliser", bcrypt.gensalt()).decode()
+
+
+class AccountError(ValueError):
+    pass
+
+
+def check_new_password(password: str, confirm: str) -> None:
+    if len(password) < MIN_PASSWORD_CHARS:
+        raise AccountError(f"use at least {MIN_PASSWORD_CHARS} characters")
+    if len(password) > MAX_FIELD_CHARS:
+        raise AccountError("that password is too long")
+    if password != confirm:
+        raise AccountError("the two passwords don't match")
+
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
 @dataclass
@@ -77,6 +98,35 @@ class UserStore:
         stored_hash = user.password_hash if user else UNUSED_HASH
         matches = bcrypt.checkpw(password.encode(), stored_hash.encode())
         return user if user and matches else None
+
+    def create_first(self, email: str, name: str, password: str, confirm: str) -> User:
+        email = normalise_email(email)
+        if "@" not in email or "." not in email.split("@")[-1] or len(email) > MAX_FIELD_CHARS:
+            raise AccountError("enter a valid email address")
+        if len(name) > MAX_FIELD_CHARS:
+            raise AccountError("that name is too long")
+        check_new_password(password, confirm)
+        with self._lock:
+            if self.list():
+                raise AccountError("an account already exists - log in instead")
+            user = User(id=uuid.uuid4().hex, email=email, name=name.strip() or email, role="admin",
+                        password_hash=hash_password(password))
+            atomic_write_json(self.path, [asdict(user)])
+            os.chmod(self.path, 0o600)
+        return user
+
+    def change_password(self, user_id: str, current: str, password: str, confirm: str) -> None:
+        user = self.find_by_id(user_id)
+        if not user or not self.verify(user.email, current[:MAX_FIELD_CHARS]):
+            raise AccountError("your current password is wrong")
+        check_new_password(password, confirm)
+        with self._lock:
+            users = self.list()
+            for stored in users:
+                if stored.id == user_id:
+                    stored.password_hash = hash_password(password)
+            atomic_write_json(self.path, [asdict(u) for u in users])
+            os.chmod(self.path, 0o600)
 
     def upsert(self, email: str, name: str, role: str, password_hash: str) -> User:
         if role not in ROLES:
@@ -133,6 +183,12 @@ class SessionStore:
             sessions = _read_json(self.path, dict)
             if sessions.pop(_token_digest(token), None) is not None:
                 atomic_write_json(self.path, sessions)
+
+    def revoke_all_for(self, user_id: str) -> None:
+        with self._lock:
+            sessions = _read_json(self.path, dict)
+            atomic_write_json(self.path, {d: s for d, s in sessions.items() if s.get("user_id") != user_id})
+            os.chmod(self.path, 0o600)
 
 
 class LoginLimiter:
@@ -194,7 +250,18 @@ def install(app: FastAPI, users: UserStore, sessions: SessionStore) -> None:
 
     @app.middleware("http")
     async def require_login(request: Request, call_next):
-        if not users.has_users() or is_public(request.url.path):
+        path = request.url.path
+        if not users.has_users():
+            if path in SETUP_PATHS or (is_public(path) and path != LOGIN_PAGE):
+                return await call_next(request)
+            if path.startswith("/api/"):
+                return JSONResponse({"detail": "set up an account first", "setup": True}, status_code=401)
+            return RedirectResponse(SETUP_PAGE, status_code=303)
+        if path in SETUP_PATHS:
+            if path.startswith("/api/"):
+                return JSONResponse({"detail": "an account already exists - log in instead"}, status_code=409)
+            return RedirectResponse(LOGIN_PAGE, status_code=303)
+        if is_public(path):
             return await call_next(request)
         user = current_user(request, users, sessions)
         if user:

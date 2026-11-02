@@ -1,3 +1,4 @@
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -7,11 +8,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "ser
 
 def _bootstrap_dependencies() -> None:
     need_install = shutil.which("uvx") is None or shutil.which("piper") is None
-    if not need_install:
-        try:
-            import fastapi
-        except ImportError:
-            need_install = True
+    if not need_install and importlib.util.find_spec("fastapi") is None:
+        need_install = True
 
     if need_install:
         print("  starfire.ai  ->  installing dependencies (first run)...")
@@ -143,9 +141,9 @@ async def lifespan(app: FastAPI):
     for server in routes.mcp_servers.list():
         await mcp_manager.disconnect(server.id)
 
-if not auth.is_loopback(config.bind_host) and not auth_routes.users.has_users():
-    sys.exit(f"starfire.ai: BIND_HOST is {config.bind_host}, but no accounts exist, so anyone who can reach "
-             "the port could use it. Add one with import_openwebui_users.py, or set BIND_HOST=127.0.0.1.")
+if not auth_routes.users.has_users():
+    print(f"starfire.ai: no account yet - open the app and choose your email and password on {auth.SETUP_PAGE} "
+          "(everything else stays locked until you do).", file=sys.stderr)
 
 app = FastAPI(title="starfire.ai", lifespan=lifespan)
 

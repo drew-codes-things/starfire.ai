@@ -25,6 +25,42 @@ async function setUpLogout() {
     await fetch('/api/auth/logout', { method: 'POST' });
     window.location.replace('/login.html');
   });
+  setUpPasswordChange(user);
+}
+
+function setUpPasswordChange(user) {
+  const card = document.getElementById('accountCard');
+  const form = document.getElementById('passwordForm');
+  const status = document.getElementById('passwordStatus');
+  const submit = document.getElementById('passwordSubmit');
+  document.getElementById('accountWho').textContent = `Logged in as ${user.email} (${user.role})`;
+  card.hidden = false;
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    const body = {
+      current: document.getElementById('currentPassword').value,
+      password: document.getElementById('newPassword').value,
+      confirm: document.getElementById('confirmPassword').value,
+    };
+    status.className = 'settings-hint';
+    status.textContent = 'saving…';
+    submit.disabled = true;
+    try {
+      const response = await fetch('/api/auth/password', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || `failed (${response.status})`);
+      form.reset();
+      status.className = 'settings-hint ok';
+      status.textContent = 'password changed - other browsers have been logged out';
+    } catch (error) {
+      status.className = 'settings-hint error';
+      status.textContent = `couldn't change it: ${error.message}`;
+    } finally {
+      submit.disabled = false;
+    }
+  });
 }
 
 const $ = id => document.getElementById(id);

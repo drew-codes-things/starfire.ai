@@ -105,9 +105,21 @@ def test_limiter_locks_after_repeated_failures_and_resets():
     assert limiter.seconds_locked("ip|drew") == 0
 
 
-def test_everything_is_open_until_an_account_exists(users, sessions):
+def test_only_setup_is_reachable_until_an_account_exists(users, sessions):
     client = TestClient(build_app(users, sessions))
-    assert client.get("/index.html").status_code == 200
+    for page in ("/index.html", "/login.html"):
+        response = client.get(page, follow_redirects=False)
+        assert response.status_code == 303 and response.headers["location"] == "/setup.html"
+    response = client.get("/api/secret")
+    assert response.status_code == 401 and response.json()["setup"] is True
+
+
+def test_setup_is_closed_once_an_account_exists(users, sessions):
+    users.upsert("drew@example.com", "Drew", "admin", fast_hash(PASSWORD))
+    client = TestClient(build_app(users, sessions))
+    page = client.get("/setup.html", follow_redirects=False)
+    assert page.status_code == 303 and page.headers["location"] == "/login.html"
+    assert client.post("/api/auth/setup", json={}).status_code == 409
 
 
 def test_login_is_required_once_an_account_exists(users, sessions):
@@ -169,3 +181,55 @@ def test_login_route_rejects_wrong_passwords_then_locks(login_client):
 def test_login_route_rejects_oversized_input(login_client):
     response = login_client.post("/api/auth/login", json={"email": "a" * 300, "password": PASSWORD})
     assert response.status_code == 400
+
+
+@pytest.fixture
+def setup_client(users, sessions, monkeypatch):
+    import auth_routes
+    monkeypatch.setattr(auth_routes, "users", users)
+    monkeypatch.setattr(auth_routes, "sessions", sessions)
+    app = build_app(users, sessions)
+    app.include_router(auth_routes.router)
+    return TestClient(app, base_url="https://testserver")
+
+
+def setup_body(**changes):
+    return {"email": "Drew@Example.com", "name": "Drew", "password": PASSWORD, "confirm": PASSWORD, **changes}
+
+
+@pytest.mark.parametrize("changes, message", [
+    ({"email": "not-an-email"}, "valid email"),
+    ({"password": "short", "confirm": "short"}, "at least 10"),
+    ({"confirm": PASSWORD + "!"}, "don't match"),
+])
+def test_setup_refuses_bad_details(setup_client, users, changes, message):
+    response = setup_client.post("/api/auth/setup", json=setup_body(**changes))
+    assert response.status_code == 400 and message in response.json()["detail"]
+    assert not users.has_users()
+
+
+def test_setup_creates_one_admin_and_logs_in(setup_client, users):
+    assert setup_client.get("/api/auth/status").json() == {"has_users": False}
+    response = setup_client.post("/api/auth/setup", json=setup_body())
+    assert response.json() == {"email": "drew@example.com", "name": "Drew", "role": "admin"}
+    assert setup_client.get("/api/secret").status_code == 200
+    assert PASSWORD not in open(users.path).read()
+    again = setup_client.post("/api/auth/setup", json=setup_body(email="evil@example.com"))
+    assert again.status_code == 409
+    assert [u.email for u in users.list()] == ["drew@example.com"]
+
+
+def test_changing_the_password_logs_out_other_sessions(setup_client, users, sessions):
+    setup_client.post("/api/auth/setup", json=setup_body())
+    user = users.list()[0]
+    other_token = sessions.create(user.id)
+    new = "a brand new password"
+
+    wrong = setup_client.post("/api/auth/password", json={"current": "nope", "password": new, "confirm": new})
+    assert wrong.status_code == 400
+    changed = setup_client.post("/api/auth/password", json={"current": PASSWORD, "password": new, "confirm": new})
+    assert changed.status_code == 200
+
+    assert sessions.user_id_for(other_token) is None
+    assert setup_client.get("/api/secret").status_code == 200
+    assert users.verify("drew@example.com", new) and not users.verify("drew@example.com", PASSWORD)

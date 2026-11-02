@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
-from auth import (SESSION_COOKIE, SESSION_LIFETIME_SECONDS, LoginLimiter, SessionStore, UserStore,
-                  client_address, current_user, normalise_email)
+from auth import (MAX_FIELD_CHARS, SESSION_COOKIE, SESSION_LIFETIME_SECONDS, AccountError, LoginLimiter, SessionStore,
+                  UserStore, client_address, current_user, normalise_email)
 from config import config
 
 router = APIRouter(prefix="/api/auth")
@@ -10,12 +10,30 @@ users = UserStore(config.data_dir)
 sessions = SessionStore(config.data_dir)
 limiter = LoginLimiter()
 
-MAX_FIELD_LENGTH = 256
+MAX_FIELD_LENGTH = MAX_FIELD_CHARS
 
 
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+
+class SetupRequest(BaseModel):
+    email: str
+    name: str = ""
+    password: str
+    confirm: str
+
+
+class PasswordRequest(BaseModel):
+    current: str
+    password: str
+    confirm: str
+
+
+def _start_session(response: Response, user_id: str) -> None:
+    response.set_cookie(SESSION_COOKIE, sessions.create(user_id), max_age=SESSION_LIFETIME_SECONDS,
+                        httponly=True, secure=config.cookie_secure, samesite="lax", path="/")
 
 
 @router.post("/login")
@@ -31,9 +49,37 @@ def login(body: LoginRequest, request: Request, response: Response):
         limiter.record_failure(limit_key)
         raise HTTPException(status_code=401, detail="wrong email or password")
     limiter.reset(limit_key)
-    response.set_cookie(SESSION_COOKIE, sessions.create(user.id), max_age=SESSION_LIFETIME_SECONDS,
-                        httponly=True, secure=config.cookie_secure, samesite="lax", path="/")
+    _start_session(response, user.id)
     return user.public()
+
+
+@router.get("/status")
+def status():
+    return {"has_users": users.has_users()}
+
+
+@router.post("/setup")
+def setup(body: SetupRequest, response: Response):
+    try:
+        user = users.create_first(body.email, body.name, body.password, body.confirm)
+    except AccountError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    _start_session(response, user.id)
+    return user.public()
+
+
+@router.post("/password")
+def change_password(body: PasswordRequest, request: Request, response: Response):
+    user = current_user(request, users, sessions)
+    if not user:
+        raise HTTPException(status_code=401, detail="not logged in")
+    try:
+        users.change_password(user.id, body.current, body.password, body.confirm)
+    except AccountError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    sessions.revoke_all_for(user.id)
+    _start_session(response, user.id)
+    return {"ok": True}
 
 
 @router.post("/logout")

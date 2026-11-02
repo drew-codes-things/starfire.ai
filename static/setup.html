@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#0a0a0b" />
+  <title>Set up · starfire.ai</title>
+  <link rel="icon" href="assets/logo.svg" type="image/svg+xml" />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="login-page">
+  <main class="login-card">
+    <img class="login-logo" src="assets/logo.svg" alt="" />
+    <h1>Welcome to starfire.ai</h1>
+    <p class="login-sub">Create your account. It's the admin account, and this page only works once.</p>
+    <form id="setupForm" novalidate>
+      <label for="setupName">Name</label>
+      <input id="setupName" name="name" type="text" autocomplete="name" maxlength="256" />
+      <label for="setupEmail">Email</label>
+      <input id="setupEmail" name="email" type="email" autocomplete="username" required autofocus />
+      <label for="setupPassword">Password (at least 10 characters)</label>
+      <input id="setupPassword" name="password" type="password" autocomplete="new-password" minlength="10" required />
+      <label for="setupConfirm">Password again</label>
+      <input id="setupConfirm" name="confirm" type="password" autocomplete="new-password" minlength="10" required />
+      <p class="login-error" id="setupError" role="alert" hidden></p>
+      <button class="login-submit" id="setupSubmit" type="submit">Create account</button>
+    </form>
+  </main>
+  <script src="setup.js"></script>
+</body>
+</html>
