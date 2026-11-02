@@ -1131,26 +1131,26 @@ class QuickCompleteBody(BaseModel):
 def _quick_target(body: QuickCompleteBody):
     helper_endpoint = helper_tasks.ollama_endpoint(endpoints.list()) if body.helper and config.task_model else None
     if helper_endpoint:
-        return (helper_endpoint, config.task_model, helper_tasks.helper_prompt(body.prompt, config.task_model),
-                helper_tasks.helper_options(config.task_num_ctx))
+        return (helper_endpoint, config.task_model, helper_tasks.helper_options(config.task_num_ctx),
+                helper_tasks.helper_think(config.task_model))
     endpoint = endpoints.get(body.endpoint_id)
     if not endpoint:
         raise HTTPException(404, "endpoint not found")
-    return endpoint, body.model, body.prompt, None
+    return endpoint, body.model, None, None
 
 @router.post("/quick-complete")
 async def quick_complete(body: QuickCompleteBody):
     from agent_loop import run_chat_collected
 
-    endpoint, model, prompt, options = _quick_target(body)
+    endpoint, model, options, think = _quick_target(body)
     api_key = _api_key_for(endpoint.id, endpoint.provider)
     try:
         text = await run_chat_collected(endpoint.base_url, api_key, model,
-                                          [{"role": "user", "content": prompt}], options=options)
+                                          [{"role": "user", "content": body.prompt}], options=options, think=think)
     except RuntimeError as e:
         raise HTTPException(502, str(e))
     text = helper_tasks.clean_reply(text)
-    usage.record(endpoint.provider, model, prompt, text)
+    usage.record(endpoint.provider, model, body.prompt, text)
     return {"text": text}
 
 @router.get("/usage")

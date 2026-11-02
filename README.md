@@ -123,7 +123,7 @@ These small jobs go to the chat's own model unless `TASK_MODEL` is set, in which
 straight to that Ollama model instead. That keeps them out of an assistant's history and tool
 loop (Arty's brain, for example): point it at the model the assistant already has loaded, with
 `TASK_NUM_CTX` matching its context size, so Ollama doesn't load a second copy. Qwen3 models
-are asked not to think for these.
+are asked not to think for these (Ollama's `think: false`).
 
 ## Chats
 

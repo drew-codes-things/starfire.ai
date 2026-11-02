@@ -65,7 +65,8 @@ async def run_chat_collected(base_url: str, api_key: str | None, model: str, mes
                               system: str | None = None, options: dict | None = None,
                               enabled_server_ids: set[str] | None = None,
                               enabled_builtin_tools: set[str] | None = None,
-                              ctx: "builtin_tools.ToolContext | None" = None) -> str:
+                              ctx: "builtin_tools.ToolContext | None" = None,
+                              think: bool | None = None) -> str:
     enabled_server_ids = enabled_server_ids or set()
     enabled_builtin_tools = enabled_builtin_tools or set()
 
@@ -81,7 +82,8 @@ async def run_chat_collected(base_url: str, api_key: str | None, model: str, mes
                 elif kind == "error":
                     error = payload
     else:
-        async for kind, payload in stream_chat_once(base_url, api_key, model, messages, system, options):
+        async for kind, payload in stream_chat_once(base_url, api_key, model, messages, system, options,
+                                                    think=think):
             if kind == "delta":
                 text_parts.append(payload)
             elif kind == "error":

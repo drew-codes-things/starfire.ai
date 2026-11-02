@@ -19,8 +19,8 @@ def test_ollama_endpoint_is_found():
 
 
 def test_qwen3_is_asked_not_to_think():
-    assert helper_tasks.helper_prompt("Title?", "qwen3:14b").endswith("/no_think")
-    assert helper_tasks.helper_prompt("Title?", "llama3.1:8b") == "Title?"
+    assert helper_tasks.helper_think("qwen3:14b") is False
+    assert helper_tasks.helper_think("llama3.1:8b") is None
 
 
 def test_options_match_the_loaded_context():
@@ -31,3 +31,26 @@ def test_options_match_the_loaded_context():
 def test_thinking_is_removed_from_replies():
     assert helper_tasks.clean_reply("<think>\nhmm\n</think>\n\nPlex setup") == "Plex setup"
     assert helper_tasks.clean_reply("  plain  ") == "plain"
+
+
+def test_ollama_payload_carries_think(monkeypatch):
+    import asyncio
+    import chat_stream
+
+    sent = {}
+
+    async def fake_iter(client, url, headers, payload):
+        sent.update(payload)
+        yield ("delta", "ok")
+
+    monkeypatch.setattr(chat_stream, "_iter_ollama", fake_iter)
+
+    async def collect(**kwargs):
+        return [item async for item in chat_stream.stream_chat_once(
+            "http://127.0.0.1:11434", None, "qwen3:14b", [{"role": "user", "content": "hi"}], None, None, **kwargs)]
+
+    assert asyncio.run(collect(think=False)) == [("delta", "ok")]
+    assert sent["think"] is False
+    sent.clear()
+    asyncio.run(collect())
+    assert "think" not in sent

@@ -211,7 +211,8 @@ def _hosted_params(provider: str, options: dict | None) -> dict:
     return {names[key]: value for key, value in (options or {}).items() if key in names and value is not None}
 
 async def stream_chat_once(base_url: str, api_key: str | None, model: str, messages: list[dict],
-                            system: str | None, options: dict | None, tools: list[dict] | None = None):
+                            system: str | None, options: dict | None, tools: list[dict] | None = None,
+                            think: bool | None = None):
     provider = _detect_provider(base_url)
     url = build_chat_url(base_url)
     headers = build_headers(api_key, base_url)
@@ -225,6 +226,7 @@ async def stream_chat_once(base_url: str, api_key: str | None, model: str, messa
                     "messages": _to_ollama_messages(_build_messages(messages, system)),
                     **({"options": options} if options else {}),
                     **({"tools": tools_param} if tools_param else {}),
+                    **({"think": think} if think is not None else {}),
                 }
                 async for item in _iter_ollama(client, url, headers, payload):
                     yield item

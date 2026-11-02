@@ -10,10 +10,8 @@ def ollama_endpoint(endpoints: list):
     return next((e for e in endpoints if e.provider == "ollama"), None)
 
 
-def helper_prompt(prompt: str, model: str) -> str:
-    if model.lower().startswith(NO_THINK_MODELS):
-        return f"{prompt}\n\n/no_think"
-    return prompt
+def helper_think(model: str) -> bool | None:
+    return False if model.lower().startswith(NO_THINK_MODELS) else None
 
 
 def helper_options(num_ctx: int) -> dict:
