@@ -43,10 +43,26 @@ python server.py
 
 Then open [http://localhost:8080](http://localhost:8080).
 
-It listens on `127.0.0.1` only. There's no login, and the browser decides which tools a
-chat can use - including the shell tool - so anyone who can reach the port could run
-commands on this machine. Only set `BIND_HOST=0.0.0.0` (or publish the Docker port beyond
-loopback) behind your own authentication, e.g. a reverse proxy or Cloudflare Access.
+It listens on `127.0.0.1` only by default.
+
+### Logging in
+
+Once at least one account exists, every page and API call needs a login (email and
+password, kept for 30 days in an HttpOnly cookie; 5 wrong passwords lock that email from
+that address for 15 minutes). With no accounts it stays open, which is only safe on
+`127.0.0.1` - starfire refuses to start on any other `BIND_HOST` until an account exists.
+
+To reuse your Open WebUI login (same email and password - only the bcrypt hash is copied):
+
+```bash
+python import_openwebui_users.py /path/to/open-webui/data/webui.db
+```
+
+Run it again whenever you change your password in Open WebUI. Accounts are kept in
+`data/users.json`. The cookie is `Secure`, so serve it over HTTPS (or `localhost`), or set
+`COOKIE_SECURE=false` for plain HTTP on a trusted network. Everyone who logs in shares the
+same chats and settings - it's still a single-user app with a lock on the door. The shell
+tool runs as whichever user starfire runs as, so give it an unprivileged one.
 
 If Ollama is already running on its default port, it's detected automatically on startup
 and appears in the model list with no setup. Otherwise, open **Settings → Providers** and
