@@ -164,6 +164,11 @@ async def revalidate_app_files(request: Request, call_next):
     return response
 
 auth.install(app, auth_routes.users, auth_routes.sessions)
+
+@app.get("/api/health")
+async def health():
+    return {"ok": True}
+
 app.include_router(auth_routes.router)
 app.include_router(routes.router)
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

@@ -1,0 +1,21 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt pytest pyflakes
+      - run: python -m pyflakes server.py server_configs tests import_openwebui_users.py import_openwebui_data.py
+      - run: python -m pytest -q
+        env:
+          DATA_DIR: ${{ runner.temp }}/starfire-test-data
+      - run: node --check static/app.js && node --check static/workspace.js && node --check static/login.js && node --check static/setup.js

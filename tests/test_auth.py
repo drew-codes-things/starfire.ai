@@ -233,3 +233,7 @@ def test_changing_the_password_logs_out_other_sessions(setup_client, users, sess
     assert sessions.user_id_for(other_token) is None
     assert setup_client.get("/api/secret").status_code == 200
     assert users.verify("drew@example.com", new) and not users.verify("drew@example.com", PASSWORD)
+
+
+def test_health_check_needs_no_login():
+    assert auth.is_public("/api/health")
