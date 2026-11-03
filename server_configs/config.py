@@ -12,6 +12,14 @@ class AppConfig(BaseSettings):
     cookie_secure: bool = True
     task_model: str = ""
     task_num_ctx: int = 0
+    own_tools_models: str = "assistant-core,arty/*"
+    inline_media_prefixes: str = "/arty-files/"
+
+    def own_tools_patterns(self) -> list[str]:
+        return [p.strip() for p in self.own_tools_models.split(",") if p.strip()]
+
+    def media_prefixes(self) -> list[str]:
+        return [p.strip() for p in self.inline_media_prefixes.split(",") if p.strip()]
 
 config = AppConfig()
 

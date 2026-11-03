@@ -1,8 +1,24 @@
 # Changelog
 
-## Unreleased
+## 1.0.0 - 2026-11-03
 
 ### Added
+- Shell commands proposed by the model wait in the chat for "run it" or "reject" (on by
+  default, five-minute timeout); the model only sees the output after approval.
+  `GET /api/pending-shell` and approve/reject routes. Automations still run unattended.
+- `find_image` tool: DuckDuckGo image search, server-side download with type, size and
+  private-address checks, shown inline with its source link.
+- MCP servers over streamable HTTP and SSE, with an optional Authorization header, from the
+  custom-server form. Stdio servers are unchanged.
+- Tool levels for local models: none under 3B, a basic set capped at eight tools up to 12B,
+  everything from 12B; the banner above the chat says which applies.
+- `reset_password.py` to set a new password from the terminal and log every browser out.
+- A version number (`/api/health`, `/api/config`, Settings → Interface → about).
+- `OWN_TOOLS_MODELS` and `INLINE_MEDIA_PREFIXES` settings replace the hard-coded Arty model
+  ids and media path.
+- IBM Plex fonts bundled locally; no request leaves the machine for fonts.
+- API tests for chat sessions, import, folders, notes, tasks, prompts, memory, the code check,
+  shell approval, image search, MCP validation and the reset script.
 - Code blocks render in a box with the language, a copy button and a check result. Every
   block in a finished reply is parsed or compiled on the server (Python, JavaScript,
   TypeScript, shell, JSON, YAML, TOML, XML, Go, C, C++, Ruby, PHP; never run); a failing block

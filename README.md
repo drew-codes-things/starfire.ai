@@ -52,7 +52,13 @@ password (at least 10 characters). That makes the admin account, and the setup p
 for good. Until then, every other page and API call is locked, so set it up straight away
 on a new install. After that, every page and API call needs a login (kept for 30 days in an
 HttpOnly cookie; 5 wrong passwords lock that email from that address for 15 minutes).
-Change your password under **Settings → account**; that logs out every other browser.
+Change your password under **Settings → account**; that logs out every other browser. Forgot
+it? Reset it from the terminal on the machine starfire runs on (this also logs out every
+browser that was signed in):
+
+```bash
+python reset_password.py you@example.com
+```
 
 To copy logins from Open WebUI instead (same email and password - only the bcrypt hash is
 copied):
@@ -162,6 +168,11 @@ three official reference servers) are installed and connected automatically on f
 enable their checkbox to use them in a chat. **Filesystem** (read/write within a directory you
 choose) stays a manual "Quick add" since it needs that directory choice first.
 
+An MCP server that is already running at a URL - the newer **streamable HTTP** transport or
+the older **SSE** one - is added from the same **Custom MCP server** form: pick the transport,
+paste the URL (for example `http://localhost:3001/mcp`) and, if the server wants one, an
+`Authorization` header value. Local servers stay stdio: a command plus arguments.
+
 Filesystem and MCP Memory need [Node.js](https://nodejs.org) (`npx`) installed locally; Fetch
 needs [uv](https://docs.astral.sh/uv/) (`uvx`). Beyond those three, a **server repository**
 dropdown lists other common MCP servers (Git, GitHub, GitLab, SQLite, Brave Search, Slack,
@@ -175,14 +186,34 @@ Automations, and Email below for most of them, plus:
 
 - **Search the web** - a single no-API-key backend (DuckDuckGo's HTML results page); see
   `server_configs/web_search.py`. Swapping in a proper provider later is a one-function change.
+- **Find images on the web** - DuckDuckGo image search (no API key). The model asks for a
+  picture of something, the top usable result is downloaded on the server (images only, 15 MB
+  cap, no private addresses) and stored with the other generated files, then shown in the chat
+  with a link to the page it came from. Nothing is hot-linked from the model's own guesses.
 - **⚠️ Run shell commands** - off by default. One general-purpose shell tool the model can call
   directly, the same way Claude Code itself uses one Bash tool rather than a curated command
   set. **There is no sandbox under it** - it runs as your own user on your own machine, with
-  only a timeout (120s) and an output-size cap as guardrails. Only enable this in a chat (or an
-  automation, see below) that won't also be reading untrusted content (a webpage, an email) in
-  the same conversation - a tool the agent can call is reachable by prompt injection, and this
-  one has no floor under it if that happens. `ssh host 'command'` through this same tool covers
-  SSH; there's no separate SSH-specific tool.
+  only a timeout (120s) and an output-size cap as guardrails. By default every command the
+  model proposes **waits in the chat for you to press "run it" or "reject"** (five minutes,
+  then it is dropped); the model only sees the output once you approve. You can switch that
+  off under the shell toggle if you really want it unattended. Only enable this in a chat (or
+  an automation, see below) that won't also be reading untrusted content (a webpage, an email)
+  in the same conversation - a tool the agent can call is reachable by prompt injection, and
+  this one has no floor under it if that happens. `ssh host 'command'` through this same tool
+  covers SSH; there's no separate SSH-specific tool.
+
+### Tool levels for local models
+
+Not every model can juggle fifteen tool schemas. starfire picks a level from the Ollama model's
+parameter count (the `7b`, `14b` in its name) and tells you in a banner above the chat:
+
+| Level | Models | What the model is given |
+|---|---|---|
+| none | under 3B, or known non-tool models | no tools at all, whatever you ticked |
+| basic | 3B up to 12B | web search, knowledge, memory, notes, find/generate images, scheduled tasks, plus MCP servers, capped at 8 tools in total |
+| full | 12B and up, and every hosted provider | everything you enabled |
+
+The thresholds are two constants at the top of `server_configs/model_capabilities.py`.
 
 ## Memory
 
@@ -257,7 +288,8 @@ choose to enable it - shell). There's no separate "run a shell command" task typ
 the reference app has one; a task is "send a prompt, with these tools available" and reuses the model's
 normal tool-calling for that, one mechanism rather than two. The same warning as the chat
 toggle applies: only give an automation the shell tool if it isn't also going to encounter
-untrusted content.
+untrusted content - an automation runs unattended, so there is nobody to approve its commands
+and they run straight away. The tool levels above apply to automations too.
 
 ## Email
 
@@ -387,6 +419,8 @@ rather use that instead)
 | `DATA_DIR` | `./data` | Where endpoint config and encrypted API keys are stored |
 | `TASK_MODEL` | _(chat's model)_ | Ollama model for titles, tags and follow-up suggestions |
 | `TASK_NUM_CTX` | _(model default)_ | Context size for `TASK_MODEL`; match the loaded model's to avoid a reload |
+| `OWN_TOOLS_MODELS` | `assistant-core,arty/*` | Comma-separated model ids (with `*` wildcards) that bring their own tools: the tools menu hides for them and starfire sends them none |
+| `INLINE_MEDIA_PREFIXES` | `/arty-files/` | Comma-separated path prefixes on this server whose image and video links render inline in replies |
 
 Hosted-provider API keys are **not** set via environment variables - add them through the
 Settings UI so they're encrypted at rest rather than sitting in plaintext in `.env`.
@@ -444,8 +478,11 @@ one-click backup/restore); deleting `data/.key` makes any stored keys unrecovera
   with a hosted-API fallback when configured
 - Hardware detection (RAM/VRAM capacity, CPU/GPU/RAM identity and speed, cross-platform) with
   model-fit suggestions and one-click pulls with progress bars
-- Incremental markdown rendering while responses stream; markdown, sanitiser and syntax
-  highlighting are bundled in `static/vendor/`, so the UI needs no CDN and works offline
+- Incremental markdown rendering while responses stream; markdown, sanitiser, syntax
+  highlighting and the IBM Plex fonts are bundled in `static/vendor/`, so the UI makes no
+  request to any CDN or font service and works offline
+- Shell commands wait for your approval in the chat; find real images on the web; connect MCP
+  servers over streamable HTTP or SSE as well as stdio; tool levels sized to the local model
 - Code blocks are syntax-checked server-side when a reply finishes, with an automatic fix
   round-trip to the model and a copy button on every block
 - Light/dark theme toggle
@@ -457,5 +494,5 @@ one-click backup/restore); deleting `data/.key` makes any stored keys unrecovera
 Proprietary - made by [Drew](https://github.com/drew-codes-things). You may install and run
 starfire.ai for your own use, as supplied. Copying, modifying, building on, redistributing or
 selling it is not permitted; see [LICENSE](LICENSE) for the full terms. The bundled
-third-party libraries in `static/vendor/` (marked, DOMPurify, highlight.js) keep their own
-open-source licences, which sit next to them.
+third-party libraries and fonts in `static/vendor/` (marked, DOMPurify, highlight.js, IBM Plex)
+keep their own open-source licences, which sit next to them.

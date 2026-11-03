@@ -47,6 +47,7 @@ from mcp_manager import McpConnectionError, mcp_manager
 from mcp_servers_store import REFERENCE_SERVERS
 import ollama_manager
 from model_endpoints import detect_ollama
+from version import VERSION
 
 DEFAULT_MCP_PRESETS = ["fetch", "memory"]
 
@@ -115,7 +116,7 @@ async def lifespan(app: FastAPI):
         if not server.enabled:
             continue
         try:
-            await mcp_manager.connect(server.id, server.command, server.args, server.env or None)
+            await mcp_manager.connect_server(server)
         except McpConnectionError as e:
             print(f"  starfire.ai  ->  could not start MCP server '{server.name}': {e}")
 
@@ -167,7 +168,7 @@ auth.install(app, auth_routes.users, auth_routes.sessions)
 
 @app.get("/api/health")
 async def health():
-    return {"ok": True}
+    return {"ok": True, "version": VERSION}
 
 app.include_router(auth_routes.router)
 app.include_router(routes.router)

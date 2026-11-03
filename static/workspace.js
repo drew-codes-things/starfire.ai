@@ -934,6 +934,7 @@ const TOOL_TOGGLES = [
   ['toggleManageTasks', 'scheduled tasks'],
   ['toggleManageEmail', 'email'],
   ['toggleGenerateImage', 'image generation'],
+  ['toggleFindImage', 'find images'],
   ['toggleGenerateAudio', 'speech generation'],
   ['toggleGenerateVideo', 'video generation'],
   ['toggleGenerateDocument', 'document generation'],

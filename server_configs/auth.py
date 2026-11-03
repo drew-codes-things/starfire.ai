@@ -128,6 +128,18 @@ class UserStore:
             atomic_write_json(self.path, [asdict(u) for u in users])
             os.chmod(self.path, 0o600)
 
+    def set_password(self, user_id: str, password: str, confirm: str) -> None:
+        check_new_password(password, confirm)
+        with self._lock:
+            users = self.list()
+            if not any(u.id == user_id for u in users):
+                raise AccountError("no such account")
+            for stored in users:
+                if stored.id == user_id:
+                    stored.password_hash = hash_password(password)
+            atomic_write_json(self.path, [asdict(u) for u in users])
+            os.chmod(self.path, 0o600)
+
     def upsert(self, email: str, name: str, role: str, password_hash: str) -> User:
         if role not in ROLES:
             raise ValueError(f"role must be one of {', '.join(ROLES)}, not {role!r}")

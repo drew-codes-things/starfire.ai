@@ -1357,3 +1357,7 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--red); }
   .settings-tab { white-space: nowrap; flex-shrink: 0; }
   .compare-column { min-width: 82vw; }
 }
+
+.diff-card-source { font-size: 0.72rem; color: var(--muted); padding: 6px 0 2px; }
+.diff-card-source a { color: var(--red); }
+.shell-card pre { font-family: var(--mono); }

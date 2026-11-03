@@ -7,6 +7,8 @@ from dataclasses import asdict, dataclass, field
 
 from atomic_io import atomic_write_json
 
+TRANSPORTS = ("stdio", "http", "sse")
+
 @dataclass
 class McpServerConfig:
     id: str
@@ -15,6 +17,9 @@ class McpServerConfig:
     args: list[str]
     env: dict[str, str] = field(default_factory=dict)
     enabled: bool = True
+    transport: str = "stdio"
+    url: str = ""
+    headers: dict[str, str] = field(default_factory=dict)
 
 REFERENCE_SERVERS = {
     "filesystem": {
@@ -108,15 +113,18 @@ class McpServerStore:
             return []
         servers = []
         for item in raw:
-            if not isinstance(item, dict) or "id" not in item or "command" not in item:
+            if not isinstance(item, dict) or "id" not in item or not (item.get("command") or item.get("url")):
                 continue
             servers.append(McpServerConfig(
                 id=item["id"],
-                name=item.get("name", item["command"]),
-                command=item["command"],
+                name=item.get("name") or item.get("command") or item.get("url", ""),
+                command=item.get("command", ""),
                 args=item.get("args", []),
                 env=item.get("env", {}),
                 enabled=item.get("enabled", True),
+                transport=item.get("transport", "stdio") if item.get("transport") in TRANSPORTS else "stdio",
+                url=item.get("url", ""),
+                headers=item.get("headers", {}) if isinstance(item.get("headers"), dict) else {},
             ))
         return servers
 
@@ -132,10 +140,11 @@ class McpServerStore:
                 return s
         return None
 
-    def add(self, name: str, command: str, args: list[str], env: dict[str, str] | None = None) -> McpServerConfig:
+    def add(self, name: str, command: str, args: list[str], env: dict[str, str] | None = None,
+            transport: str = "stdio", url: str = "", headers: dict[str, str] | None = None) -> McpServerConfig:
         servers = self._load()
         server = McpServerConfig(id=uuid.uuid4().hex[:12], name=name, command=command,
-                                  args=args, env=env or {})
+                                  args=args, env=env or {}, transport=transport, url=url, headers=headers or {})
         servers.append(server)
         self._save(servers)
         return server

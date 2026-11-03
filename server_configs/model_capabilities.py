@@ -8,6 +8,15 @@ _KNOWN_NON_TOOL_OLLAMA_PATTERNS = [
 ]
 
 _MIN_RELIABLE_TOOL_PARAMS_B = 3.0
+_FULL_TOOLSET_MIN_PARAMS_B = 12.0
+
+TOOL_TIERS = ("none", "basic", "full")
+
+BASIC_TIER_TOOLS = [
+    "search_web", "search_documents", "manage_memory", "manage_notes",
+    "find_image", "generate_image", "manage_tasks",
+]
+BASIC_TIER_MAX_TOOLS = 8
 
 _PARAM_SIZE_RE = re.compile(r"(\d+(?:\.\d+)?)b\b")
 
@@ -27,3 +36,30 @@ def supports_tools(provider: str, model_id: str) -> bool:
             return False
         return True
     return True
+
+def tool_tier(provider: str, model_id: str) -> str:
+    if not supports_tools(provider, model_id):
+        return "none"
+    if provider == "ollama":
+        size_b = _param_size_billions(model_id)
+        if size_b is not None and size_b < _FULL_TOOLSET_MIN_PARAMS_B:
+            return "basic"
+    return "full"
+
+def tools_for_tier(tier: str, enabled_builtin_tools: set[str]) -> set[str]:
+    if tier == "none":
+        return set()
+    if tier == "basic":
+        return {name for name in enabled_builtin_tools if name in BASIC_TIER_TOOLS}
+    return set(enabled_builtin_tools)
+
+def tool_cap_for_tier(tier: str) -> int | None:
+    return BASIC_TIER_MAX_TOOLS if tier == "basic" else None
+
+def tier_description(tier: str) -> str:
+    if tier == "none":
+        return "no tools (model is too small or is known not to support tool-calling)"
+    if tier == "basic":
+        return (f"basic tool set (model under {_FULL_TOOLSET_MIN_PARAMS_B:g}B): "
+                + ", ".join(BASIC_TIER_TOOLS) + f", at most {BASIC_TIER_MAX_TOOLS} tools in total")
+    return "full tool set"

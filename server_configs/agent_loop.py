@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import builtin_tools
@@ -8,8 +9,11 @@ MAX_TOOL_ROUNDS = 5
 
 async def run_chat_with_tools(base_url: str, api_key: str | None, model: str, messages: list[dict],
                                system: str | None, options: dict | None, enabled_server_ids: set[str],
-                               enabled_builtin_tools: set[str], ctx: "builtin_tools.ToolContext"):
-    tools = mcp_manager.get_all_openai_schemas(enabled_server_ids) + builtin_tools.schemas_for(enabled_builtin_tools)
+                               enabled_builtin_tools: set[str], ctx: "builtin_tools.ToolContext",
+                               max_tools: int | None = None):
+    tools = builtin_tools.schemas_for(enabled_builtin_tools) + mcp_manager.get_all_openai_schemas(enabled_server_ids)
+    if max_tools is not None:
+        tools = tools[:max_tools]
     working_messages = list(messages)
 
     for _round in range(MAX_TOOL_ROUNDS):
@@ -47,13 +51,12 @@ async def run_chat_with_tools(base_url: str, api_key: str | None, model: str, me
 
         for call in tool_calls:
             yield _sse_line({"tool_start": call["name"]})
-            try:
-                if call["name"].startswith("mcp__"):
-                    result = await mcp_manager.call_tool(call["name"], call["arguments"])
+            result = ""
+            async for kind, payload in _execute_tool(call, ctx):
+                if kind == "event":
+                    yield _sse_line(payload)
                 else:
-                    result = await builtin_tools.call_builtin_tool(call["name"], call["arguments"], ctx)
-            except Exception as e:
-                result = f"error: {e}"
+                    result = payload
             yield _sse_line({"tool_result": {"name": call["name"], "result": result[:2000]}})
             working_messages.append({
                 "role": "tool", "tool_call_id": call["id"], "content": result,
@@ -61,12 +64,38 @@ async def run_chat_with_tools(base_url: str, api_key: str | None, model: str, me
 
     yield _sse_line({"error": "tool-call round limit reached"})
 
+async def _call_tool(call: dict, ctx: "builtin_tools.ToolContext") -> str:
+    try:
+        if call["name"].startswith("mcp__"):
+            return await mcp_manager.call_tool(call["name"], call["arguments"])
+        return await builtin_tools.call_builtin_tool(call["name"], call["arguments"], ctx)
+    except Exception as e:
+        return f"error: {e}"
+
+async def _execute_tool(call: dict, ctx: "builtin_tools.ToolContext"):
+    events = getattr(ctx, "events", None)
+    task = asyncio.ensure_future(_call_tool(call, ctx))
+    if events is None:
+        yield "result", await task
+        return
+    while True:
+        getter = asyncio.ensure_future(events.get())
+        done, _ = await asyncio.wait({task, getter}, return_when=asyncio.FIRST_COMPLETED)
+        if getter in done:
+            yield "event", getter.result()
+            continue
+        getter.cancel()
+        while not events.empty():
+            yield "event", events.get_nowait()
+        yield "result", task.result()
+        return
+
 async def run_chat_collected(base_url: str, api_key: str | None, model: str, messages: list[dict],
                               system: str | None = None, options: dict | None = None,
                               enabled_server_ids: set[str] | None = None,
                               enabled_builtin_tools: set[str] | None = None,
                               ctx: "builtin_tools.ToolContext | None" = None,
-                              think: bool | None = None) -> str:
+                              think: bool | None = None, max_tools: int | None = None) -> str:
     enabled_server_ids = enabled_server_ids or set()
     enabled_builtin_tools = enabled_builtin_tools or set()
 
@@ -75,7 +104,7 @@ async def run_chat_collected(base_url: str, api_key: str | None, model: str, mes
 
     if (enabled_server_ids or enabled_builtin_tools) and ctx is not None:
         async for chunk in run_chat_with_tools(base_url, api_key, model, messages, system, options,
-                                                 enabled_server_ids, enabled_builtin_tools, ctx):
+                                                 enabled_server_ids, enabled_builtin_tools, ctx, max_tools=max_tools):
             for kind, payload in _parse_sse_bytes(chunk):
                 if kind == "delta":
                     text_parts.append(payload)

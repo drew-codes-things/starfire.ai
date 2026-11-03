@@ -1,3 +1,4 @@
+import asyncio
 import io
 import json
 import logging
@@ -19,6 +20,7 @@ import hardware_probe
 import helper_tasks
 import model_capabilities
 import ollama_manager
+import shell_tool
 from agent_loop import run_chat_with_tools
 from attachments import AttachmentError, AttachmentStore, expand_attachments
 from api_key_manager import APIKeyManager
@@ -44,6 +46,7 @@ from providers import build_models_url, is_embedding_model
 from task_scheduler import TaskScheduler, compute_next_run
 from task_store import ScheduledTask, TaskRunStore, TaskStore
 from usage_store import UsageStore
+from version import VERSION
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +75,8 @@ chat_folders = FolderStore(config.data_dir)
 prompts = PromptStore(config.data_dir)
 
 def _tool_context(base_url: str = "", api_key: str | None = None, model: str = "",
-                   require_edit_approval: bool = False) -> builtin_tools.ToolContext:
+                   require_edit_approval: bool = False, require_shell_approval: bool = False,
+                   interactive: bool = False) -> builtin_tools.ToolContext:
     return builtin_tools.ToolContext(
         memory=memory, documents=documents, tasks=tasks, task_runs=task_runs,
         email_accounts=email_accounts, api_keys=api_keys, notes=notes,
@@ -80,6 +84,8 @@ def _tool_context(base_url: str = "", api_key: str | None = None, model: str = "
         comfyui_config=comfyui_config, piper_config=piper_config, custom_workflows=custom_workflows,
         base_url=base_url, api_key=api_key, model=model,
         require_edit_approval=require_edit_approval,
+        require_shell_approval=require_shell_approval,
+        events=asyncio.Queue() if interactive else None,
     )
 
 _INLINE_MEMORY_RE = re.compile(r"^(?:remember|memorize|save|note|store)[:\-]?\s+(.+)$", re.IGNORECASE)
@@ -198,7 +204,12 @@ async def warm(body: dict):
 @router.get("/config")
 async def get_config():
     detected = await detect_ollama(config.ollama_base_url)
-    return {"ollama_base_url": detected or "http://localhost:11434"}
+    return {
+        "ollama_base_url": detected or "http://localhost:11434",
+        "version": VERSION,
+        "own_tools_models": config.own_tools_patterns(),
+        "inline_media_prefixes": config.media_prefixes(),
+    }
 
 def _list_dirs(path: str) -> dict:
     base = os.path.abspath(os.path.expanduser(path or "~"))
@@ -227,6 +238,9 @@ class AddMcpServerBody(BaseModel):
     env: dict[str, str] = {}
     preset: str | None = None
     path: str | None = None
+    transport: str = "stdio"
+    url: str = ""
+    headers: dict[str, str] = {}
 
 @router.get("/mcp/repository")
 async def list_mcp_repository():
@@ -239,6 +253,7 @@ async def list_mcp_repository():
 async def list_mcp_servers():
     return {"servers": [
         {"id": s.id, "name": s.name, "command": s.command, "args": s.args, "enabled": s.enabled,
+         "transport": s.transport, "url": s.url,
          "connected": mcp_manager.is_connected(s.id), "tool_count": len(mcp_manager.list_tools(s.id))}
         for s in mcp_servers.list()
     ], "presets": [{"id": pid, **{k: v for k, v in p.items() if k != "args"}} for pid, p in REFERENCE_SERVERS.items()]}
@@ -257,14 +272,24 @@ async def add_mcp_server(body: AddMcpServerBody):
         name, command, args = preset["name"], preset["command"], list(preset["args"])
         if preset.get("needs_path"):
             args.append(body.path)
-    else:
+    elif body.transport in ("http", "sse"):
+        url = body.url.strip()
+        if not url.lower().startswith(("http://", "https://")):
+            raise HTTPException(400, "the server URL must start with http:// or https://")
+        name, command, args = body.name or url, "", []
+    elif body.transport == "stdio":
         if not body.command:
             raise HTTPException(400, "command is required")
         name, command, args = body.name or body.command, body.command, body.args
+    else:
+        raise HTTPException(400, "transport must be stdio, http or sse")
 
-    server = mcp_servers.add(name=name, command=command, args=args, env=body.env or None)
+    server = mcp_servers.add(name=name, command=command, args=args, env=body.env or None,
+                             transport="stdio" if body.preset else body.transport,
+                             url="" if body.preset else body.url.strip(),
+                             headers=None if body.preset else (body.headers or None))
     try:
-        tools = await mcp_manager.connect(server.id, server.command, server.args, server.env or None)
+        tools = await mcp_manager.connect_server(server)
     except McpConnectionError as e:
         mcp_servers.delete(server.id)
         raise HTTPException(502, str(e))
@@ -406,10 +431,12 @@ def _task_chat_fn(endpoint_id, model, prompt, enabled_mcp_servers, enabled_built
         raise RuntimeError("task has no valid endpoint configured")
     api_key = _api_key_for(endpoint.id, endpoint.provider)
     ctx = _tool_context(base_url=endpoint.base_url, api_key=api_key, model=model)
+    tier = model_capabilities.tool_tier(endpoint.provider, model)
     return run_chat_collected(
         endpoint.base_url, api_key, model, [{"role": "user", "content": prompt}],
-        enabled_server_ids=set(enabled_mcp_servers), enabled_builtin_tools=set(enabled_builtin_tools),
-        ctx=ctx,
+        enabled_server_ids=set(enabled_mcp_servers),
+        enabled_builtin_tools=model_capabilities.tools_for_tier(tier, set(enabled_builtin_tools)),
+        ctx=ctx, max_tools=model_capabilities.tool_cap_for_tier(tier),
     )
 
 scheduler = TaskScheduler(tasks, task_runs, _task_chat_fn)
@@ -847,6 +874,7 @@ class ChatBody(BaseModel):
     enabled_mcp_servers: list[str] = []
     enabled_builtin_tools: list[str] = []
     require_edit_approval: bool = False
+    require_shell_approval: bool = True
 
 async def _track_usage(gen, provider: str, model: str, input_text: str):
     output_parts: list[str] = []
@@ -902,14 +930,17 @@ async def chat_stream_endpoint(body: ChatBody):
             if not server or not server.enabled:
                 continue
             try:
-                await mcp_manager.connect(server.id, server.command, server.args, server.env or None)
+                await mcp_manager.connect_server(server)
             except McpConnectionError as e:
                 logger.warning("could not reconnect MCP server %s: %s", server_id, e)
         ctx = _tool_context(base_url=endpoint.base_url, api_key=api_key, model=body.model,
-                            require_edit_approval=body.require_edit_approval)
+                            require_edit_approval=body.require_edit_approval,
+                            require_shell_approval=body.require_shell_approval, interactive=True)
+        tier = model_capabilities.tool_tier(endpoint.provider, body.model)
         generator = run_chat_with_tools(endpoint.base_url, api_key, body.model, messages,
                                           body.system, body.options, set(body.enabled_mcp_servers),
-                                          set(body.enabled_builtin_tools), ctx)
+                                          model_capabilities.tools_for_tier(tier, set(body.enabled_builtin_tools)), ctx,
+                                          max_tools=model_capabilities.tool_cap_for_tier(tier))
     else:
         generator = stream_chat(endpoint.base_url, api_key, body.model, messages, body.system, body.options)
 
@@ -1172,7 +1203,13 @@ async def get_usage():
 
 @router.get("/model-capabilities")
 async def get_model_capabilities(provider: str, model: str):
-    return {"supports_tools": model_capabilities.supports_tools(provider, model)}
+    tier = model_capabilities.tool_tier(provider, model)
+    return {
+        "supports_tools": model_capabilities.supports_tools(provider, model),
+        "tool_tier": tier,
+        "tier_description": model_capabilities.tier_description(tier),
+        "basic_tools": model_capabilities.BASIC_TIER_TOOLS,
+    }
 
 @router.get("/hardware")
 async def get_hardware():
@@ -1222,6 +1259,22 @@ async def pull_model(body: dict):
 
     return StreamingResponse(stream(), media_type="text/event-stream",
                               headers={"Cache-Control": "no-cache", "Connection": "keep-alive"})
+
+@router.get("/pending-shell")
+async def list_pending_shell():
+    return {"commands": shell_tool.list_pending()}
+
+@router.post("/pending-shell/{pending_id}/approve")
+async def approve_pending_shell(pending_id: str):
+    if not shell_tool.resolve(pending_id, True):
+        raise HTTPException(404, "no command is waiting with that id (already decided, timed out, or the server restarted)")
+    return {"approved": True}
+
+@router.post("/pending-shell/{pending_id}/reject")
+async def reject_pending_shell(pending_id: str):
+    if not shell_tool.resolve(pending_id, False):
+        raise HTTPException(404, "no command is waiting with that id")
+    return {"rejected": True}
 
 @router.get("/pending-edits")
 async def list_pending_edits():

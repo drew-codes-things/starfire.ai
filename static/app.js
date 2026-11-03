@@ -181,6 +181,16 @@ const settingsEls = {
   editApprovalRow: $('editApprovalRow'),
   toggleEditApproval: $('toggleEditApproval'),
   toggleRunShell: $('toggleRunShell'),
+  shellApprovalRow: $('shellApprovalRow'),
+  toggleShellApproval: $('toggleShellApproval'),
+  toggleFindImage: $('toggleFindImage'),
+  mcpTransport: $('mcpTransport'),
+  mcpCommandRow: $('mcpCommandRow'),
+  mcpArgsRow: $('mcpArgsRow'),
+  mcpUrlRow: $('mcpUrlRow'),
+  mcpAuthRow: $('mcpAuthRow'),
+  mcpUrl: $('mcpUrl'),
+  mcpAuthHeader: $('mcpAuthHeader'),
   presetName: $('presetName'),
   savePresetBtn: $('savePresetBtn'),
   presetSaveResult: $('presetSaveResult'),
@@ -627,6 +637,52 @@ function renderDiffCard(resultJson) {
   els.output.scrollTop = els.output.scrollHeight;
 }
 
+function renderShellApprovalCard(data) {
+  const w = $('welcome');
+  if (w) w.remove();
+  const card = document.createElement('div');
+  card.className = 'diff-card shell-card';
+  const where = data.cwd ? ` in ${escapeHtml(data.cwd)}` : '';
+  card.innerHTML =
+    `<div class="diff-card-header">shell command - waiting for your approval${where}</div>` +
+    `<pre>${escapeHtml(data.command || '')}</pre>`;
+  const actionsRow = document.createElement('div');
+  actionsRow.className = 'diff-card-actions';
+  const approveBtn = document.createElement('button');
+  approveBtn.type = 'button'; approveBtn.className = 'btn send'; approveBtn.textContent = 'run it';
+  const rejectBtn = document.createElement('button');
+  rejectBtn.type = 'button'; rejectBtn.className = 'btn ghost'; rejectBtn.textContent = 'reject';
+  const decide = async (approved) => {
+    approveBtn.disabled = true; rejectBtn.disabled = true;
+    try {
+      const r = await fetch(`/api/pending-shell/${data.pending_id}/${approved ? 'approve' : 'reject'}`, { method: 'POST' });
+      actionsRow.textContent = r.ok ? (approved ? 'approved - running…' : 'rejected - not run') : 'that command is no longer waiting';
+    } catch (_) {
+      actionsRow.textContent = 'failed to send your answer';
+    }
+  };
+  approveBtn.onclick = () => decide(true);
+  rejectBtn.onclick = () => decide(false);
+  actionsRow.append(approveBtn, rejectBtn);
+  card.appendChild(actionsRow);
+  els.output.appendChild(card);
+  els.output.scrollTop = els.output.scrollHeight;
+}
+
+function renderShellResultCard(result) {
+  const w = $('welcome');
+  if (w) w.remove();
+  const text = result || '';
+  const failed = text.startsWith('error:');
+  const card = document.createElement('div');
+  card.className = 'diff-card shell-card';
+  card.innerHTML =
+    `<div class="diff-card-header">${failed ? 'shell command not run' : 'shell output'}</div>` +
+    `<pre>${escapeHtml(text)}</pre>`;
+  els.output.appendChild(card);
+  els.output.scrollTop = els.output.scrollHeight;
+}
+
 function renderGeneratedFileCard(toolName, resultJson) {
   let data;
   try { data = JSON.parse(resultJson); }
@@ -641,6 +697,17 @@ function renderGeneratedFileCard(toolName, resultJson) {
 
   if (data.kind === 'image') {
     card.innerHTML = `<img src="${data.url}" alt="${escapeHtml(data.prompt || 'generated image')}" style="max-width:100%;display:block;" />`;
+    if (data.source || data.image_url) {
+      const from = document.createElement('div');
+      from.className = 'diff-card-source';
+      const link = document.createElement('a');
+      link.href = data.source || data.image_url;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = data.source ? new URL(data.source, location.href).hostname : 'image source';
+      from.append(escapeHtml(data.prompt || '') ? data.prompt + ' · from ' : 'from ', link);
+      card.appendChild(from);
+    }
   } else if (data.kind === 'audio') {
     card.innerHTML = `<div class="diff-card-header">generated audio</div><audio controls src="${data.url}" style="width:100%"></audio>`;
   } else if (data.kind === 'document') {
@@ -735,10 +802,31 @@ async function forkSession(uptoIdx) {
 
 const ARTY_MEDIA = { image: /\.(png|jpe?g|gif|webp)$/i, video: /\.(mp4|webm|mov|m4v)$/i };
 
+const appConfig = { version: '', own_tools_models: ['assistant-core', 'arty/*'], inline_media_prefixes: ['/arty-files/'] };
+
+async function loadAppConfig() {
+  try {
+    const r = await fetch('/api/config');
+    if (!r.ok) return;
+    const data = await r.json();
+    if (Array.isArray(data.own_tools_models)) appConfig.own_tools_models = data.own_tools_models;
+    if (Array.isArray(data.inline_media_prefixes)) appConfig.inline_media_prefixes = data.inline_media_prefixes;
+    appConfig.version = data.version || '';
+  } catch (_) {}
+  const about = $('aboutVersion');
+  if (about) about.textContent = 'starfire.ai' + (appConfig.version ? ' ' + appConfig.version : '');
+}
+
+function globMatch(value, pattern) {
+  const re = new RegExp('^' + pattern.split('*').map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$', 'i');
+  return re.test(value);
+}
+
 function artyFilePath(href) {
   try {
     const url = new URL(href, location.href);
-    return url.pathname.startsWith('/arty-files/') ? url.pathname : null;
+    if (url.origin !== location.origin) return null;
+    return appConfig.inline_media_prefixes.some(prefix => url.pathname.startsWith(prefix)) ? url.pathname : null;
   } catch (_) {
     return null;
   }
@@ -761,7 +849,7 @@ function showInlineMedia(container) {
       media.controls = true;
       media.preload = 'metadata';
     } else {
-      media.alt = link.textContent || 'picture from Arty';
+      media.alt = link.textContent || 'picture';
       media.loading = 'lazy';
       media.onclick = () => window.open(path, '_blank', 'noopener');
     }
@@ -1082,6 +1170,7 @@ async function send(text, overrideModel, extra = {}) {
         enabled_mcp_servers: modelHasOwnTools(model) ? [] : [...enabledMcpServers],
         enabled_builtin_tools: modelHasOwnTools(model) ? [] : [...enabledBuiltinTools],
         require_edit_approval: requireEditApproval,
+        require_shell_approval: requireShellApproval,
       }),
     });
 
@@ -1123,13 +1212,17 @@ async function send(text, overrideModel, extra = {}) {
             const toolName = obj.tool_result.name;
             if (toolName === 'edit_file') {
               renderDiffCard(obj.tool_result.result);
-            } else if (toolName === 'generate_image' || toolName === 'generate_audio' || toolName === 'generate_document') {
+            } else if (toolName === 'generate_image' || toolName === 'generate_audio' || toolName === 'generate_document' || toolName === 'find_image') {
               renderGeneratedFileCard(toolName, obj.tool_result.result);
             } else if (toolName === 'generate_video') {
               renderGeneratedVideoCard(obj.tool_result.result);
+            } else if (toolName === 'run_shell') {
+              renderShellResultCard(obj.tool_result.result);
             } else {
               printLine('» ' + toolName.replace(/^mcp__[^_]+__/, '') + ' done', 'info');
             }
+          } else if (obj.shell_pending) {
+            renderShellApprovalCard(obj.shell_pending);
           } else if (obj.error) {
             streamError = obj.error;
           }
@@ -1304,7 +1397,7 @@ els.modelList.addEventListener('change', () => {
 });
 
 function modelHasOwnTools(model) {
-  return !!model && (model.id === 'assistant-core' || model.id.startsWith('arty/'));
+  return !!model && appConfig.own_tools_models.some(pattern => globMatch(model.id, pattern));
 }
 
 async function checkModelToolCapability() {
@@ -1318,10 +1411,17 @@ async function checkModelToolCapability() {
   }
   try {
     const r = await fetch(`/api/model-capabilities?provider=${encodeURIComponent(model.provider)}&model=${encodeURIComponent(model.id)}`);
-    const { supports_tools } = await r.json();
+    const { supports_tools, tool_tier, basic_tools } = await r.json();
     if (supports_tools === false) {
       els.capabilityWarning.textContent =
         `⚠️ ${model.id} likely doesn't support tool-calling - enabled tools may be silently ignored.`;
+      els.capabilityWarning.hidden = false;
+    } else if (tool_tier === 'basic') {
+      const basic = new Set(basic_tools || []);
+      const heldBack = [...enabledBuiltinTools].filter(name => !basic.has(name));
+      const note = heldBack.length ? ` Held back for this model: ${heldBack.map(n => n.replace(/_/g, ' ')).join(', ')}.` : '';
+      els.capabilityWarning.textContent =
+        `ℹ️ ${model.id} is a smaller model, so it gets the basic tool set only (web search, knowledge, memory, notes, images, scheduled tasks; at most 8 tools). Models of 12B and up get everything.${note}`;
       els.capabilityWarning.hidden = false;
     } else {
       els.capabilityWarning.hidden = true;
@@ -1590,7 +1690,7 @@ async function refreshMcpServerList() {
       li.innerHTML =
         `<label class="theme-toggle"><input type="checkbox" ${checked} /></label>` +
         `<span class="endpoint-label">${escapeHtml(s.name)}</span>` +
-        `<span class="endpoint-meta">${s.tool_count} tool(s)${s.connected ? '' : ' · not running'}</span>` +
+        `<span class="endpoint-meta">${s.transport && s.transport !== 'stdio' ? escapeHtml(s.url) + ' · ' : ''}${s.tool_count} tool(s)${s.connected ? '' : ' · not running'}</span>` +
         `<button class="endpoint-remove" title="Remove">×</button>`;
       li.querySelector('input[type="checkbox"]').onchange = e => {
         if (e.target.checked) enabledMcpServers.add(s.id); else enabledMcpServers.delete(s.id);
@@ -1748,18 +1848,34 @@ setupDirBrowser({
   selectBtn: settingsEls.comfyDirBrowserSelectBtn, targetInput: settingsEls.comfyCheckpointsDir,
 });
 
+function syncMcpTransportRows() {
+  const remote = settingsEls.mcpTransport.value !== 'stdio';
+  settingsEls.mcpCommandRow.hidden = remote;
+  settingsEls.mcpArgsRow.hidden = remote;
+  settingsEls.mcpUrlRow.hidden = !remote;
+  settingsEls.mcpAuthRow.hidden = !remote;
+}
+settingsEls.mcpTransport.addEventListener('change', syncMcpTransportRows);
+syncMcpTransportRows();
+
 settingsEls.addMcpCustomBtn.onclick = async () => {
   const name = settingsEls.mcpName.value.trim();
+  const transport = settingsEls.mcpTransport.value;
   const command = settingsEls.mcpCommand.value.trim();
   const args = settingsEls.mcpArgs.value.trim().split(/\s+/).filter(Boolean);
-  if (!command) return;
-  settingsEls.mcpCustomResult.textContent = 'starting…';
+  const url = settingsEls.mcpUrl.value.trim();
+  const auth = settingsEls.mcpAuthHeader.value.trim();
+  if (transport === 'stdio' ? !command : !url) return;
+  settingsEls.mcpCustomResult.textContent = transport === 'stdio' ? 'starting…' : 'connecting…';
   settingsEls.mcpCustomResult.className = 'settings-hint';
   try {
     const r = await fetch('/api/mcp/servers', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: name || command, command, args }),
+      body: JSON.stringify({
+        name: name || (transport === 'stdio' ? command : url), transport, command, args, url,
+        headers: auth ? { Authorization: auth } : {},
+      }),
     });
     if (!r.ok) {
       const { detail } = await r.json().catch(() => ({}));
@@ -1771,6 +1887,8 @@ settingsEls.addMcpCustomBtn.onclick = async () => {
     settingsEls.mcpCustomResult.textContent = `added - ${server.tool_count} tool(s) available`;
     settingsEls.mcpCustomResult.className = 'settings-hint ok';
     settingsEls.mcpName.value = '';
+    settingsEls.mcpUrl.value = '';
+    settingsEls.mcpAuthHeader.value = '';
     settingsEls.mcpCommand.value = '';
     settingsEls.mcpArgs.value = '';
     await refreshMcpServerList();
@@ -1843,6 +1961,13 @@ settingsEls.toggleGenerateImage.addEventListener('change', () => {
   saveEnabledBuiltinTools();
 });
 
+settingsEls.toggleFindImage.checked = enabledBuiltinTools.has('find_image');
+settingsEls.toggleFindImage.addEventListener('change', () => {
+  if (settingsEls.toggleFindImage.checked) enabledBuiltinTools.add('find_image');
+  else enabledBuiltinTools.delete('find_image');
+  saveEnabledBuiltinTools();
+});
+
 settingsEls.toggleGenerateAudio.checked = enabledBuiltinTools.has('generate_audio');
 settingsEls.toggleGenerateAudio.addEventListener('change', () => {
   if (settingsEls.toggleGenerateAudio.checked) enabledBuiltinTools.add('generate_audio');
@@ -1882,10 +2007,20 @@ settingsEls.toggleEditApproval.addEventListener('change', () => {
 });
 
 settingsEls.toggleRunShell.checked = enabledBuiltinTools.has('run_shell');
+settingsEls.shellApprovalRow.hidden = !settingsEls.toggleRunShell.checked;
 settingsEls.toggleRunShell.addEventListener('change', () => {
   if (settingsEls.toggleRunShell.checked) enabledBuiltinTools.add('run_shell');
   else enabledBuiltinTools.delete('run_shell');
+  settingsEls.shellApprovalRow.hidden = !settingsEls.toggleRunShell.checked;
   saveEnabledBuiltinTools();
+});
+
+let requireShellApproval = true;
+try { requireShellApproval = localStorage.getItem('sf_shell_approval') !== '0'; } catch (_) {}
+settingsEls.toggleShellApproval.checked = requireShellApproval;
+settingsEls.toggleShellApproval.addEventListener('change', () => {
+  requireShellApproval = settingsEls.toggleShellApproval.checked;
+  try { localStorage.setItem('sf_shell_approval', requireShellApproval ? '1' : '0'); } catch (_) {}
 });
 
 async function openSession(id) {
@@ -2028,7 +2163,7 @@ function refreshTaskEndpointOptions() {
 const TASK_TOOL_OPTIONS = [
   ['manage_memory', 'memory'], ['search_documents', 'documents'], ['manage_tasks', 'tasks'],
   ['manage_email', 'email'], ['manage_notes', 'notes'], ['search_web', 'web search'],
-  ['run_shell', '⚠️ shell'],
+  ['find_image', 'find images'], ['run_shell', '⚠️ shell'],
 ];
 
 function renderTaskToolCheckboxes() {
@@ -2816,12 +2951,14 @@ function applyPreset(p) {
   settingsEls.toggleGithubCli.checked = enabledBuiltinTools.has('github_cli');
   settingsEls.toggleDeepResearch.checked = enabledBuiltinTools.has('deep_research');
   settingsEls.toggleGenerateImage.checked = enabledBuiltinTools.has('generate_image');
+  settingsEls.toggleFindImage.checked = enabledBuiltinTools.has('find_image');
   settingsEls.toggleGenerateAudio.checked = enabledBuiltinTools.has('generate_audio');
   settingsEls.toggleGenerateVideo.checked = enabledBuiltinTools.has('generate_video');
   settingsEls.toggleGenerateDocument.checked = enabledBuiltinTools.has('generate_document');
   settingsEls.toggleEditFile.checked = enabledBuiltinTools.has('edit_file');
   settingsEls.editApprovalRow.hidden = !settingsEls.toggleEditFile.checked;
   settingsEls.toggleRunShell.checked = enabledBuiltinTools.has('run_shell');
+  settingsEls.shellApprovalRow.hidden = !settingsEls.toggleRunShell.checked;
   refreshMcpServerList();
 }
 
@@ -3563,6 +3700,6 @@ settingsEls.lightModeToggle.addEventListener('change', () => {
   try { localStorage.setItem('sf_light', settingsEls.lightModeToggle.checked ? '1' : '0'); } catch (_) {}
 });
 
-loadModels().then(() => { restoreSession(); checkModelToolCapability(); });
+loadAppConfig().then(() => loadModels()).then(() => { restoreSession(); checkModelToolCapability(); });
 
 setUpLogout().catch(error => console.error('starfire.ai: could not check the login', error));

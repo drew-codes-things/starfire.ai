@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>starfire.ai</title>
   <link rel="icon" href="assets/logo.svg" type="image/svg+xml" />
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="vendor/fonts.css" />
   <link rel="stylesheet" href="style.css" />
   <link rel="stylesheet" href="vendor/highlight-themes.css" />
   <script src="vendor/marked.min.js"></script>
@@ -337,6 +337,12 @@
               </div>
               <div class="settings-row">
                 <label class="theme-toggle">
+                  <input type="checkbox" id="toggleFindImage" />
+                  <span>Find images on the web (DuckDuckGo image search; the picture is downloaded and shown in the chat with its source)</span>
+                </label>
+              </div>
+              <div class="settings-row">
+                <label class="theme-toggle">
                   <input type="checkbox" id="toggleGenerateAudio" />
                   <span>Generate speech audio (local Piper if set up in Local Gen, else OpenAI)</span>
                 </label>
@@ -369,6 +375,12 @@
                 <label class="theme-toggle warning">
                   <input type="checkbox" id="toggleRunShell" />
                   <span>&#9888;&#65039; Run shell commands - no sandbox, executes directly on this machine</span>
+                </label>
+              </div>
+              <div class="settings-row" id="shellApprovalRow" hidden>
+                <label class="theme-toggle">
+                  <input type="checkbox" id="toggleShellApproval" />
+                  <span>Ask me before each command runs - the command waits in the chat for approve/reject (recommended)</span>
                 </label>
               </div>
               <p class="settings-hint">Add facts in the Memory tab, files in the Documents tab, jobs in Automations, accounts in Email, to-dos in Notes.</p>
@@ -413,15 +425,27 @@
             </div>
 
             <div class="settings-card">
-              <h3>Custom MCP server (stdio)</h3>
+              <h3>Custom MCP server</h3>
+              <p class="settings-hint">A local command (stdio), or a server that is already running at a URL (streamable HTTP, or the older SSE transport).</p>
               <div class="settings-row">
                 <input id="mcpName" type="text" placeholder="name" autocomplete="off" spellcheck="false" />
+                <select id="mcpTransport">
+                  <option value="stdio">local command (stdio)</option>
+                  <option value="http">URL (streamable HTTP)</option>
+                  <option value="sse">URL (SSE)</option>
+                </select>
               </div>
-              <div class="settings-row">
+              <div class="settings-row" id="mcpCommandRow">
                 <input id="mcpCommand" type="text" placeholder="command, e.g. npx" autocomplete="off" spellcheck="false" />
               </div>
-              <div class="settings-row">
+              <div class="settings-row" id="mcpArgsRow">
                 <input id="mcpArgs" type="text" placeholder="args, space-separated" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="settings-row" id="mcpUrlRow" hidden>
+                <input id="mcpUrl" type="text" placeholder="http://localhost:3001/mcp" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="settings-row" id="mcpAuthRow" hidden>
+                <input id="mcpAuthHeader" type="password" placeholder="Authorization header value, e.g. Bearer … (optional)" autocomplete="off" spellcheck="false" />
               </div>
               <div class="settings-row">
                 <button class="btn send" id="addMcpCustomBtn">add</button>
@@ -876,6 +900,10 @@
               <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="showSuggestions" /><span>Show prompt suggestions on a new chat</span></label></div>
               <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="checkCode" /><span>Check code blocks for syntax errors and have the model fix them before you copy</span></label></div>
               <p class="settings-hint">Python, JavaScript, TypeScript, shell, JSON, YAML, TOML, XML, Go, C, C++, Ruby and PHP are parsed or compiled, never run. The box shows the result; a block that fails is sent back to the model up to twice.</p>
+            </div>
+            <div class="settings-card">
+              <h3>about</h3>
+              <p class="settings-hint" id="aboutVersion">starfire.ai</p>
             </div>
             <div class="settings-card">
               <h3>keyboard shortcuts</h3>

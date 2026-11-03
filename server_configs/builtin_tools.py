@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass
 
@@ -9,6 +10,7 @@ import deep_research
 import email_client
 import file_edit_tool
 import github_tool
+import image_search
 import media_generation
 import piper_tts
 import shell_tool
@@ -267,6 +269,23 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "find_image",
+            "description": "Find an existing picture on the web (DuckDuckGo image search), download it "
+                            "and show it in the chat with a link to the page it came from. Use this when "
+                            "the user wants a real photo or picture of something, not a newly generated one.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "what to search for"},
+                    "index": {"type": "integer", "description": "which result to use, 0 = best match"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "run_shell",
             "description": "Run a shell command on this machine and return its output. No sandbox - "
                             "runs as the local user with only a timeout and output-size limit. Only "
@@ -303,6 +322,12 @@ class ToolContext:
     api_key: str | None = None
     model: str = ""
     require_edit_approval: bool = False
+    require_shell_approval: bool = False
+    events: "asyncio.Queue | None" = None
+
+    async def emit(self, event: dict) -> None:
+        if self.events is not None:
+            await self.events.put(event)
 
 def schemas_for(enabled: set[str]) -> list[dict]:
     return [t for t in TOOL_SCHEMAS if t["function"]["name"] in enabled]
@@ -337,8 +362,10 @@ async def call_builtin_tool(name: str, arguments: dict, ctx: ToolContext) -> str
         return _generate_document(arguments, ctx)
     if name == "edit_file":
         return _edit_file(arguments, ctx)
+    if name == "find_image":
+        return await _find_image(arguments, ctx)
     if name == "run_shell":
-        return await shell_tool.run_shell(arguments.get("command", ""), arguments.get("cwd"))
+        return await _run_shell(arguments, ctx)
     raise ValueError(f"unknown builtin tool: {name}")
 
 def _find_openai_endpoint(ctx: ToolContext) -> tuple[str, str] | None:
@@ -488,6 +515,38 @@ async def _deep_research(args: dict, ctx: ToolContext) -> str:
                                           [{"role": "user", "content": prompt}])
 
     return await deep_research.research(query, chat_fn)
+
+async def _run_shell(args: dict, ctx: ToolContext) -> str:
+    command = (args.get("command") or "").strip()
+    cwd = args.get("cwd")
+    if not command:
+        return "error: command is required"
+    if ctx.require_shell_approval:
+        pending_id = shell_tool.stage(command, cwd)
+        await ctx.emit({"shell_pending": {"pending_id": pending_id, "command": command, "cwd": cwd or ""}})
+        decision = await shell_tool.wait_for_decision(pending_id)
+        if decision is None:
+            return ("error: the user did not approve this command within "
+                    f"{shell_tool.APPROVAL_TIMEOUT_SECONDS // 60} minutes, so it was not run")
+        if not decision:
+            return "error: the user rejected this command, so it was not run"
+    return await shell_tool.run_shell(command, cwd)
+
+async def _find_image(args: dict, ctx: ToolContext) -> str:
+    query = (args.get("query") or "").strip()
+    if not query:
+        return "error: query is required"
+    try:
+        found = await image_search.find_and_download(query, index=args.get("index") or 0)
+    except image_search.ImageSearchError as e:
+        return f"error: {e}"
+    entry = ctx.generated_files.add("image", found["filename"], found["content_type"], found["data"],
+                                    source=f"{query} ({found['source'] or found['image_url']})")
+    return json.dumps({
+        "kind": "image", "id": entry.id, "url": f"/api/generated/{entry.id}",
+        "prompt": found["title"] or query, "source": found["source"], "image_url": found["image_url"],
+        "width": found.get("width"), "height": found.get("height"), "candidates": found.get("candidates"),
+    })
 
 async def _search_web(args: dict) -> str:
     query = args.get("query", "")
