@@ -26,6 +26,11 @@ def run_script(script: str, database, data_dir, cwd):
                           capture_output=True, text=True)
 
 
+def admin_dir(data_dir) -> str:
+    user = UserStore(str(data_dir)).upsert("admin@example.com", "Admin", "admin", fast_hash(PASSWORD))
+    return os.path.join(str(data_dir), "users", user.id)
+
+
 def test_import_copies_open_webui_accounts(tmp_path):
     database = tmp_path / "webui.db"
     connection = sqlite3.connect(database)
@@ -74,19 +79,23 @@ def test_import_copies_open_webui_chats_and_notes_once(tmp_path):
 
     data_dir = tmp_path / "data"
     data_dir.mkdir()
+    missing = run_script("import_openwebui_data.py", database, data_dir, tmp_path)
+    assert missing.returncode == 1 and "no starfire account" in missing.stderr
+    user_dir = admin_dir(data_dir)
     first = run_script("import_openwebui_data.py", database, data_dir, tmp_path)
     assert first.returncode == 0, first.stderr
+    assert "into admin@example.com's account" in first.stdout
     assert "chats: 1 copied ['First chat']" in first.stdout
     second = run_script("import_openwebui_data.py", database, data_dir, tmp_path)
     assert "chats: 0 copied" in second.stdout and "notes: 0 copied" in second.stdout
 
-    [session] = ChatSessionStore(str(data_dir)).list()
+    [session] = ChatSessionStore(user_dir).list()
     assert session.title == "First chat" and session.pinned
     assert [(m["role"], m["content"]) for m in session.messages] == [("user", "hello"), ("assistant", "hi")]
     assert session.messages[1]["model"] == "arty"
     assert set(session.tags) == {"misc", "open-webui"}
     assert session.created.startswith("2025-10-20")
-    [note] = NoteStore(str(data_dir)).list()
+    [note] = NoteStore(user_dir).list()
     assert (note.title, note.content) == ("Guide", "# Guide")
 
 
@@ -112,9 +121,10 @@ def test_import_follows_open_webui_history_thread(tmp_path):
 
     data_dir = tmp_path / "data"
     data_dir.mkdir()
+    user_dir = admin_dir(data_dir)
     result = run_script("import_openwebui_data.py", database, data_dir, tmp_path)
     assert result.returncode == 0, result.stderr
 
-    [session] = ChatSessionStore(str(data_dir)).list()
+    [session] = ChatSessionStore(user_dir).list()
     assert [(m["role"], m["content"]) for m in session.messages] == [
         ("user", "first"), ("assistant", "reply one"), ("user", "second")]

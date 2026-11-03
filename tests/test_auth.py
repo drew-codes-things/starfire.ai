@@ -159,7 +159,7 @@ def login_client(users, sessions, monkeypatch):
 def test_login_route_sets_a_locked_down_cookie_and_logout_ends_it(login_client):
     response = login_client.post("/api/auth/login", json={"email": "drew@example.com", "password": PASSWORD})
     assert response.status_code == 200
-    assert response.json() == {"email": "drew@example.com", "name": "Drew", "role": "admin"}
+    assert {k: response.json()[k] for k in ("email", "name", "role")} == {"email": "drew@example.com", "name": "Drew", "role": "admin"}
     cookie = response.headers["set-cookie"].lower()
     assert "httponly" in cookie and "secure" in cookie and "samesite=lax" in cookie
 
@@ -211,7 +211,7 @@ def test_setup_refuses_bad_details(setup_client, users, changes, message):
 def test_setup_creates_one_admin_and_logs_in(setup_client, users):
     assert setup_client.get("/api/auth/status").json() == {"has_users": False}
     response = setup_client.post("/api/auth/setup", json=setup_body())
-    assert response.json() == {"email": "drew@example.com", "name": "Drew", "role": "admin"}
+    assert {k: response.json()[k] for k in ("email", "name", "role")} == {"email": "drew@example.com", "name": "Drew", "role": "admin"}
     assert setup_client.get("/api/secret").status_code == 200
     assert PASSWORD not in open(users.path).read()
     again = setup_client.post("/api/auth/setup", json=setup_body(email="evil@example.com"))

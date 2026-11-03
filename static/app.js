@@ -14,11 +14,29 @@ window.fetch = async (input, init = {}) => {
   return response;
 };
 
+let currentUser = null;
+
+function applyUserScope(user) {
+  currentUser = user;
+  document.body.classList.toggle('is-admin', user.role === 'admin');
+  let previous = null;
+  try { previous = localStorage.getItem('sf_user'); } catch (_) {}
+  if (previous !== user.id) {
+    try {
+      localStorage.removeItem('sf_current_session');
+      localStorage.removeItem('sf_draft_messages');
+      localStorage.setItem('sf_user', user.id);
+    } catch (_) {}
+    if (typeof currentSessionId !== 'undefined') currentSessionId = null;
+  }
+}
+
 async function setUpLogout() {
   const button = document.getElementById('logoutBtn');
   const response = await fetch('/api/auth/me');
   if (!response.ok) return;
   const user = await response.json();
+  applyUserScope(user);
   button.title = `Logged in as ${user.email}`;
   button.hidden = false;
   button.addEventListener('click', async () => {
@@ -806,6 +824,10 @@ const appConfig = { version: '', own_tools_models: ['assistant-core', 'arty/*'],
 
 async function loadAppConfig() {
   try {
+    const me = await fetch('/api/auth/me');
+    if (me.ok) applyUserScope(await me.json());
+  } catch (_) {}
+  try {
     const r = await fetch('/api/config');
     if (!r.ok) return;
     const data = await r.json();
@@ -1486,6 +1508,7 @@ function openSettings(tabName) {
   refreshLocalGen();
   refreshChatManagement();
   refreshPromptList();
+  refreshAccounts();
 }
 function closeSettings() {
   settingsEls.modal.hidden = true;
@@ -1691,7 +1714,7 @@ async function refreshMcpServerList() {
         `<label class="theme-toggle"><input type="checkbox" ${checked} /></label>` +
         `<span class="endpoint-label">${escapeHtml(s.name)}</span>` +
         `<span class="endpoint-meta">${s.transport && s.transport !== 'stdio' ? escapeHtml(s.url) + ' · ' : ''}${s.tool_count} tool(s)${s.connected ? '' : ' · not running'}</span>` +
-        `<button class="endpoint-remove" title="Remove">×</button>`;
+        `<button class="endpoint-remove admin-only" title="Remove">×</button>`;
       li.querySelector('input[type="checkbox"]').onchange = e => {
         if (e.target.checked) enabledMcpServers.add(s.id); else enabledMcpServers.delete(s.id);
         saveEnabledMcpServers();
@@ -3337,6 +3360,103 @@ settingsEls.restoreBackupBtn.onclick = async () => {
     settingsEls.restoreResult.className = 'settings-hint error';
   }
 };
+
+const accountEls = {
+  form: $('accountForm'), name: $('newAccountName'), email: $('newAccountEmail'),
+  password: $('newAccountPassword'), role: $('newAccountRole'), result: $('accountFormResult'),
+  list: $('accountList'), submit: $('createAccountBtn'),
+};
+
+function setAccountResult(text, kind) {
+  accountEls.result.textContent = text;
+  accountEls.result.className = 'settings-hint' + (kind ? ' ' + kind : '');
+}
+
+async function accountRequest(method, url, body) {
+  const r = await fetch(url, {
+    method, headers: body ? { 'Content-Type': 'application/json' } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.detail || `failed (${r.status})`);
+  return data;
+}
+
+async function refreshAccounts() {
+  if (!currentUser || currentUser.role !== 'admin' || !accountEls.list) return;
+  try {
+    const { users } = await accountRequest('GET', '/api/auth/users');
+    accountEls.list.innerHTML = '';
+    for (const user of users) {
+      const li = document.createElement('li');
+      li.className = 'endpoint-row';
+      const isSelf = user.id === currentUser.id;
+      const when = user.created ? new Date(user.created).toLocaleDateString() : '';
+      li.innerHTML =
+        `<span class="endpoint-label">${escapeHtml(user.name)} <span class="endpoint-meta">${escapeHtml(user.email)}${isSelf ? ' · you' : ''}${user.disabled ? ' · disabled' : ''}${when ? ' · since ' + escapeHtml(when) : ''}</span></span>` +
+        `<select class="account-role"><option value="user">user</option><option value="admin">admin</option></select>` +
+        `<button class="btn ghost account-reset" type="button">reset password</button>` +
+        `<button class="btn ghost account-toggle" type="button">${user.disabled ? 'enable' : 'disable'}</button>` +
+        `<button class="endpoint-remove" title="Delete this account and its data">×</button>`;
+      const role = li.querySelector('.account-role');
+      role.value = user.role;
+      role.disabled = isSelf;
+      role.onchange = async () => {
+        try { await accountRequest('PATCH', `/api/auth/users/${user.id}`, { role: role.value }); setAccountResult(`${user.email} is now ${role.value}`, 'ok'); }
+        catch (e) { setAccountResult(e.message, 'error'); }
+        refreshAccounts();
+      };
+      li.querySelector('.account-reset').onclick = async () => {
+        const password = await showDialog({ title: `new password for ${user.email}`, text: 'At least 10 characters. Every browser signed in to this account will be logged out.', input: '', inputType: 'password', placeholder: 'new password', okLabel: 'set password' });
+        if (!password) return;
+        try { await accountRequest('POST', `/api/auth/users/${user.id}/password`, { password }); setAccountResult(`password set for ${user.email}`, 'ok'); }
+        catch (e) { setAccountResult(e.message, 'error'); }
+      };
+      const toggle = li.querySelector('.account-toggle');
+      toggle.disabled = isSelf;
+      toggle.onclick = async () => {
+        try { await accountRequest('PATCH', `/api/auth/users/${user.id}`, { disabled: !user.disabled }); setAccountResult(`${user.email} ${user.disabled ? 'enabled' : 'disabled'}`, 'ok'); }
+        catch (e) { setAccountResult(e.message, 'error'); }
+        refreshAccounts();
+      };
+      const remove = li.querySelector('.endpoint-remove');
+      remove.disabled = isSelf;
+      remove.onclick = async () => {
+        const ok = await showDialog({ title: `delete ${user.email}?`, text: 'Their chats, memory, knowledge, notes, automations, email accounts and prompts are deleted with the account. This cannot be undone.', okLabel: 'delete account', danger: true });
+        if (!ok) return;
+        try { await accountRequest('DELETE', `/api/auth/users/${user.id}`); setAccountResult(`${user.email} deleted`, 'ok'); }
+        catch (e) { setAccountResult(e.message, 'error'); }
+        refreshAccounts();
+      };
+      accountEls.list.appendChild(li);
+    }
+  } catch (e) {
+    accountEls.list.innerHTML = `<li class="settings-hint error">${escapeHtml(e.message)}</li>`;
+  }
+}
+
+if (accountEls.form) {
+  accountEls.form.addEventListener('submit', async event => {
+    event.preventDefault();
+    const body = {
+      name: accountEls.name.value.trim(), email: accountEls.email.value.trim(),
+      password: accountEls.password.value, role: accountEls.role.value,
+    };
+    if (!body.email || !body.password) { setAccountResult('email and password are required', 'error'); return; }
+    accountEls.submit.disabled = true;
+    setAccountResult('adding…');
+    try {
+      const user = await accountRequest('POST', '/api/auth/users', body);
+      accountEls.form.reset();
+      setAccountResult(`added ${user.email} (${user.role}) - send them the password; they can change it under Settings → Interface`, 'ok');
+      refreshAccounts();
+    } catch (e) {
+      setAccountResult(e.message, 'error');
+    } finally {
+      accountEls.submit.disabled = false;
+    }
+  });
+}
 
 const compareEls = {
   modal: $('compareModal'), closeBtn: $('compareCloseBtn'), form: $('compareForm'),

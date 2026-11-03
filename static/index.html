@@ -190,12 +190,13 @@
           <button class="settings-tab" data-tab="email">Email</button>
           <div class="settings-group">settings</div>
           <button class="settings-tab" data-tab="appearance">Interface</button>
-          <button class="settings-tab active" data-tab="providers">Connections</button>
-          <button class="settings-tab" data-tab="localgen">Audio &amp; Images</button>
+          <button class="settings-tab active admin-only" data-tab="providers">Connections</button>
+          <button class="settings-tab admin-only" data-tab="localgen">Audio &amp; Images</button>
           <button class="settings-tab" data-tab="chats">Chats</button>
           <button class="settings-tab" data-tab="usage">Usage</button>
-          <button class="settings-tab" data-tab="hardware">Hardware</button>
-          <button class="settings-tab" data-tab="data">Data</button>
+          <button class="settings-tab admin-only" data-tab="hardware">Hardware</button>
+          <button class="settings-tab admin-only" data-tab="data">Data</button>
+          <button class="settings-tab admin-only" data-tab="accounts">Accounts</button>
         </nav>
         <div class="settings-panels">
 
@@ -386,7 +387,7 @@
               <p class="settings-hint">Add facts in the Memory tab, files in the Documents tab, jobs in Automations, accounts in Email, to-dos in Notes.</p>
             </div>
 
-            <div class="settings-card">
+            <div class="settings-card admin-only">
               <h3>Quick add (official MCP reference servers)</h3>
               <p class="settings-hint">Fetch and Memory are already installed and connected below - enable their checkbox to use them. Filesystem needs a directory choice, so it stays a manual add. Requires Node.js (npx) installed locally.</p>
               <div class="settings-row">
@@ -404,7 +405,7 @@
               <p class="settings-hint" id="mcpQuickAddResult"></p>
             </div>
 
-            <div class="settings-card">
+            <div class="settings-card admin-only">
               <h3>MCP server repository</h3>
               <p class="settings-hint">A broader catalog beyond Filesystem/Fetch/Memory above. Each needs its own
                 credentials/config - pick one to see what it needs. Connection is tested live before it's saved,
@@ -424,7 +425,7 @@
               <p class="settings-hint" id="mcpRepoResult"></p>
             </div>
 
-            <div class="settings-card">
+            <div class="settings-card admin-only">
               <h3>Custom MCP server</h3>
               <p class="settings-hint">A local command (stdio), or a server that is already running at a URL (streamable HTTP, or the older SSE transport).</p>
               <div class="settings-row">
@@ -867,6 +868,31 @@
             </div>
           </div>
 
+          <div class="settings-panel" data-panel="accounts" hidden>
+            <div class="settings-card">
+              <h3>Add an account</h3>
+              <p class="settings-hint">Each account has its own chats, memory, knowledge, notes, automations, email and prompts. Connections, MCP servers and local generation are shared and managed by admins.</p>
+              <form id="accountForm" novalidate>
+                <div class="settings-row">
+                  <input id="newAccountName" type="text" placeholder="name" autocomplete="off" spellcheck="false" />
+                  <input id="newAccountEmail" type="email" placeholder="email" autocomplete="off" spellcheck="false" />
+                </div>
+                <div class="settings-row">
+                  <input id="newAccountPassword" type="password" placeholder="password (10+ characters)" autocomplete="new-password" />
+                  <select id="newAccountRole">
+                    <option value="user">user</option>
+                    <option value="admin">admin</option>
+                  </select>
+                  <button class="btn send" type="submit" id="createAccountBtn">add account</button>
+                </div>
+              </form>
+              <p class="settings-hint" id="accountFormResult" role="status"></p>
+            </div>
+            <div class="settings-card">
+              <h3>Accounts</h3>
+              <ul class="endpoint-list" id="accountList"></ul>
+            </div>
+          </div>
           <div class="settings-panel" data-panel="appearance" hidden>
             <div class="settings-card">
               <h3>theme</h3>

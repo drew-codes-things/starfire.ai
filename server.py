@@ -42,6 +42,7 @@ from fastapi.staticfiles import StaticFiles
 import auth
 import auth_routes
 import routes
+import user_data
 from config import config
 from mcp_manager import McpConnectionError, mcp_manager
 from mcp_servers_store import REFERENCE_SERVERS
@@ -50,41 +51,6 @@ from model_endpoints import detect_ollama
 from version import VERSION
 
 DEFAULT_MCP_PRESETS = ["fetch", "memory"]
-
-DEFAULT_NOTE_TEMPLATES = [
-    {
-        "name": "Meeting notes",
-        "title": "Meeting - ",
-        "content": "Attendees:\n\nAgenda:\n- \n\nNotes:\n\n\nAction items:\n- ",
-        "note_type": "note",
-    },
-    {
-        "name": "Daily to-do",
-        "title": "To-do - today",
-        "note_type": "checklist",
-        "repeat": "daily",
-        "items": [{"text": "", "done": False}],
-    },
-    {
-        "name": "Weekly review",
-        "title": "Weekly review",
-        "content": "What went well:\n\nWhat didn't:\n\nFocus for next week:\n",
-        "note_type": "note",
-        "repeat": "weekly",
-    },
-    {
-        "name": "Shopping list",
-        "title": "Shopping list",
-        "note_type": "checklist",
-        "items": [{"text": "", "done": False}],
-    },
-    {
-        "name": "Project brainstorm",
-        "title": "Brainstorm - ",
-        "content": "Problem:\n\nIdeas:\n- \n\nOpen questions:\n- ",
-        "note_type": "note",
-    },
-]
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -107,11 +73,6 @@ async def lifespan(app: FastAPI):
         routes.mcp_servers.add(name=preset["name"], command=preset["command"], args=list(preset["args"]))
         print(f"  starfire.ai  ->  added default MCP server '{preset['name']}'")
 
-    if not routes.note_templates.list():
-        for template in DEFAULT_NOTE_TEMPLATES:
-            routes.note_templates.add(**template)
-        print(f"  starfire.ai  ->  added {len(DEFAULT_NOTE_TEMPLATES)} starter note templates")
-
     for server in routes.mcp_servers.list():
         if not server.enabled:
             continue
@@ -120,7 +81,16 @@ async def lifespan(app: FastAPI):
         except McpConnectionError as e:
             print(f"  starfire.ai  ->  could not start MCP server '{server.name}': {e}")
 
-    pruned = routes.attachment_store.prune()
+    first_admin = auth_routes.users.first_admin()
+    if first_admin:
+        moved = routes.registry.migrate_legacy(first_admin.id)
+        if moved:
+            print(f"  starfire.ai  ->  moved {len(moved)} data file(s) into {first_admin.email}'s account")
+
+    pruned = 0
+    for user_id in routes.registry.user_ids():
+        with user_data.run_as(user_id):
+            pruned += routes.attachment_store.prune()
     if pruned:
         print(f"  starfire.ai  ->  removed {pruned} attachment(s) older than 30 days")
 

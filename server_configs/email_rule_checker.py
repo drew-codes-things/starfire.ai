@@ -4,6 +4,7 @@ import asyncio
 import logging
 
 import email_client
+import user_data
 from email_store import EmailAccountStore, EmailRule, EmailRuleStore
 from note_store import NoteStore
 
@@ -12,12 +13,14 @@ logger = logging.getLogger(__name__)
 TICK_SECONDS = 120
 
 class EmailRuleChecker:
-    def __init__(self, rules: EmailRuleStore, accounts: EmailAccountStore, get_password, chat_fn, notes: NoteStore):
+    def __init__(self, rules: EmailRuleStore, accounts: EmailAccountStore, get_password, chat_fn, notes: NoteStore,
+                 user_ids_fn=None):
         self.rules = rules
         self.accounts = accounts
         self.get_password = get_password
         self.chat_fn = chat_fn
         self.notes = notes
+        self.user_ids_fn = user_ids_fn
         self._stop = asyncio.Event()
 
     async def run_loop(self):
@@ -35,6 +38,17 @@ class EmailRuleChecker:
         self._stop.set()
 
     async def _tick(self):
+        if self.user_ids_fn is None:
+            await self._tick_current_user()
+            return
+        for user_id in self.user_ids_fn():
+            with user_data.run_as(user_id):
+                try:
+                    await self._tick_current_user()
+                except Exception as e:
+                    logger.warning("email rule check failed for user %s: %s", user_id, e)
+
+    async def _tick_current_user(self):
         for rule in self.rules.list():
             if rule.enabled:
                 await self._check_rule(rule)

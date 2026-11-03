@@ -22,30 +22,22 @@ import model_capabilities
 import ollama_manager
 import shell_tool
 from agent_loop import run_chat_with_tools
-from attachments import AttachmentError, AttachmentStore, expand_attachments
+from attachments import AttachmentError, expand_attachments
 from api_key_manager import APIKeyManager
-from chat_session_store import ChatSessionStore
 from chat_stream import _sse_line, stream_chat
 from config import config
 from context_budget import trim_to_budget
-from documents_store import DocumentStore
-from folder_store import FolderStore
 import comfyui_client
 import piper_tts
-from local_gen_store import ComfyUIConfigStore, CustomWorkflowStore, GeneratedFileStore, PiperConfigStore
+from local_gen_store import ComfyUIConfigStore, CustomWorkflowStore, PiperConfigStore
 from email_rule_checker import EmailRuleChecker
-from email_store import EmailAccountStore, EmailRuleStore
 from mcp_manager import McpConnectionError, mcp_manager
 from mcp_servers_store import MCP_SERVER_REPOSITORY, REFERENCE_SERVERS, McpServerStore
-from memory_store import MemoryStore
 from model_endpoints import ModelEndpointStore, detect_ollama, discover_servers
-from note_store import NoteStore, NoteTemplateStore
-from preset_store import PresetStore
-from prompt_store import PromptStore
 from providers import build_models_url, is_embedding_model
 from task_scheduler import TaskScheduler, compute_next_run
-from task_store import ScheduledTask, TaskRunStore, TaskStore
-from usage_store import UsageStore
+from task_store import ScheduledTask
+import user_data
 from version import VERSION
 
 logger = logging.getLogger(__name__)
@@ -55,24 +47,26 @@ router = APIRouter(prefix="/api")
 api_keys = APIKeyManager(config.data_dir)
 endpoints = ModelEndpointStore(config.data_dir)
 mcp_servers = McpServerStore(config.data_dir)
-memory = MemoryStore(config.data_dir)
-documents = DocumentStore(config.data_dir)
-attachment_store = AttachmentStore(config.data_dir)
-tasks = TaskStore(config.data_dir)
-task_runs = TaskRunStore(config.data_dir)
-email_accounts = EmailAccountStore(config.data_dir)
-email_rules = EmailRuleStore(config.data_dir)
-presets = PresetStore(config.data_dir)
-generated_files = GeneratedFileStore(config.data_dir)
 comfyui_config = ComfyUIConfigStore(config.data_dir)
 piper_config = PiperConfigStore(config.data_dir)
 custom_workflows = CustomWorkflowStore(config.data_dir)
-usage = UsageStore(config.data_dir)
-notes = NoteStore(config.data_dir)
-note_templates = NoteTemplateStore(config.data_dir)
-chat_sessions = ChatSessionStore(config.data_dir)
-chat_folders = FolderStore(config.data_dir)
-prompts = PromptStore(config.data_dir)
+
+registry = user_data.configure(config.data_dir)
+memory = user_data.PerUser("memory")
+documents = user_data.PerUser("documents")
+attachment_store = user_data.PerUser("attachment_store")
+tasks = user_data.PerUser("tasks")
+task_runs = user_data.PerUser("task_runs")
+email_accounts = user_data.PerUser("email_accounts")
+email_rules = user_data.PerUser("email_rules")
+presets = user_data.PerUser("presets")
+generated_files = user_data.PerUser("generated_files")
+usage = user_data.PerUser("usage")
+notes = user_data.PerUser("notes")
+note_templates = user_data.PerUser("note_templates")
+chat_sessions = user_data.PerUser("chat_sessions")
+chat_folders = user_data.PerUser("chat_folders")
+prompts = user_data.PerUser("prompts")
 
 def _tool_context(base_url: str = "", api_key: str | None = None, model: str = "",
                    require_edit_approval: bool = False, require_shell_approval: bool = False,
@@ -439,7 +433,7 @@ def _task_chat_fn(endpoint_id, model, prompt, enabled_mcp_servers, enabled_built
         ctx=ctx, max_tools=model_capabilities.tool_cap_for_tier(tier),
     )
 
-scheduler = TaskScheduler(tasks, task_runs, _task_chat_fn)
+scheduler = TaskScheduler(tasks, task_runs, _task_chat_fn, user_ids_fn=registry.user_ids)
 
 def _email_rule_password(account_id: str) -> str | None:
     return api_keys.load().get(account_id)
@@ -453,7 +447,8 @@ async def _email_rule_chat_fn(endpoint_id: str, model: str, prompt: str) -> str:
     api_key = _api_key_for(endpoint.id, endpoint.provider)
     return await run_chat_collected(endpoint.base_url, api_key, model, [{"role": "user", "content": prompt}])
 
-email_rule_checker = EmailRuleChecker(email_rules, email_accounts, _email_rule_password, _email_rule_chat_fn, notes)
+email_rule_checker = EmailRuleChecker(email_rules, email_accounts, _email_rule_password, _email_rule_chat_fn, notes,
+                                      user_ids_fn=registry.user_ids)
 
 @router.get("/tasks")
 async def list_tasks():

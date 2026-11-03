@@ -70,11 +70,13 @@ const dialogEls = {
   input: $('dialogInput'), ok: $('dialogOkBtn'), cancel: $('dialogCancelBtn'),
 };
 
-function showDialog({ title, text = '', input, okLabel = 'ok', danger = false, allowEmpty = false }) {
+function showDialog({ title, text = '', input, okLabel = 'ok', danger = false, allowEmpty = false, inputType = 'text', placeholder = '' }) {
   return new Promise(resolve => {
     dialogEls.title.textContent = title;
     dialogEls.text.textContent = text;
     dialogEls.input.hidden = input === undefined;
+    dialogEls.input.type = inputType;
+    dialogEls.input.placeholder = placeholder;
     dialogEls.input.value = input || '';
     dialogEls.ok.textContent = okLabel;
     dialogEls.ok.className = danger ? 'btn' : 'btn send';

@@ -11,7 +11,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import user_data
 from atomic_io import atomic_write_json
+from auth import UserStore
 from chat_session_store import ChatSessionStore
 from config import config
 from note_store import NoteStore
@@ -112,14 +114,25 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Copy Open WebUI chats and notes into starfire.ai. "
                                                  "Running it again only copies ones it hasn't copied before.")
     parser.add_argument("database", help="path to Open WebUI's webui.db")
+    parser.add_argument("--user", help="email of the starfire account to import into (default: the first admin)")
     args = parser.parse_args()
 
-    imported_path = os.path.join(config.data_dir, IMPORTED_FILE)
+    users = UserStore(config.data_dir)
+    account = users.find_by_email(args.user) if args.user else users.first_admin()
+    if not account:
+        print("no starfire account to import into - set one up first (or pass --user EMAIL)", file=sys.stderr)
+        return 1
+    registry = user_data.configure(config.data_dir)
+    user_dir = registry.dir_for(account.id)
+    os.makedirs(user_dir, exist_ok=True)
+
+    imported_path = os.path.join(user_dir, IMPORTED_FILE)
     imported = load_imported(imported_path)
-    chat_titles = import_chats(args.database, ChatSessionStore(config.data_dir), imported)
-    note_titles = import_notes(args.database, NoteStore(config.data_dir), imported)
+    chat_titles = import_chats(args.database, ChatSessionStore(user_dir), imported)
+    note_titles = import_notes(args.database, NoteStore(user_dir), imported)
     atomic_write_json(imported_path, sorted(imported))
 
+    print(f"into {account.email}'s account")
     print(f"chats: {len(chat_titles)} copied {chat_titles}")
     print(f"notes: {len(note_titles)} copied {note_titles}")
     return 0

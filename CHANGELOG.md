@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.1.0 - 2026-11-03
+
+### Added
+- Multiple accounts. Each account owns its chats, folders, memory, knowledge, notes,
+  automations, email, prompts, presets, usage, attachments and generated files under
+  `data/users/<id>/`. Connections, MCP servers, local generation, hardware and backup stay
+  shared and admin-only.
+- Settings → Accounts for admins: add an account, change its role, reset its password,
+  disable or re-enable it, delete it with its data. `GET/POST /api/auth/users`,
+  `PATCH/DELETE /api/auth/users/{id}`, `POST /api/auth/users/{id}/password`.
+- Non-admins get a 403 on shared settings and don't see those tabs.
+
+### Changed
+- A single-user install's data moves into the first admin's folder on the first start.
+- `import_openwebui_data.py` takes `--user EMAIL` (default: the first admin).
+- `/api/auth/me` and the login reply include the account id, `disabled` and `created`.
+
 ## 1.0.0 - 2026-11-03
 
 ### Added

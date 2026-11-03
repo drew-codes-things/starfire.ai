@@ -204,3 +204,38 @@ class NoteTemplateStore:
             return False
         self._save(remaining)
         return True
+
+DEFAULT_TEMPLATES = [
+    {
+        "name": "Meeting notes",
+        "title": "Meeting - ",
+        "content": "Attendees:\n\nAgenda:\n- \n\nNotes:\n\n\nAction items:\n- ",
+        "note_type": "note",
+    },
+    {
+        "name": "Daily to-do",
+        "title": "To-do - today",
+        "note_type": "checklist",
+        "repeat": "daily",
+        "items": [{"text": "", "done": False}],
+    },
+    {
+        "name": "Weekly review",
+        "title": "Weekly review",
+        "content": "What went well:\n\nWhat didn't:\n\nFocus for next week:\n",
+        "note_type": "note",
+        "repeat": "weekly",
+    },
+    {
+        "name": "Shopping list",
+        "title": "Shopping list",
+        "note_type": "checklist",
+        "items": [{"text": "", "done": False}],
+    },
+    {
+        "name": "Project brainstorm",
+        "title": "Brainstorm - ",
+        "content": "Problem:\n\nIdeas:\n- \n\nOpen questions:\n- ",
+        "note_type": "note",
+    },
+]

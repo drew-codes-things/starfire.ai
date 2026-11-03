@@ -1361,3 +1361,6 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--red); }
 .diff-card-source { font-size: 0.72rem; color: var(--muted); padding: 6px 0 2px; }
 .diff-card-source a { color: var(--red); }
 .shell-card pre { font-family: var(--mono); }
+
+body:not(.is-admin) .admin-only { display: none !important; }
+.account-role { max-width: 90px; }

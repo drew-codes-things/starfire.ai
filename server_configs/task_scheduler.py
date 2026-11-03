@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 
 from croniter import croniter
 
+import user_data
 from task_store import ScheduledTask, TaskRun, TaskRunStore, TaskStore
 
 logger = logging.getLogger(__name__)
@@ -58,10 +59,11 @@ async def _run_task(task: ScheduledTask, task_runs: TaskRunStore, chat_fn) -> No
         task_runs.update(run.id, status="error", output=str(e), finished=datetime.now(timezone.utc).isoformat())
 
 class TaskScheduler:
-    def __init__(self, tasks: TaskStore, task_runs: TaskRunStore, chat_fn):
+    def __init__(self, tasks: TaskStore, task_runs: TaskRunStore, chat_fn, user_ids_fn=None):
         self.tasks = tasks
         self.task_runs = task_runs
         self.chat_fn = chat_fn
+        self.user_ids_fn = user_ids_fn
         self._stop = asyncio.Event()
 
     async def run_loop(self):
@@ -79,6 +81,17 @@ class TaskScheduler:
         self._stop.set()
 
     async def _tick(self):
+        if self.user_ids_fn is None:
+            await self._tick_current_user()
+            return
+        for user_id in self.user_ids_fn():
+            with user_data.run_as(user_id):
+                try:
+                    await self._tick_current_user()
+                except Exception as e:
+                    logger.warning("task scheduler tick failed for user %s: %s", user_id, e)
+
+    async def _tick_current_user(self):
         now = datetime.now(timezone.utc).isoformat()
         for task in self.tasks.list():
             if task.status != "active" or not task.next_run or task.next_run > now:

@@ -69,9 +69,26 @@ python import_openwebui_users.py /path/to/open-webui/data/webui.db
 
 Accounts are kept in
 `data/users.json`. The cookie is `Secure`, so serve it over HTTPS (or `localhost`), or set
-`COOKIE_SECURE=false` for plain HTTP on a trusted network. Everyone who logs in shares the
-same chats and settings - it's still a single-user app with a lock on the door. The shell
-tool runs as whichever user starfire runs as, so give it an unprivileged one.
+`COOKIE_SECURE=false` for plain HTTP on a trusted network. The shell tool runs as whichever
+system user starfire runs as, so give it an unprivileged one.
+
+### Accounts
+
+The first account is the admin. Under **Settings → Accounts** an admin adds more people (name,
+email, a starting password they can change later, and a role), resets a password, disables or
+re-enables an account, and deletes one along with everything it owns.
+
+Each account has its own chats, folders, memory, knowledge documents, notes and templates,
+automations, email accounts and rules, prompts, presets, usage figures, attachments and
+generated files, stored under `data/users/<id>/`. What's shared is the house's infrastructure:
+model connections and their API keys, MCP servers, local image and audio setup, hardware and
+backup. Only admins can change those; everyone can use them. Non-admins don't see the
+Connections, Audio & Images, Hardware, Data and Accounts tabs, and the tools menu hides the
+MCP server management for them.
+
+Upgrading from a single-user install: on the first start your existing data moves into the
+first admin's folder automatically. The Open WebUI import script now takes `--user EMAIL`
+(default: the first admin).
 
 If Ollama is already running on its default port, it's detected automatically on startup
 and appears in the model list with no setup. Otherwise, open **Settings → Providers** and
@@ -431,21 +448,16 @@ Settings UI so they're encrypted at rest rather than sitting in plaintext in `.e
 - `data/api_keys.json` - API keys, encrypted with [Fernet](https://cryptography.io/en/latest/fernet/).
 - `data/.key` - the per-install encryption key, `chmod 600` (owner-only).
 - `data/mcp_servers.json` - configured MCP servers (command/args, non-secret).
-- `data/memory.json` - your remembered facts.
-- `data/documents.json` - uploaded documents, chunked and indexed for search.
-- `data/tasks.json` / `data/task_runs.json` - scheduled automations and their run history.
-- `data/email_accounts.json` / `data/email_rules.json` - email account metadata and rules
-  (host/port/username, match/action config - all non-secret); the app password itself is
-  encrypted in `data/api_keys.json` alongside provider API keys.
-- `data/notes.json` / `data/note_templates.json` - your notes/checklists and saved templates.
-- `data/chat_sessions.json` - your saved conversations (including branches).
-- `data/presets.json` - saved (model + system prompt + tools) bundles.
-- `data/usage.json` - estimated token/cost history (see Usage above).
+- `data/users.json` / `data/sessions.json` - accounts (bcrypt hashes) and login sessions.
+- `data/users/<id>/` - one folder per account holding that person's `memory.json`,
+  `documents.json`, `tasks.json` / `task_runs.json`, `email_accounts.json` / `email_rules.json`
+  (host/port/username, match/action config - all non-secret; the app password itself is
+  encrypted in `data/api_keys.json` alongside provider API keys), `notes.json` /
+  `note_templates.json`, `chat_sessions.json`, `chat_folders.json`, `presets.json`,
+  `prompts.json`, `usage.json`, `generated_files.json` + `generated/`, and `attachments/`.
 - `data/comfyui_config.json` / `data/piper_config.json` / `data/custom_workflows.json` - local
   image/audio/video generation config (see Local generation above); non-secret, no API keys
   involved.
-- `data/generated_files.json` + `data/generated/` - metadata and file bytes for anything
-  generated (images/audio/documents).
 
 Back up or delete the whole `data/` directory to reset the app (or use Settings → Data's
 one-click backup/restore); deleting `data/.key` makes any stored keys unrecoverable.
@@ -487,7 +499,9 @@ one-click backup/restore); deleting `data/.key` makes any stored keys unrecovera
   round-trip to the model and a copy button on every block
 - Light/dark theme toggle
 - Optional system prompt (saved in browser), export chat as JSON, markdown or text
-- Runs 100% locally unless you opt in to a hosted provider - no telemetry, no accounts
+- Multiple accounts, each with its own chats, memory, knowledge, notes, automations and email,
+  managed by the admin from Settings → Accounts
+- Runs 100% locally unless you opt in to a hosted provider - no telemetry, no cloud accounts
 
 ## License
 
