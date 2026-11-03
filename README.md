@@ -7,6 +7,7 @@
 [![Python](https://img.shields.io/badge/python-3.12+-blue?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/fastapi-web-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Ollama](https://img.shields.io/badge/ollama-local%20models-000000?style=flat-square)](https://ollama.com/)
+[![Version](https://img.shields.io/badge/version-1.1.0-lightgrey?style=flat-square)](CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-proprietary-red?style=flat-square)](LICENSE)
 
 </div>
@@ -23,7 +24,7 @@ vLLM, ...) via API keys you add in Settings. Nothing is sent anywhere unless you
 hosted provider yourself.
 
 Built on FastAPI, sharing its provider architecture and encrypted key-storage pattern with
-[the reference app](https://github.com), scaled down to a single-user local chat app.
+[the reference app](https://github.com), as a local chat app for you and the people you add.
 
 ## Requirements
 
@@ -34,7 +35,7 @@ Built on FastAPI, sharing its provider architecture and encrypted key-storage pa
 ## Setup
 
 ```bash
-cd starfire.ai-main
+cd starfire.ai
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
@@ -52,7 +53,7 @@ password (at least 10 characters). That makes the admin account, and the setup p
 for good. Until then, every other page and API call is locked, so set it up straight away
 on a new install. After that, every page and API call needs a login (kept for 30 days in an
 HttpOnly cookie; 5 wrong passwords lock that email from that address for 15 minutes).
-Change your password under **Settings → account**; that logs out every other browser. Forgot
+Change your password under **Settings → Interface → account**; that logs out every other browser. Forgot
 it? Reset it from the terminal on the machine starfire runs on (this also logs out every
 browser that was signed in):
 
@@ -91,13 +92,13 @@ first admin's folder automatically. The Open WebUI import script now takes `--us
 (default: the first admin).
 
 If Ollama is already running on its default port, it's detected automatically on startup
-and appears in the model list with no setup. Otherwise, open **Settings → Providers** and
+and appears in the model list with no setup. Otherwise, open **Settings → Connections** and
 either click **add ollama** (fills in the default endpoint, then Test/Add) or **scan
 network** to probe common local model-server ports.
 
 ## Adding a hosted provider
 
-Settings → Providers → "Add API provider": pick OpenAI, Anthropic, or "Other
+Settings → Connections → "Add API provider": pick OpenAI, Anthropic, or "Other
 (OpenAI-compatible)", paste an API key, Test, then Add. The key is encrypted at rest - see
 below.
 
@@ -143,7 +144,9 @@ up to twice, and the corrected version replaces it in the reply (**✓ fixed · 
 the original error in the tooltip). If it still fails, the original stays with **✗ syntax
 error** and the line number, so you know before you paste. The copy button is disabled while a
 block is being checked. Languages whose checker isn't installed on this machine are left
-unmarked. Switch the whole thing off under **Settings → Interface → chat**. Your own messages have **edit**, **copy** and **delete**. Editing your
+unmarked. Switch the whole thing off under **Settings → Interface → chat**.
+
+Your own messages have **edit**, **copy** and **delete**. Editing your
 message or regenerating branches the conversation - rather than mutating history in place,
 they create a new chat pointing back at the original up to that point (marked `↪` in the
 sidebar). A **stop** button appears while a reply is streaming. Every conversation autosaves
@@ -244,9 +247,9 @@ with an embedding model (`nomic-embed-text` by default) is reachable, so a parap
 shared words can still surface. No Ollama/embedding model pulled → falls back to exactly the
 old keyword-only behavior, automatically, with no configuration needed either way.
 
-## Documents
+## Knowledge (documents)
 
-Settings → Documents lets you upload `.txt`, `.md`, or `.pdf` files, which are chunked and
+Settings → Knowledge lets you upload `.txt`, `.md`, or `.pdf` files, which are chunked and
 indexed for the model to search. Enable "Search my documents" in Settings → Tools so the model
 can pull in relevant passages while answering. Same keyword-search-by-default,
 semantic-when-available behavior as Memory above.
@@ -276,9 +279,9 @@ Two things worth knowing:
   cache). This version shows overdue/due-today notes with a highlighted badge in the list
   instead. If you want to be notified outside the app, that's not built.
 
-## Local generation (image/audio/video)
+## Audio & Images (local generation)
 
-Settings → Local Gen configures fully local image, audio, and video generation - no API key,
+Settings → Audio & Images configures fully local image, audio, and video generation - no API key,
 no hosted service, no content moderation layer other than whatever model you load:
 
 - **Image** - via [ComfyUI](https://github.com/comfyanonymous/ComfyUI), a plain local server
@@ -368,7 +371,7 @@ own Linux installer needs `sudo`.
 
 ### Pulling models
 
-Click **pull** next to any suggested model in the Hardware tab (or in Settings → Providers) to
+Click **pull** next to any suggested model in the Hardware tab (or in Settings → Connections) to
 download it through Ollama with a progress bar, same UX as Ollama's own CLI. To pull a model
 manually instead - useful for scripting, a headless box, or a model not in the suggested
 list - use Ollama's CLI directly:
