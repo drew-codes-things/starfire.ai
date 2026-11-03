@@ -7,7 +7,7 @@
 [![Python](https://img.shields.io/badge/python-3.12+-blue?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/fastapi-web-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Ollama](https://img.shields.io/badge/ollama-local%20models-000000?style=flat-square)](https://ollama.com/)
-[![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/badge/license-proprietary-red?style=flat-square)](LICENSE)
 
 </div>
 
@@ -108,7 +108,19 @@ bottom - in starfire's terminal look.
 
 Every reply has a toolbar: **edit** (in place), **copy**, **listen**, **info** (model, time,
 estimated size), **+1 / -1** rating, **continue** (extends the reply), **regenerate** (with any
-model) and **delete**. Your own messages have **edit**, **copy** and **delete**. Editing your
+model) and **delete**.
+
+Code in a reply lands in its own box with the language, a **copy** button and a check result.
+When a reply finishes, every fenced code block whose language starfire knows is parsed or
+compiled on the server - Python (`compile`), JavaScript and TypeScript (`node --check`),
+shell (`bash -n`), JSON, YAML, TOML and XML (parsers), Go (`gofmt -e`), C and C++
+(`cc -fsyntax-only`), Ruby (`ruby -c`) and PHP (`php -l`) - and never executed. A block that
+passes shows **✓ syntax ok**; a block that fails is sent back to the same model with the error,
+up to twice, and the corrected version replaces it in the reply (**✓ fixed · syntax ok**, with
+the original error in the tooltip). If it still fails, the original stays with **✗ syntax
+error** and the line number, so you know before you paste. The copy button is disabled while a
+block is being checked. Languages whose checker isn't installed on this machine are left
+unmarked. Switch the whole thing off under **Settings → Interface → chat**. Your own messages have **edit**, **copy** and **delete**. Editing your
 message or regenerating branches the conversation - rather than mutating history in place,
 they create a new chat pointing back at the original up to that point (marked `↪` in the
 sidebar). A **stop** button appears while a reply is streaming. Every conversation autosaves
@@ -369,6 +381,8 @@ rather use that instead)
 | Variable | Default | Notes |
 |---|---|---|
 | `PORT` | `8080` | Port the server listens on |
+| `BIND_HOST` | `127.0.0.1` | Address to listen on; keep it on loopback unless an account exists, since the shell tool can run commands |
+| `COOKIE_SECURE` | `true` | Set to `false` to allow the login cookie over plain HTTP on a trusted network |
 | `OLLAMA_BASE_URL` | _(auto-detect)_ | Override auto-detection with a specific Ollama URL |
 | `DATA_DIR` | `./data` | Where endpoint config and encrypted API keys are stored |
 | `TASK_MODEL` | _(chat's model)_ | Ollama model for titles, tags and follow-up suggestions |
@@ -430,11 +444,18 @@ one-click backup/restore); deleting `data/.key` makes any stored keys unrecovera
   with a hosted-API fallback when configured
 - Hardware detection (RAM/VRAM capacity, CPU/GPU/RAM identity and speed, cross-platform) with
   model-fit suggestions and one-click pulls with progress bars
-- Incremental markdown rendering while responses stream
+- Incremental markdown rendering while responses stream; markdown, sanitiser and syntax
+  highlighting are bundled in `static/vendor/`, so the UI needs no CDN and works offline
+- Code blocks are syntax-checked server-side when a reply finishes, with an automatic fix
+  round-trip to the model and a copy button on every block
 - Light/dark theme toggle
 - Optional system prompt (saved in browser), export chat as JSON, markdown or text
 - Runs 100% locally unless you opt in to a hosted provider - no telemetry, no accounts
 
 ## License
 
-MIT - made by [Drew](https://github.com/drew-codes-things)
+Proprietary - made by [Drew](https://github.com/drew-codes-things). You may install and run
+starfire.ai for your own use, as supplied. Copying, modifying, building on, redistributing or
+selling it is not permitted; see [LICENSE](LICENSE) for the full terms. The bundled
+third-party libraries in `static/vendor/` (marked, DOMPurify, highlight.js) keep their own
+open-source licences, which sit next to them.

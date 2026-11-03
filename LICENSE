@@ -1,21 +1,83 @@
-MIT License
+starfire.ai Proprietary License
 
-Copyright (c) 2026 Drew
+Copyright (c) 2026 Drew. All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This software, including its source code, object code, user interface, design,
+documentation and any accompanying files (together, the "Software"), is the
+copyrighted work of Drew (the "Licensor") and is protected by copyright law and
+international treaties. The Software is licensed, not sold.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+1. Grant of licence
+   Subject to full compliance with this licence, the Licensor grants you a
+   personal, non-exclusive, non-transferable, non-sublicensable, revocable
+   licence to install and run the Software, in unmodified form, solely for your
+   own use.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+2. Restrictions
+   Except as expressly permitted in section 1, you may not, and may not permit
+   or help anyone else to:
+   (a) copy, reproduce or redistribute the Software or any part of it, in any
+       form or by any means;
+   (b) modify, adapt, translate, or create derivative works of or based on the
+       Software, or build on, extend or incorporate the Software or any part of
+       it into any other software, product or service;
+   (c) sell, rent, lease, lend, sublicense, host, publish, distribute or
+       otherwise make the Software available to any third party;
+   (d) reverse engineer, decompile or disassemble the Software, except to the
+       extent that applicable law expressly permits this despite this
+       restriction;
+   (e) remove, obscure or alter any copyright, trademark or other proprietary
+       notice in the Software; or
+   (f) use the Software to develop a competing product or service, or use any
+       part of its source code, design or structure as a reference for doing so.
+
+3. Unauthorised use
+   Any use of the Software that is not expressly permitted by this licence is
+   unauthorised, is an infringement of the Licensor's copyright and other
+   intellectual property rights, and may also breach other applicable laws.
+   The Licensor reserves all rights not expressly granted here and may pursue
+   every remedy available at law or in equity against unauthorised use,
+   including injunctive relief and damages.
+
+4. Ownership
+   The Software is and remains the exclusive property of the Licensor. This
+   licence does not transfer any title, ownership or intellectual property
+   rights in the Software to you.
+
+5. Third-party components
+   The Software includes third-party components that are distributed under
+   their own licences, which continue to govern those components:
+   marked (static/vendor/LICENSE-marked.md), DOMPurify
+   (static/vendor/LICENSE-dompurify.txt) and highlight.js
+   (static/vendor/LICENSE-highlightjs.txt). Python packages listed in
+   requirements.txt are obtained separately and are licensed by their own
+   authors. Nothing in this licence restricts your rights under those licences
+   in respect of those components alone.
+
+6. Termination
+   This licence terminates automatically, without notice, if you breach any of
+   its terms. On termination you must stop using the Software and destroy all
+   copies in your possession or control. Sections 2 to 8 survive termination.
+
+7. Disclaimer of warranty
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT. The Software can run
+   shell commands and edit files on the machine it is installed on when those
+   tools are switched on; you are solely responsible for how and where you run
+   it.
+
+8. Limitation of liability
+   TO THE MAXIMUM EXTENT PERMITTED BY LAW, IN NO EVENT SHALL THE LICENSOR BE
+   LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+   CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+   SOFTWARE OR THE USE OF OR OTHER DEALINGS IN THE SOFTWARE.
+
+9. General
+   If any provision of this licence is held unenforceable, the remaining
+   provisions stay in full force. Failure to enforce any provision is not a
+   waiver of it. This licence is the entire agreement between you and the
+   Licensor concerning the Software.
+
+For permission to do anything this licence does not allow, contact the
+Licensor: https://github.com/drew-codes-things

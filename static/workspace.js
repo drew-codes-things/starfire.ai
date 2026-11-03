@@ -9,6 +9,7 @@ const PREF_DEFAULTS = {
   autoSpeak: false,
   showSuggestions: true,
   userBubbles: true,
+  checkCode: true,
 };
 
 const prefs = { ...PREF_DEFAULTS };
@@ -129,14 +130,24 @@ function toggleSidebar() {
   setSidebarOpen(document.documentElement.classList.contains('sidebar-closed'));
 }
 
-let storedSidebarClosed = false;
-try { storedSidebarClosed = localStorage.getItem('sf_sidebar_closed') === '1'; } catch (_) {}
-setSidebarOpen(!(isNarrowScreen() || storedSidebarClosed));
+function storedSidebarClosed() {
+  try { return localStorage.getItem('sf_sidebar_closed') === '1'; } catch (_) { return false; }
+}
+setSidebarOpen(!(isNarrowScreen() || storedSidebarClosed()));
+
+let wasNarrowScreen = isNarrowScreen();
+window.addEventListener('resize', () => {
+  const narrow = isNarrowScreen();
+  if (narrow === wasNarrowScreen) return;
+  wasNarrowScreen = narrow;
+  setSidebarOpen(narrow ? false : !storedSidebarClosed());
+  if (narrow) toggleControls(false);
+});
 
 $('sidebarCloseBtn').onclick = () => setSidebarOpen(false);
 $('sidebarOpenBtn').onclick = () => setSidebarOpen(true);
 $('sidebarScrim').onclick = () => setSidebarOpen(false);
-$('newChatBtn').onclick = () => { clearChat(); els.input.focus(); };
+$('newChatBtn').onclick = () => { clearChat(); if (isNarrowScreen()) setSidebarOpen(false); els.input.focus(); };
 
 document.querySelectorAll('[data-open-tab]').forEach(btn => {
   btn.onclick = () => openSettings(btn.dataset.openTab);
@@ -189,7 +200,7 @@ function chatItem(session) {
   li.innerHTML =
     `<button type="button" class="chat-item-link" title="${escapeHtml(session.title || '(untitled)')}">${branch}${escapeHtml(session.title || '(untitled)')}${tags}</button>` +
     `<button type="button" class="icon-btn small chat-item-menu-btn" aria-label="Chat options" title="Chat options">&middot;&middot;&middot;</button>`;
-  li.querySelector('.chat-item-link').onclick = () => openSession(session.id);
+  li.querySelector('.chat-item-link').onclick = () => { openSession(session.id); if (isNarrowScreen()) setSidebarOpen(false); };
   li.querySelector('.chat-item-link').ondblclick = () => renameChat(session);
   li.querySelector('.chat-item-menu-btn').onclick = e => {
     e.stopPropagation();
@@ -537,6 +548,7 @@ async function refreshArchived() {
 
 function openArchived() {
   archivedEls.modal.hidden = false;
+  if (isNarrowScreen()) setSidebarOpen(false);
   refreshArchived();
 }
 

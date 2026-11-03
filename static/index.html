@@ -7,9 +7,10 @@
   <link rel="icon" href="assets/logo.svg" type="image/svg+xml" />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+  <link rel="stylesheet" href="vendor/highlight-themes.css" />
+  <script src="vendor/marked.min.js"></script>
+  <script src="vendor/highlight.min.js"></script>
+  <script src="vendor/purify.min.js"></script>
 </head>
 <body>
 
@@ -662,7 +663,7 @@
               <h3>Save current setup as a preset</h3>
               <p class="settings-hint">Captures the current model, system prompt, and enabled tools.</p>
               <div class="settings-row">
-                <input id="presetName" type="text" placeholder="preset name, e.g. \"coding\"" autocomplete="off" spellcheck="false" />
+                <input id="presetName" type="text" placeholder="preset name, e.g. coding" autocomplete="off" spellcheck="false" />
                 <button class="btn send" id="savePresetBtn">save current setup</button>
               </div>
               <p class="settings-hint" id="presetSaveResult"></p>
@@ -806,7 +807,7 @@
                 tell starfire which node/input holds the prompt text, and save it here. Runs against the ComfyUI
                 server configured above.</p>
               <div class="settings-row">
-                <input id="workflowName" type="text" placeholder="name, e.g. \"svd-video\"" autocomplete="off" spellcheck="false" />
+                <input id="workflowName" type="text" placeholder="name, e.g. svd-video" autocomplete="off" spellcheck="false" />
               </div>
               <div class="settings-row">
                 <textarea id="workflowJson" placeholder="paste exported workflow JSON here" rows="4" style="width:100%;font-family:var(--mono);background:var(--panel);color:var(--fg);border:1px solid var(--border);padding:6px 8px;"></textarea>
@@ -873,6 +874,8 @@
               <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="ctrlEnterSends" /><span>Ctrl+Enter sends (Enter adds a new line)</span></label></div>
               <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="autoSpeak" /><span>Read replies aloud automatically</span></label></div>
               <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="showSuggestions" /><span>Show prompt suggestions on a new chat</span></label></div>
+              <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="checkCode" /><span>Check code blocks for syntax errors and have the model fix them before you copy</span></label></div>
+              <p class="settings-hint">Python, JavaScript, TypeScript, shell, JSON, YAML, TOML, XML, Go, C, C++, Ruby and PHP are parsed or compiled, never run. The box shows the result; a block that fails is sent back to the model up to twice.</p>
             </div>
             <div class="settings-card">
               <h3>keyboard shortcuts</h3>

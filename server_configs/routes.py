@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 import builtin_tools
+import code_check
 import date_parsing
 import email_client
 import file_edit_tool
@@ -128,6 +129,8 @@ async def test_endpoint(body: TestEndpointBody):
 async def add_endpoint(body: AddEndpointBody):
     if not body.base_url.strip():
         raise HTTPException(400, "base_url is required")
+    if endpoints.find_by_url(body.base_url.strip()):
+        raise HTTPException(409, "that endpoint is already configured")
     ok, message = await _probe_endpoint(body.base_url, body.api_key)
     if not ok:
         raise HTTPException(502, message)
@@ -1154,6 +1157,14 @@ async def quick_complete(body: QuickCompleteBody):
     text = helper_tasks.clean_reply(text)
     usage.record(endpoint.provider, model, body.prompt, text)
     return {"text": text}
+
+class CodeCheckBody(BaseModel):
+    language: str = ""
+    code: str
+
+@router.post("/code-check")
+async def check_code_block(body: CodeCheckBody):
+    return await code_check.check(body.language, body.code)
 
 @router.get("/usage")
 async def get_usage():
