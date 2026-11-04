@@ -11,10 +11,10 @@ APPROVAL_TIMEOUT_SECONDS = 300
 _pending: dict[str, dict] = {}
 
 
-def stage(command: str, cwd: str | None) -> str:
+def stage(command: str, cwd: str | None, owner: str | None) -> str:
     pending_id = uuid.uuid4().hex[:12]
     _pending[pending_id] = {
-        "id": pending_id, "command": command, "cwd": cwd or "",
+        "id": pending_id, "owner": owner, "command": command, "cwd": cwd or "",
         "created": time.time(), "future": asyncio.get_running_loop().create_future(),
     }
     return pending_id
@@ -32,16 +32,17 @@ async def wait_for_decision(pending_id: str) -> bool | None:
         _pending.pop(pending_id, None)
 
 
-def resolve(pending_id: str, approved: bool) -> bool:
+def resolve(pending_id: str, approved: bool, owner: str | None) -> bool:
     entry = _pending.get(pending_id)
-    if not entry or entry["future"].done():
+    if not entry or entry["owner"] != owner or entry["future"].done():
         return False
     entry["future"].set_result(approved)
     return True
 
 
-def list_pending() -> list[dict]:
-    return [{k: v for k, v in entry.items() if k != "future"} for entry in _pending.values()]
+def list_pending(owner: str | None) -> list[dict]:
+    return [{k: v for k, v in entry.items() if k != "future"}
+            for entry in _pending.values() if entry["owner"] == owner]
 
 
 async def run_shell(command: str, cwd: str | None = None) -> str:

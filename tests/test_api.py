@@ -170,7 +170,7 @@ def test_pending_shell_commands_can_be_approved_or_rejected(client):
     assert client.post("/api/pending-shell/nope/approve").status_code == 404
 
     async def stage_and_wait():
-        pending_id = shell_tool.stage("echo hi", None)
+        pending_id = shell_tool.stage("echo hi", None, owner=None)
         assert client.get("/api/pending-shell").json()["commands"][0]["command"] == "echo hi"
         assert client.post(f"/api/pending-shell/{pending_id}/reject").json() == {"rejected": True}
         assert await shell_tool.wait_for_decision(pending_id) is False

@@ -31,7 +31,7 @@ def test_approved_command_runs_and_rejected_command_does_not(monkeypatch):
         async def decide(approved):
             event = await events.get()
             assert event["shell_pending"]["command"] == "echo approved"
-            assert shell_tool.resolve(event["shell_pending"]["pending_id"], approved)
+            assert shell_tool.resolve(event["shell_pending"]["pending_id"], approved, owner=None)
 
         decision = asyncio.ensure_future(decide(True))
         result = await builtin_tools._run_shell({"command": "echo approved"}, ctx)
@@ -42,7 +42,7 @@ def test_approved_command_runs_and_rejected_command_does_not(monkeypatch):
         result = await builtin_tools._run_shell({"command": "echo approved"}, ctx)
         await decision
         assert result.startswith("error: the user rejected")
-        assert shell_tool.list_pending() == []
+        assert shell_tool.list_pending(None) == []
 
     asyncio.run(run())
 
@@ -52,7 +52,7 @@ def test_unanswered_command_times_out(monkeypatch):
         monkeypatch.setattr(shell_tool, "APPROVAL_TIMEOUT_SECONDS", 0.05)
         result = await builtin_tools._run_shell({"command": "echo never"}, context(True, asyncio.Queue()))
         assert result.startswith("error: the user did not approve")
-        assert shell_tool.list_pending() == []
+        assert shell_tool.list_pending(None) == []
 
     asyncio.run(run())
 

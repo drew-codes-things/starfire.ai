@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
+import auth_routes
 import builtin_tools
 import code_check
 import date_parsing
@@ -68,6 +69,11 @@ chat_sessions = user_data.PerUser("chat_sessions")
 chat_folders = user_data.PerUser("chat_folders")
 prompts = user_data.PerUser("prompts")
 
+def _current_user_is_active_admin() -> bool:
+    user_id = user_data.current_user_id.get()
+    user = auth_routes.users.find_by_id(user_id) if user_id else None
+    return bool(user) and user.role == "admin" and not user.disabled
+
 def _tool_context(base_url: str = "", api_key: str | None = None, model: str = "",
                    require_edit_approval: bool = False, require_shell_approval: bool = False,
                    interactive: bool = False) -> builtin_tools.ToolContext:
@@ -79,6 +85,7 @@ def _tool_context(base_url: str = "", api_key: str | None = None, model: str = "
         base_url=base_url, api_key=api_key, model=model,
         require_edit_approval=require_edit_approval,
         require_shell_approval=require_shell_approval,
+        may_use_host_tools=_current_user_is_active_admin(),
         events=asyncio.Queue() if interactive else None,
     )
 
@@ -1257,38 +1264,39 @@ async def pull_model(body: dict):
 
 @router.get("/pending-shell")
 async def list_pending_shell():
-    return {"commands": shell_tool.list_pending()}
+    return {"commands": shell_tool.list_pending(user_data.current_user_id.get())}
 
 @router.post("/pending-shell/{pending_id}/approve")
 async def approve_pending_shell(pending_id: str):
-    if not shell_tool.resolve(pending_id, True):
+    if not shell_tool.resolve(pending_id, True, user_data.current_user_id.get()):
         raise HTTPException(404, "no command is waiting with that id (already decided, timed out, or the server restarted)")
     return {"approved": True}
 
 @router.post("/pending-shell/{pending_id}/reject")
 async def reject_pending_shell(pending_id: str):
-    if not shell_tool.resolve(pending_id, False):
+    if not shell_tool.resolve(pending_id, False, user_data.current_user_id.get()):
         raise HTTPException(404, "no command is waiting with that id")
     return {"rejected": True}
 
 @router.get("/pending-edits")
 async def list_pending_edits():
-    return {"edits": file_edit_tool.list_pending()}
+    return {"edits": file_edit_tool.list_pending(user_data.current_user_id.get())}
 
 @router.post("/pending-edits/{edit_id}/approve")
 async def approve_pending_edit(edit_id: str):
-    edit = file_edit_tool.get_pending(edit_id)
+    owner = user_data.current_user_id.get()
+    edit = file_edit_tool.get_pending(edit_id, owner)
     if not edit:
         raise HTTPException(404, "no pending edit with that id (already approved/rejected, or the server restarted)")
     result = file_edit_tool.apply_edit(edit["path"], edit["content"])
-    file_edit_tool.remove_pending(edit_id)
+    file_edit_tool.remove_pending(edit_id, owner)
     if not result["ok"]:
         raise HTTPException(500, result["error"])
     return {"ok": True, "path": edit["path"]}
 
 @router.post("/pending-edits/{edit_id}/reject")
 async def reject_pending_edit(edit_id: str):
-    if not file_edit_tool.remove_pending(edit_id):
+    if not file_edit_tool.remove_pending(edit_id, user_data.current_user_id.get()):
         raise HTTPException(404, "no pending edit with that id")
     return {"ok": True}
 

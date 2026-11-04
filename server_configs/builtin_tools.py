@@ -14,6 +14,7 @@ import image_search
 import media_generation
 import piper_tts
 import shell_tool
+import user_data
 import web_search
 from api_key_manager import APIKeyManager
 from documents_store import DocumentStore
@@ -303,6 +304,7 @@ TOOL_SCHEMAS = [
 ]
 
 _TOOL_NAMES = {t["function"]["name"] for t in TOOL_SCHEMAS}
+HOST_TOOLS = frozenset({"run_shell", "edit_file", "github_cli"})
 
 @dataclass
 class ToolContext:
@@ -323,6 +325,7 @@ class ToolContext:
     model: str = ""
     require_edit_approval: bool = False
     require_shell_approval: bool = False
+    may_use_host_tools: bool = False
     events: "asyncio.Queue | None" = None
 
     async def emit(self, event: dict) -> None:
@@ -336,6 +339,8 @@ def is_builtin_tool(name: str) -> bool:
     return name in _TOOL_NAMES
 
 async def call_builtin_tool(name: str, arguments: dict, ctx: ToolContext) -> str:
+    if name in HOST_TOOLS and not ctx.may_use_host_tools:
+        return f"error: only an admin account can use {name}, because it acts directly on the server"
     if name == "manage_memory":
         return await _manage_memory(arguments, ctx.memory)
     if name == "search_documents":
@@ -497,7 +502,7 @@ def _edit_file(args: dict, ctx: ToolContext) -> str:
     diff_text = file_edit_tool.make_diff(path, old_content, new_content)
 
     if ctx.require_edit_approval:
-        pending_id = file_edit_tool.stage(path, new_content, diff_text)
+        pending_id = file_edit_tool.stage(path, new_content, diff_text, owner=user_data.current_user_id.get())
         return json.dumps({"staged": True, "pending_id": pending_id, "path": path, "diff": diff_text})
 
     result = file_edit_tool.apply_edit(path, new_content)
@@ -522,7 +527,7 @@ async def _run_shell(args: dict, ctx: ToolContext) -> str:
     if not command:
         return "error: command is required"
     if ctx.require_shell_approval:
-        pending_id = shell_tool.stage(command, cwd)
+        pending_id = shell_tool.stage(command, cwd, owner=user_data.current_user_id.get())
         await ctx.emit({"shell_pending": {"pending_id": pending_id, "command": command, "cwd": cwd or ""}})
         decision = await shell_tool.wait_for_decision(pending_id)
         if decision is None:

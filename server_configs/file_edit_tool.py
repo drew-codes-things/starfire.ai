@@ -33,16 +33,20 @@ def apply_edit(path: str, new_content: str) -> dict:
 
 _pending: dict[str, dict] = {}
 
-def stage(path: str, content: str, diff_text: str) -> str:
+def stage(path: str, content: str, diff_text: str, owner: str | None) -> str:
     edit_id = uuid.uuid4().hex[:12]
-    _pending[edit_id] = {"id": edit_id, "path": path, "content": content, "diff": diff_text}
+    _pending[edit_id] = {"id": edit_id, "owner": owner, "path": path, "content": content, "diff": diff_text}
     return edit_id
 
-def get_pending(edit_id: str) -> dict | None:
-    return _pending.get(edit_id)
+def get_pending(edit_id: str, owner: str | None) -> dict | None:
+    edit = _pending.get(edit_id)
+    return edit if edit and edit["owner"] == owner else None
 
-def remove_pending(edit_id: str) -> bool:
-    return _pending.pop(edit_id, None) is not None
+def remove_pending(edit_id: str, owner: str | None) -> bool:
+    if not get_pending(edit_id, owner):
+        return False
+    del _pending[edit_id]
+    return True
 
-def list_pending() -> list[dict]:
-    return list(_pending.values())
+def list_pending(owner: str | None) -> list[dict]:
+    return [edit for edit in _pending.values() if edit["owner"] == owner]
