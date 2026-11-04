@@ -12,6 +12,7 @@ import code_check
 
 needs_node = pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
 needs_bash = pytest.mark.skipif(shutil.which("bash") is None, reason="bash is not installed")
+needs_cc = pytest.mark.skipif(code_check._c_compiler() is None, reason="no C compiler installed")
 
 
 def test_language_aliases_map_to_one_checker():
@@ -83,3 +84,32 @@ def test_shell_syntax():
 def test_async_wrapper_returns_same_shape():
     result = asyncio.run(code_check.check("python", "x = 1\n"))
     assert result["status"] == "ok"
+
+
+@needs_cc
+def test_c_with_system_headers_is_checked():
+    assert code_check.check_sync("c", "#include <stdio.h>\nint main(void) { puts(\"hi\"); return 0; }\n")["status"] == "ok"
+    assert code_check.check_sync("cpp", "#include <vector>\nint main() { std::vector<int> v; return 0; }\n")["status"] == "ok"
+    assert code_check.check_sync("c", "#include <sys/types.h>\nint main(void) { return 0 }\n")["status"] == "error"
+
+
+@needs_cc
+@pytest.mark.parametrize("directive", [
+    '#include "{path}"',
+    "#include <{path}>",
+    '  #  include "{path}"',
+    '%:include "{path}"',
+    '#inc\\\nlude "{path}"',
+    '#include_next "{path}"',
+    '#import "{path}"',
+    '#embed "{path}"',
+    "#include <../../../../../../..{path}>",
+    '#define LOCATION "{path}"\n#include LOCATION',
+])
+def test_c_never_reads_files_outside_system_headers(tmp_path, directive):
+    secret = tmp_path / "secret.txt"
+    secret.write_text("leaked_marker_value = 1\n")
+    code = directive.format(path=secret) + "\nint main(void) { return 0; }\n"
+    result = code_check.check_sync("c", code)
+    assert result["status"] == "skipped"
+    assert "leaked_marker_value" not in result["message"]

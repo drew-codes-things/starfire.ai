@@ -211,6 +211,23 @@ def _check_go(code: str) -> dict:
     return _tool_check("go", "gofmt -e", "gofmt", ".go", code, lambda b, p: [b, "-e", p], retry=retry)
 
 
+LINE_SPLICE = re.compile(r"\\\r?\n")
+FILE_DIRECTIVE = re.compile(r"^[ \t]*(?:#|%:)[ \t]*(include_next|include|import|embed)\b[ \t]*(.*)$", re.M)
+SYSTEM_HEADER = re.compile(r"<([A-Za-z0-9_][A-Za-z0-9_+./-]*)>")
+
+
+def _is_system_header(directive: str, argument: str) -> bool:
+    if directive != "include":
+        return False
+    match = SYSTEM_HEADER.fullmatch(argument.strip())
+    return bool(match) and ".." not in match.group(1)
+
+
+def _reads_files_outside_system_headers(code: str) -> bool:
+    spliced = LINE_SPLICE.sub("", code)
+    return any(not _is_system_header(m.group(1), m.group(2)) for m in FILE_DIRECTIVE.finditer(spliced))
+
+
 def _c_compiler() -> str | None:
     for tool in ("gcc", "clang", "cc"):
         if shutil.which(tool):
@@ -222,6 +239,9 @@ def _check_c_family(language: str, code: str) -> dict:
     tool = _c_compiler()
     if not tool:
         return _result(language, "skipped", "cc -fsyntax-only", "no C compiler installed")
+    if _reads_files_outside_system_headers(code):
+        return _result(language, "skipped", f"{tool} -fsyntax-only",
+                       "only code whose #include lines name system headers like <stdio.h> is checked")
     suffix = ".c" if language == "c" else ".cpp"
     return _tool_check(language, f"{tool} -fsyntax-only", tool, suffix, code,
                        lambda b, p: [b, "-fsyntax-only", "-w", p])
