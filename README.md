@@ -12,6 +12,8 @@
 
 </div>
 
+![starfire.ai showing a chat with a highlighted code block and a table](screenshot.png)
+
 ---
 
 ## Overview
