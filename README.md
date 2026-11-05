@@ -210,7 +210,7 @@ Automations, and Email below for most of them, plus:
   cap, no private addresses) and stored with the other generated files, then shown in the chat
   with a link to the page it came from. Nothing is hot-linked from the model's own guesses.
 - **⚠️ Run shell commands** - off by default. One general-purpose shell tool the model can call
-  directly, the same way Claude Code itself uses one Bash tool rather than a curated command
+  directly, the same way coding agents use one shell tool rather than a curated command
   set. **There is no sandbox under it** - it runs as your own user on your own machine, with
   only a timeout (120s) and an output-size cap as guardrails. By default every command the
   model proposes **waits in the chat for you to press "run it" or "reject"** (five minutes,
