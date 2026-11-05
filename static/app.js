@@ -847,7 +847,6 @@ function globMatch(value, pattern) {
 function artyFilePath(href) {
   try {
     const url = new URL(href, location.href);
-    if (url.origin !== location.origin) return null;
     return appConfig.inline_media_prefixes.some(prefix => url.pathname.startsWith(prefix)) ? url.pathname : null;
   } catch (_) {
     return null;
@@ -855,6 +854,10 @@ function artyFilePath(href) {
 }
 
 function showInlineMedia(container) {
+  for (const image of container.querySelectorAll('img[src]')) {
+    const path = artyFilePath(image.getAttribute('src'));
+    if (path) image.src = path;
+  }
   for (const link of container.querySelectorAll('a[href]')) {
     if (link.dataset.media) continue;
     const path = artyFilePath(link.getAttribute('href'));
