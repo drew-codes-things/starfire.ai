@@ -23,8 +23,7 @@ running - or add one manually) and optionally talks to hosted providers
 vLLM, ...) via API keys you add in Settings. Nothing is sent anywhere unless you add a
 hosted provider yourself.
 
-Built on FastAPI, sharing its provider architecture and encrypted key-storage pattern with
-[the reference app](https://github.com), as a local chat app for you and the people you add.
+Built on FastAPI with encrypted key storage, as a local chat app for you and the people you add.
 
 ## Requirements
 
@@ -272,11 +271,10 @@ brainstorm) are seeded on first run.
 Two things worth knowing:
 - **Recurring due dates only advance while the Notes tab is open** - a lightweight timer
   checks for overdue repeating notes and pushes their due date forward one period at a time.
-  This matches the reference app's own actual behavior (its backend never rewrites a due date either;
-  only a browser tab open on its Notes page does) - not a shortcut invented for this port.
-- **No reminder popups, emails, or push notifications** - the reference app's equivalent is a genuinely
-  large subsystem (four delivery channels, SSRF-guarded webhooks, a background poller, a dedup
-  cache). This version shows overdue/due-today notes with a highlighted badge in the list
+  The server never rewrites a due date on its own; only a browser tab open on the Notes page does.
+- **No reminder popups, emails, or push notifications** - a proper reminder system is a large
+  subsystem of its own (delivery channels, SSRF-guarded webhooks, a background poller, a dedup
+  cache). starfire shows overdue/due-today notes with a highlighted badge in the list
   instead. If you want to be notified outside the app, that's not built.
 
 ## Audio & Images (local generation)
@@ -304,8 +302,8 @@ Enable the corresponding tool (Generate image / Generate audio / Generate docume
 Settings → Automations schedules a prompt to be sent to a model on a repeating basis (once,
 daily, weekly, or a cron expression) and records what came back. Pick which tools that run may
 use from the same list as chat (memory, documents, tasks, email, notes, web search, and - if you
-choose to enable it - shell). There's no separate "run a shell command" task type the way
-the reference app has one; a task is "send a prompt, with these tools available" and reuses the model's
+choose to enable it - shell). There's no separate "run a shell command" task type;
+a task is "send a prompt, with these tools available" and reuses the model's
 normal tool-calling for that, one mechanism rather than two. The same warning as the chat
 toggle applies: only give an automation the shell tool if it isn't also going to encounter
 untrusted content - an automation runs unattended, so there is nobody to approve its commands
