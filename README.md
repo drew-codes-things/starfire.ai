@@ -105,8 +105,8 @@ These three projects are made to work together, and each one links to the other 
 | Project | What it is | What it does for the other two |
 |---|---|---|
 | [Arty](https://github.com/drew-codes-things/Arty) | The assistant: the brain and its API, tools, memory and voice, plus the desktop, Android, iPhone and Quest apps | Answers for both. Arty CLI and starfire.ai send their chats to Arty's API and use its models and tools. Arty's approve page sends a browser that has no Arty key to starfire.ai |
-| [Arty CLI](https://github.com/drew-codes-things/ArtyCode) (ArtyCode) | Arty in your terminal: a coding agent that reads, edits and runs code in a project, asking first | Talks only to Arty. Logs in with an Arty API key, or by approving the computer in the browser |
-| [starfire.ai](https://github.com/drew-codes-things/starfire.ai) | A web chat dashboard for local and hosted models | Lets you chat with Arty in the browser. Its admin-only **Arty devices** page approves a computer that is logging in (Arty CLI's browser login), lists and turns off approved devices, and makes a new key with a QR code for a phone |
+| [Arty CLI](https://github.com/drew-codes-things/ArtyCode) (ArtyCode) | Arty in your terminal: a coding agent that reads, edits and runs code in a project, asking first | Talks only to Arty. Logs in with an Arty API key, or by approving the computer in the browser. With `/remote` it shares a session through Arty, so starfire.ai and the Arty phone apps can follow and steer it |
+| [starfire.ai](https://github.com/drew-codes-things/starfire.ai) | A web chat dashboard for local and hosted models | Lets you chat with Arty in the browser. Its admin-only **Arty devices** page approves a computer that is logging in (Arty CLI's browser login), lists and turns off approved devices, chooses which devices may control Arty CLI, and makes a new key with a QR code for a phone. Its admin-only **Arty CLI** page follows and steers shared Arty CLI sessions |
 
 How to link them:
 
@@ -119,8 +119,14 @@ How to link them:
 - **Arty CLI to Arty**: set `ARTY_URL` (home network) or `ARTY_REMOTE_URL` (from anywhere, with
   `ARTY_ACCESS_CLIENT_ID` and `ARTY_ACCESS_CLIENT_SECRET` if Cloudflare Access guards it), then run `arty login`.
 
+- **Controlling Arty CLI from elsewhere**: run `/remote` (or start with `arty --remote`) on the computer, then open
+  **Arty CLI** in starfire's sidebar (admins only). It lists the computers sharing a session; open one to read what
+  Arty is doing, answer its permission questions with **Allow** or **Deny**, send a message, or **Stop** the current
+  turn. starfire uses its own Arty connection for this, so the browser never holds Arty's key. For a phone with its
+  own device key, switch on **Arty CLI** for it on the **Arty devices** page.
+
 Arty works without the other two. Arty CLI needs Arty. starfire.ai works with other models on its own, but its
-**Arty devices** page needs Arty.
+**Arty devices** and **Arty CLI** pages need Arty.
 
 ## Adding a hosted provider
 
