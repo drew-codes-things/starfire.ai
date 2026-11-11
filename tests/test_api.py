@@ -154,6 +154,7 @@ def test_prompts_and_memory(client):
 def test_config_reports_version_and_model_patterns(client):
     data = client.get("/api/config").json()
     assert data["version"] == VERSION
+    assert "Arty" in data["own_tools_models"]
     assert "assistant-core" in data["own_tools_models"]
     assert data["inline_media_prefixes"] == ["/arty-files/"]
 

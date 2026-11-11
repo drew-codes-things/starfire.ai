@@ -899,7 +899,7 @@ async function forkSession(uptoIdx) {
 
 const ARTY_MEDIA = { image: /\.(png|jpe?g|gif|webp)$/i, video: /\.(mp4|webm|mov|m4v)$/i };
 
-const appConfig = { version: '', own_tools_models: ['assistant-core', 'arty/*'], inline_media_prefixes: ['/arty-files/'] };
+const appConfig = { version: '', own_tools_models: ['Arty', 'assistant-core', 'arty/*'], inline_media_prefixes: ['/arty-files/'] };
 
 async function loadAppConfig() {
   try {

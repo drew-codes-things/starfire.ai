@@ -158,3 +158,10 @@ def test_text_colours_meet_wcag_aa_on_every_surface(selector):
             ratio = contrast(tokens[text], tokens[surface])
             assert ratio >= minimum, f"{selector}: {text} on {surface} is {ratio:.2f}:1"
     assert contrast(tokens["--on-accent"], tokens["--accent-fill"]) >= minimum
+
+
+def test_the_offline_fallback_treats_arty_and_its_old_name_as_bringing_their_own_tools():
+    fallback = re.search(r"own_tools_models: \[([^\]]*)\]", read("app.js"))
+    assert fallback, "app.js has no own_tools_models fallback"
+    names = re.findall(r"'([^']+)'", fallback.group(1))
+    assert {"Arty", "assistant-core", "arty/*"} <= set(names)
