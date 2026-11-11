@@ -38,6 +38,7 @@ load_dotenv()
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+import arty_devices
 import auth
 import auth_routes
 import routes
@@ -142,6 +143,7 @@ async def health():
 
 app.include_router(auth_routes.router)
 app.include_router(routes.router)
+app.include_router(arty_devices.router)
 app.mount("/", static_files.compressed_static("static"), name="static")
 
 if __name__ == "__main__":

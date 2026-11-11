@@ -9,6 +9,7 @@ import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass
+from urllib.parse import quote
 from datetime import datetime, timezone
 
 import bcrypt
@@ -24,8 +25,9 @@ MAX_FAILED_LOGINS = 5
 LOCKOUT_SECONDS = 15 * 60
 LOGIN_PAGE = "/login.html"
 SETUP_PAGE = "/setup.html"
-PUBLIC_PATHS = frozenset({LOGIN_PAGE, "/login.js", "/style.css", "/vendor/fonts.css", "/api/auth/login", "/api/auth/status",
-                          "/api/health"})
+PUBLIC_PATHS = frozenset({LOGIN_PAGE, "/login.js", "/loginNext.js", "/style.css", "/vendor/fonts.css", "/api/auth/login",
+                          "/api/auth/status", "/api/health"})
+HOME_PATHS = frozenset({"/", "/index.html"})
 SETUP_PATHS = frozenset({SETUP_PAGE, "/setup.js", "/api/auth/setup"})
 MIN_PASSWORD_CHARS = 10
 MAX_FIELD_CHARS = 256
@@ -58,11 +60,12 @@ def _now_iso() -> str:
 ADMIN_ONLY_PREFIXES = ("/api/model-endpoints", "/api/mcp/servers", "/api/comfyui", "/api/piper",
                        "/api/custom-workflows", "/api/hardware", "/api/restore", "/api/auth/users")
 ADMIN_ONLY_PATHS = frozenset({"/api/backup"})
+ADMIN_ONLY_FOR_EVERY_METHOD = ("/api/arty-devices",)
 READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
 def is_admin_only(method: str, path: str) -> bool:
-    if path in ADMIN_ONLY_PATHS or path.startswith("/api/auth/users"):
+    if path in ADMIN_ONLY_PATHS or path.startswith(("/api/auth/users", *ADMIN_ONLY_FOR_EVERY_METHOD)):
         return True
     return method not in READ_METHODS and path.startswith(ADMIN_ONLY_PREFIXES)
 
@@ -355,6 +358,14 @@ def require_admin(request: Request) -> User:
     return user
 
 
+def login_redirect(request: Request) -> str:
+    path = request.url.path
+    if request.method not in READ_METHODS or path in HOME_PATHS:
+        return LOGIN_PAGE
+    wanted = path + (f"?{request.url.query}" if request.url.query else "")
+    return f"{LOGIN_PAGE}?next={quote(wanted, safe='')}"
+
+
 def install(app: FastAPI, users: UserStore, sessions: SessionStore) -> None:
 
     @app.middleware("http")
@@ -384,4 +395,4 @@ def install(app: FastAPI, users: UserStore, sessions: SessionStore) -> None:
                 user_data.current_user_id.reset(token)
         if request.url.path.startswith("/api/"):
             return JSONResponse({"detail": "not logged in"}, status_code=401)
-        return RedirectResponse(LOGIN_PAGE, status_code=303)
+        return RedirectResponse(login_redirect(request), status_code=303)

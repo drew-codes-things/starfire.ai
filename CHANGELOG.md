@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Added
+- Arty devices page (`/arty-devices.html`, admins only, linked from Settings > Accounts):
+  approve a computer waiting to join Arty (opened from the QR code or link Arty shows, with the
+  code typed to match), list approved devices and turn one off, and make a named key with a
+  one-time copy button and a phone setup QR code. Set `ARTY_BASE_URL` to use it.
+- Logging in returns you to the page you asked for, so an approve link still works after the
+  login page.
 - Light, dark and system themes (Settings → Appearance). The stored theme is applied before
   the page paints, the browser theme colour follows it, and the login and setup pages use it
   too. The old `sf_light` setting is still read and kept in step.

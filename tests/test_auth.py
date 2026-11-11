@@ -247,3 +247,29 @@ def test_fonts_load_on_the_login_and_setup_pages(path):
 @pytest.mark.parametrize("path", ["/vendor/marked.min.js", "/app.js", "/workspace.js", "/index.html", "/vendor/"])
 def test_app_code_still_needs_a_login(path):
     assert not auth.is_public(path)
+
+
+def test_a_page_asked_for_before_login_opens_again_after_it(users, sessions):
+    users.upsert("drew@example.com", "Drew", "admin", fast_hash(PASSWORD))
+    app = build_app(users, sessions)
+
+    @app.get("/arty-devices.html")
+    def devices_page():
+        return {"page": True}
+
+    client = TestClient(app)
+    page = client.get("/arty-devices.html?code=ABCD-EFGH", follow_redirects=False)
+    assert page.status_code == 303
+    assert page.headers["location"] == "/login.html?next=%2Farty-devices.html%3Fcode%3DABCD-EFGH"
+    home = client.get("/index.html", follow_redirects=False)
+    assert home.headers["location"] == "/login.html"
+
+
+def test_the_arty_devices_api_is_admin_only_even_to_read():
+    assert auth.is_admin_only("GET", "/api/arty-devices")
+    assert auth.is_admin_only("GET", "/api/arty-devices/pending")
+    assert not auth.is_admin_only("GET", "/api/model-endpoints")
+
+
+def test_the_login_page_can_read_where_to_go_next():
+    assert auth.is_public("/loginNext.js")

@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+  <meta name="color-scheme" content="dark light" />
+  <meta name="theme-color" content="#19191c" />
+  <title>Arty devices · starfire.ai</title>
+  <link rel="icon" href="assets/logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="vendor/fonts.css" />
+  <link rel="stylesheet" href="style.css" />
+  <script>
+    (function () {
+      var root = document.documentElement;
+      var choice = 'dark';
+      var sidebarClosed = false;
+      try {
+        choice = localStorage.getItem('sf_theme') || (localStorage.getItem('sf_light') === '1' ? 'light' : 'dark');
+        sidebarClosed = localStorage.getItem('sf_sidebar_closed') === '1';
+      } catch (error) {
+        choice = 'dark';
+      }
+      var light = choice === 'light' || (choice === 'system' && window.matchMedia('(prefers-color-scheme: light)').matches);
+      root.classList.toggle('light', light);
+      if (sidebarClosed || window.innerWidth <= 860) root.classList.add('sidebar-closed');
+      var meta = document.querySelector('meta[name="theme-color"]');
+      var background = getComputedStyle(root).getPropertyValue('--bg').trim();
+      if (meta && background) meta.setAttribute('content', background);
+    })();
+  </script>
+</head>
+<body class="login-page">
+  <main class="login-card arty-devices-card">
+    <div class="login-brand">
+      <img class="login-logo" src="assets/logo.svg" alt="" />
+      <span class="login-wordmark">starfire<span>.ai</span></span>
+    </div>
+    <h1>Arty devices</h1>
+    <p class="login-sub">Approve computers, make keys for phones and turn devices off.</p>
+    <div id="artyDevices" aria-live="polite"><p class="settings-hint">Loading...</p></div>
+    <p class="arty-back"><a href="/">Back to starfire</a></p>
+  </main>
+  <script src="vendor/qrcode-generator.js"></script>
+  <script src="artyDevicesLogic.js"></script>
+  <script src="artyDevices.js"></script>
+</body>
+</html>

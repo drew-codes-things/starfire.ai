@@ -14,6 +14,10 @@ class AppConfig(BaseSettings):
     task_num_ctx: int = 0
     own_tools_models: str = "assistant-core,arty/*"
     inline_media_prefixes: str = "/arty-files/"
+    arty_base_url: str = ""
+    arty_phone_url: str = ""
+    arty_access_client_id: str = ""
+    arty_access_client_secret: str = ""
 
     def own_tools_patterns(self) -> list[str]:
         return [p.strip() for p in self.own_tools_models.split(",") if p.strip()]

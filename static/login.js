@@ -38,7 +38,7 @@ form.addEventListener('submit', async event => {
       showError(await readError(response));
       return;
     }
-    window.location.replace('/');
+    window.location.replace(safeNextPath(window.location.search));
   } catch {
     showError("Couldn't reach starfire.ai - check your connection and try again.");
   } finally {
