@@ -19,9 +19,20 @@ function savePrefs() {
   try { localStorage.setItem('sf_prefs', JSON.stringify(prefs)); } catch (_) {}
 }
 
+const MOD_KEY_LABEL = /Mac|iPhone|iPad/.test(navigator.platform || '') ? '⌘' : 'Ctrl';
+
 function applyPrefs() {
   document.documentElement.classList.toggle('wide-chat', !!prefs.wideChat);
+  const sendKeys = prefs.ctrlEnterSends ? `<kbd>${MOD_KEY_LABEL}</kbd><kbd>Enter</kbd>` : '<kbd>Enter</kbd>';
+  const newlineKeys = prefs.ctrlEnterSends ? '<kbd>Enter</kbd>' : '<kbd>Shift</kbd><kbd>Enter</kbd>';
+  document.getElementById('shortcutSendKeys').innerHTML = sendKeys;
+  document.getElementById('shortcutNewlineKeys').innerHTML = newlineKeys;
+  document.getElementById('composerHint').textContent = (prefs.ctrlEnterSends
+    ? `${MOD_KEY_LABEL}+Enter to send · Enter for a new line`
+    : 'Enter to send · Shift+Enter for a new line') + ' · / prompts · # knowledge · @ model';
 }
+
+document.querySelectorAll('kbd[data-mod]').forEach(key => { key.textContent = MOD_KEY_LABEL; });
 
 document.querySelectorAll('[data-pref]').forEach(input => {
   input.checked = !!prefs[input.dataset.pref];
@@ -29,7 +40,7 @@ document.querySelectorAll('[data-pref]').forEach(input => {
     prefs[input.dataset.pref] = input.checked;
     savePrefs();
     applyPrefs();
-    rerenderAll();
+    rerenderInPlace();
   });
 });
 applyPrefs();
@@ -38,7 +49,6 @@ const NARROW_SCREEN_PX = 860;
 const SEARCH_DEBOUNCE_MS = 250;
 const MAX_ATTACHMENT_CHARS = 60000;
 const SCROLL_BUTTON_THRESHOLD_PX = 300;
-const DAY_MS = 86400000;
 
 function isNarrowScreen() { return window.innerWidth <= NARROW_SCREEN_PX; }
 
@@ -59,6 +69,7 @@ function closeAllMenus(except) {
     if (m !== except) m.hidden = true;
   });
   $('modelPickerBtn').setAttribute('aria-expanded', String(!$('modelMenu').hidden));
+  $('accountMenuBtn').setAttribute('aria-expanded', String(!$('accountMenu').hidden));
 }
 
 document.addEventListener('click', e => {
@@ -79,7 +90,7 @@ function showDialog({ title, text = '', input, okLabel = 'ok', danger = false, a
     dialogEls.input.placeholder = placeholder;
     dialogEls.input.value = input || '';
     dialogEls.ok.textContent = okLabel;
-    dialogEls.ok.className = danger ? 'btn' : 'btn send';
+    dialogEls.ok.className = danger ? 'btn danger-fill' : 'btn send';
     dialogEls.modal.hidden = false;
     (input === undefined ? dialogEls.ok : dialogEls.input).focus();
 
@@ -179,19 +190,6 @@ async function refreshSidebar() {
   }
 }
 
-function dateGroupLabel(iso) {
-  const updated = new Date(iso);
-  if (isNaN(updated)) return 'Older';
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
-  const age = startOfToday - updated;
-  if (age <= 0) return 'Today';
-  if (age <= DAY_MS) return 'Yesterday';
-  if (age <= 7 * DAY_MS) return 'Previous 7 days';
-  if (age <= 30 * DAY_MS) return 'Previous 30 days';
-  return updated.toLocaleString(undefined, { month: 'long', year: 'numeric' });
-}
-
 function chatItem(session) {
   const li = document.createElement('li');
   li.className = 'chat-item' + (session.id === currentSessionId ? ' active' : '');
@@ -200,8 +198,8 @@ function chatItem(session) {
   const branch = session.parent_session_id ? '<span class="chat-item-branch" title="Branched from another chat">&#8618; </span>' : '';
   const tags = session.tags && session.tags.length ? `<span class="chat-item-tags">#${session.tags.map(escapeHtml).join(' #')}</span>` : '';
   li.innerHTML =
-    `<button type="button" class="chat-item-link" title="${escapeHtml(session.title || '(untitled)')}">${branch}${escapeHtml(session.title || '(untitled)')}${tags}</button>` +
-    `<button type="button" class="icon-btn small chat-item-menu-btn" aria-label="Chat options" title="Chat options">&middot;&middot;&middot;</button>`;
+    `<button type="button" class="chat-item-link" title="${escapeHtml(session.title || '(untitled)')}">${branch}<span class="chat-item-title">${escapeHtml(session.title || '(untitled)')}</span>${tags}</button>` +
+    `<button type="button" class="icon-btn small chat-item-menu-btn" aria-label="Chat options" aria-haspopup="menu" title="Chat options">${icon('more', 'solid')}</button>`;
   li.querySelector('.chat-item-link').onclick = () => { openSession(session.id); if (isNarrowScreen()) setSidebarOpen(false); };
   li.querySelector('.chat-item-link').ondblclick = () => renameChat(session);
   li.querySelector('.chat-item-menu-btn').onclick = e => {
@@ -244,7 +242,7 @@ function renderSidebar() {
 
   const folderList = $('folderList');
   folderList.innerHTML = '';
-  if (!folders.length) folderList.innerHTML = '<li class="folder-empty">no folders - drag chats into one once made</li>';
+  if (!folders.length) folderList.innerHTML = '<li class="folder-empty">No folders yet</li>';
   for (const folder of folders) {
     const chats = sessions.filter(s => s.folder_id === folder.id && !s.pinned);
     const open = sidebarState.expandedFolders.has(folder.id) || (query && chats.length);
@@ -252,8 +250,8 @@ function renderSidebar() {
     const row = document.createElement('div');
     row.className = 'folder-row';
     row.innerHTML =
-      `<button type="button" class="folder-toggle" aria-expanded="${open ? 'true' : 'false'}">${open ? '&#9662;' : '&#9656;'} ${escapeHtml(folder.name)} <span class="chat-item-tags">${chats.length}</span></button>` +
-      `<button type="button" class="icon-btn small folder-menu-btn" aria-label="Folder options" title="Folder options">&middot;&middot;&middot;</button>`;
+      `<button type="button" class="folder-toggle" aria-expanded="${open ? 'true' : 'false'}">${icon(open ? 'chevron-down' : 'chevron-right')}<span class="chat-item-title">${escapeHtml(folder.name)}</span><span class="chat-item-tags">${chats.length}</span></button>` +
+      `<button type="button" class="icon-btn small folder-menu-btn" aria-label="Folder options" aria-haspopup="menu" title="Folder options">${icon('more', 'solid')}</button>`;
     row.querySelector('.folder-toggle').onclick = () => {
       if (sidebarState.expandedFolders.has(folder.id)) sidebarState.expandedFolders.delete(folder.id);
       else sidebarState.expandedFolders.add(folder.id);
@@ -269,7 +267,7 @@ function renderSidebar() {
     if (open) {
       const children = document.createElement('ul');
       children.className = 'folder-children';
-      if (!chats.length) children.innerHTML = '<li class="folder-empty">empty</li>';
+      if (!chats.length) children.innerHTML = '<li class="folder-empty">Empty</li>';
       chats.forEach(s => children.appendChild(chatItem(s)));
       li.appendChild(children);
     }
@@ -280,7 +278,7 @@ function renderSidebar() {
   groupsEl.innerHTML = '';
   const loose = sessions.filter(s => !s.pinned && !inFolder(s));
   if (!sessions.length) {
-    groupsEl.innerHTML = `<p class="folder-empty">${query ? 'no matching chats' : 'no chats yet'}</p>`;
+    groupsEl.innerHTML = `<p class="folder-empty">${query ? 'No chats match that search' : 'No chats yet. Send a message to start one.'}</p>`;
   }
   let currentGroup = null;
   let list = null;
@@ -290,7 +288,7 @@ function renderSidebar() {
       currentGroup = label;
       const section = document.createElement('section');
       section.className = 'sidebar-section';
-      section.innerHTML = `<h4 class="sidebar-heading">// ${escapeHtml(label.toLowerCase())}</h4>`;
+      section.innerHTML = `<h4 class="sidebar-heading">${escapeHtml(label)}</h4>`;
       list = document.createElement('ul');
       list.className = 'chat-list';
       section.appendChild(list);
@@ -317,6 +315,7 @@ function currentChatTitle() {
 
 function onChatChanged() {
   renderSidebar();
+  updateControlsScope();
   const hash = currentSessionId ? '#chat=' + currentSessionId : '';
   if (location.hash !== hash) history.replaceState(null, '', location.pathname + location.search + hash);
   if (isNarrowScreen()) setSidebarOpen(false);
@@ -326,7 +325,7 @@ async function updateChat(sessionId, fields) {
   try {
     await apiJson('/api/chat/sessions/' + sessionId, { method: 'PUT', body: fields });
   } catch (e) {
-    printLine('error: ' + e.message, 'err');
+    showToast(e.message, 'error');
   }
   await refreshSidebar();
 }
@@ -363,7 +362,7 @@ async function cloneChat(session) {
     await refreshSidebar();
     openSession(clone.id);
   } catch (e) {
-    printLine('error: ' + e.message, 'err');
+    showToast(e.message, 'error');
   }
 }
 
@@ -382,7 +381,7 @@ async function deleteChat(session) {
   try {
     await apiJson('/api/chat/sessions/' + session.id, { method: 'DELETE' });
   } catch (e) {
-    printLine('error: ' + e.message, 'err');
+    showToast(e.message, 'error');
   }
   if (session.id === currentSessionId) clearChat();
   refreshSidebar();
@@ -399,7 +398,7 @@ async function downloadChat(session, format) {
       downloadText(base + '.md', text, 'text/plain');
     }
   } catch (e) {
-    printLine('error: ' + e.message, 'err');
+    showToast(e.message, 'error');
   }
 }
 
@@ -410,7 +409,7 @@ function showContextMenu(anchor, items) {
     if (item.heading) {
       const h = document.createElement('div');
       h.className = 'menu-heading';
-      h.textContent = item.heading;
+      h.textContent = sentenceCase(item.heading);
       menu.appendChild(h);
       continue;
     }
@@ -423,7 +422,7 @@ function showContextMenu(anchor, items) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.setAttribute('role', 'menuitem');
-    btn.textContent = item.label;
+    btn.textContent = sentenceCase(item.label);
     if (item.danger) btn.classList.add('danger');
     btn.onclick = () => { menu.hidden = true; item.run(); };
     menu.appendChild(btn);
@@ -477,7 +476,7 @@ async function createFolder() {
     sidebarState.expandedFolders.add(folder.id);
     saveExpandedFolders();
   } catch (e) {
-    printLine('error: ' + e.message, 'err');
+    showToast(e.message, 'error');
   }
   refreshSidebar();
 }
@@ -489,7 +488,7 @@ function openFolderMenu(folder, anchor) {
       const name = await showDialog({ title: 'rename folder', input: folder.name, okLabel: 'rename' });
       if (!name) return;
       try { await apiJson('/api/folders/' + folder.id, { method: 'PUT', body: { name } }); }
-      catch (e) { printLine('error: ' + e.message, 'err'); }
+      catch (e) { showToast(e.message, 'error'); }
       refreshSidebar();
     } },
     { label: 'delete folder', danger: true, run: async () => {
@@ -500,7 +499,7 @@ function openFolderMenu(folder, anchor) {
       });
       if (!ok) return;
       try { await apiJson('/api/folders/' + folder.id, { method: 'DELETE' }); }
-      catch (e) { printLine('error: ' + e.message, 'err'); }
+      catch (e) { showToast(e.message, 'error'); }
       refreshSidebar();
     } },
   ]);
@@ -537,7 +536,7 @@ async function refreshArchived() {
         `<span class="endpoint-meta">${new Date(s.updated).toLocaleDateString()}</span>` +
         '<button class="btn ghost" data-act="open" type="button">open</button>' +
         '<button class="btn ghost" data-act="restore" type="button">unarchive</button>' +
-        '<button class="endpoint-remove" type="button" title="Delete">×</button>';
+        '<button class="endpoint-remove" type="button" title="Delete" aria-label="Delete">×</button>';
       li.querySelector('[data-act="open"]').onclick = () => { archivedEls.modal.hidden = true; openSession(s.id); };
       li.querySelector('[data-act="restore"]').onclick = async () => { await archiveChat(s, false); refreshArchived(); };
       li.querySelector('.endpoint-remove').onclick = async () => { await deleteChat(s); refreshArchived(); };
@@ -565,7 +564,7 @@ archivedEls.search.addEventListener('input', () => {
 });
 $('unarchiveAllBtn').onclick = async () => {
   try { await apiJson('/api/chat/sessions/unarchive-all', { method: 'POST' }); }
-  catch (e) { printLine('error: ' + e.message, 'err'); }
+  catch (e) { showToast(e.message, 'error'); }
   refreshArchived();
   refreshSidebar();
 };
@@ -685,7 +684,7 @@ async function refreshPromptList() {
       `<span class="endpoint-label">/${escapeHtml(p.command)}</span>` +
       `<span class="endpoint-meta">${escapeHtml(p.title)}</span>` +
       '<button class="btn ghost" type="button" data-act="edit">edit</button>' +
-      '<button class="endpoint-remove" type="button" title="Delete">×</button>';
+      '<button class="endpoint-remove" type="button" title="Delete" aria-label="Delete">×</button>';
     li.querySelector('[data-act="edit"]').onclick = () => {
       editingPromptId = p.id;
       $('promptCommand').value = p.command;
@@ -763,8 +762,10 @@ function renderModelPicker() {
   const preferred = storedDefaultModel();
   const isDefault = model && preferred && preferred.id === model.id && preferred.endpoint_id === model.endpoint_id;
   const star = $('setDefaultModelBtn');
-  star.innerHTML = isDefault ? '&#9733;' : '&#9734;';
+  star.innerHTML = icon('star', isDefault ? 'solid' : '');
   star.classList.toggle('active', !!isDefault);
+  star.setAttribute('aria-pressed', String(!!isDefault));
+  star.setAttribute('aria-label', isDefault ? 'This is your default model' : 'Set as default model');
   star.title = isDefault ? 'This is your default model' : 'Set as default model';
   if (!$('modelMenu').hidden) renderModelMenu();
 }
@@ -855,6 +856,7 @@ $('setDefaultModelBtn').onclick = () => {
   if (!model) return;
   try { localStorage.setItem('sf_default_model', JSON.stringify({ endpoint_id: model.endpoint_id, id: model.id })); } catch (_) {}
   renderModelPicker();
+  showToast(`${model.id} is now your default model`);
 };
 
 const CHAT_PARAMS = [
@@ -870,8 +872,65 @@ const CHAT_PARAMS = [
 let chatParams = {};
 try { chatParams = JSON.parse(localStorage.getItem('sf_params') || '{}') || {}; } catch (_) {}
 
-function saveChatParams() {
-  try { localStorage.setItem('sf_params', JSON.stringify(chatParams)); } catch (_) {}
+function defaultChatControls() {
+  let systemPrompt = '';
+  let params = {};
+  try {
+    systemPrompt = localStorage.getItem('sf_sys') || '';
+    params = JSON.parse(localStorage.getItem('sf_params') || '{}') || {};
+  } catch (_) {}
+  return { system_prompt: systemPrompt, params };
+}
+
+function saveDefaultChatControls(controls) {
+  try {
+    localStorage.setItem('sf_sys', controls.system_prompt);
+    localStorage.setItem('sf_params', JSON.stringify(controls.params));
+  } catch (_) {}
+}
+
+function currentChatControls() {
+  return { system_prompt: els.sysPrompt.value, params: { ...chatParams } };
+}
+
+function chatHasOwnControls() {
+  return !!currentSessionId && !isTemporaryChat();
+}
+
+function updateControlsScope() {
+  const own = chatHasOwnControls();
+  $('controlsScope').textContent = own
+    ? 'Saved with this chat only. New chats start from your defaults.'
+    : 'These are your defaults. Each chat keeps its own copy once it is saved.';
+  $('controlsUseDefaultsBtn').hidden = !own;
+  $('controlsSaveDefaultBtn').hidden = !own;
+}
+
+function showChatControls(controls) {
+  els.sysPrompt.value = controls.system_prompt;
+  chatParams = { ...controls.params };
+  renderParamGrid();
+  updateControlsScope();
+}
+
+function showSessionControls(session) {
+  showChatControls(resolveChatControls(session, defaultChatControls()));
+}
+
+let controlsSaveTimer = null;
+
+function onChatControlsEdited() {
+  if (!chatHasOwnControls()) {
+    saveDefaultChatControls(currentChatControls());
+    return;
+  }
+  const sessionId = currentSessionId;
+  const controls = currentChatControls();
+  clearTimeout(controlsSaveTimer);
+  controlsSaveTimer = setTimeout(() => {
+    apiJson('/api/chat/sessions/' + sessionId, { method: 'PUT', body: controls })
+      .catch(e => showToast(`Could not save the chat controls: ${e.message}`, 'error'));
+  }, CONTROLS_SAVE_DEBOUNCE_MS);
 }
 
 function renderParamGrid() {
@@ -891,7 +950,7 @@ function renderParamGrid() {
       const value = input.value === '' ? null : Number(input.value);
       if (value === null || Number.isNaN(value)) delete chatParams[param.key];
       else chatParams[param.key] = value;
-      saveChatParams();
+      onChatControlsEdited();
     });
     grid.append(label, input);
   }
@@ -913,8 +972,14 @@ function toggleControls(force) {
 
 $('controlsBtn').onclick = () => toggleControls();
 $('controlsCloseBtn').onclick = () => toggleControls(false);
-$('resetParamsBtn').onclick = () => { chatParams = {}; saveChatParams(); renderParamGrid(); };
+$('resetParamsBtn').onclick = () => { chatParams = {}; renderParamGrid(); onChatControlsEdited(); };
+$('controlsUseDefaultsBtn').onclick = () => { showChatControls(defaultChatControls()); onChatControlsEdited(); };
+$('controlsSaveDefaultBtn').onclick = () => {
+  saveDefaultChatControls(currentChatControls());
+  showToast('Saved as your defaults for new chats');
+};
 renderParamGrid();
+updateControlsScope();
 
 $('exportBtn').onclick = e => {
   e.stopPropagation();
@@ -952,7 +1017,7 @@ function renderPlusMenuTools() {
     const source = $(id);
     if (!source) continue;
     const row = document.createElement('label');
-    row.innerHTML = `<input type="checkbox" ${source.checked ? 'checked' : ''} /> <span>${escapeHtml(label)}</span>`;
+    row.innerHTML = `<input type="checkbox" ${source.checked ? 'checked' : ''} /> <span>${escapeHtml(sentenceCase(label))}</span>`;
     row.querySelector('input').addEventListener('change', () => { source.click(); });
     box.appendChild(row);
   }
@@ -966,7 +1031,7 @@ function refreshActiveTools() {
     if (!source || !source.checked) continue;
     const chip = document.createElement('span');
     chip.className = 'chip tool';
-    chip.innerHTML = `<span class="chip-label">${escapeHtml(label)}</span><button type="button" aria-label="Turn off ${escapeHtml(label)}">×</button>`;
+    chip.innerHTML = `<span class="chip-label">${escapeHtml(sentenceCase(label))}</span><button type="button" aria-label="Turn off ${escapeHtml(label)}">×</button>`;
     chip.querySelector('button').onclick = () => source.click();
     box.appendChild(chip);
   }
@@ -1261,8 +1326,9 @@ const SUGGESTIONS = [
 ];
 
 window.renderSuggestions = container => {
-  if (!container || !prefs.showSuggestions || !models.length) return;
+  if (!container) return;
   container.innerHTML = '';
+  if (!prefs.showSuggestions || !models.length) return;
   for (const s of SUGGESTIONS) {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -1363,7 +1429,10 @@ $('scrollBottomBtn').onclick = () => { els.output.scrollTo({ top: els.output.scr
 
 function copyText(text) {
   if (!text) return;
-  navigator.clipboard.writeText(text).then(() => setStatus('ready', 'copied'), () => setStatus('error', 'copy failed'));
+  navigator.clipboard.writeText(text).then(
+    () => showToast('Copied to clipboard'),
+    () => showToast('Could not copy to the clipboard', 'error'),
+  );
 }
 
 document.addEventListener('keydown', e => {
@@ -1395,6 +1464,43 @@ document.addEventListener('keydown', e => {
 
 const chatFromHash = (location.hash.match(/^#chat=([\w-]+)$/) || [])[1];
 if (chatFromHash) currentSessionId = chatFromHash;
+
+function closeAccountMenu() {
+  $('accountMenu').hidden = true;
+  $('accountMenuBtn').setAttribute('aria-expanded', 'false');
+}
+
+$('accountMenuBtn').onclick = e => {
+  e.stopPropagation();
+  const opening = $('accountMenu').hidden;
+  closeAllMenus();
+  $('accountMenu').hidden = !opening;
+  $('accountMenuBtn').setAttribute('aria-expanded', String(opening));
+  if (opening) $('accountMenu').querySelector('button:not([hidden])').focus();
+};
+$('accountMenu').addEventListener('click', e => { if (e.target.closest('button')) closeAccountMenu(); });
+$('accountMenu').addEventListener('keydown', e => {
+  const buttons = [...$('accountMenu').querySelectorAll('button:not([hidden])')];
+  const at = buttons.indexOf(document.activeElement);
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    buttons[(at + (e.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length].focus();
+  }
+});
+
+function openShortcuts() {
+  $('shortcutsModal').hidden = false;
+  $('shortcutsCloseBtn').focus();
+}
+
+function closeShortcuts() {
+  $('shortcutsModal').hidden = true;
+}
+
+$('shortcutsBtn').onclick = openShortcuts;
+$('openShortcutsBtn').onclick = openShortcuts;
+$('shortcutsCloseBtn').onclick = closeShortcuts;
+$('shortcutsModal').addEventListener('click', e => { if (e.target === $('shortcutsModal')) closeShortcuts(); });
 
 refreshActiveTools();
 refreshSidebar();

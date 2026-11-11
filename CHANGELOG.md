@@ -1,5 +1,64 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Light, dark and system themes (Settings → Appearance). The stored theme is applied before
+  the page paints, the browser theme colour follows it, and the login and setup pages use it
+  too. The old `sf_light` setting is still read and kept in step.
+- Account menu at the bottom of the sidebar: Settings, Archived chats, Keyboard shortcuts,
+  Log out.
+- Keyboard shortcuts sheet (`Ctrl+/`, or from the account menu). `Esc` now stops a reply that
+  is streaming.
+- Toasts for copy, save and error feedback. Sidebar errors no longer print into the chat.
+- Typing indicator until the first words of a reply arrive; an offline banner when the server
+  cannot be reached; loading placeholders in the sidebar.
+- A centred greeting with the message box in the middle and suggestion chips on a new chat.
+- Confirmation before removing a connection, MCP server, document, automation, email account,
+  note, memory, email rule, note template, preset, workflow or single message.
+- Chat controls are kept per chat. A chat stores its own `system_prompt` and `params`
+  (`PUT /api/chat/sessions/{id}` accepts them, `GET` returns them, clone, export and import
+  carry them). What you set on a new chat stays your default, and chats saved earlier use the
+  defaults. "Use my defaults" and "Save as my defaults" in the controls panel.
+- Shell commands and file edits waiting for approval are drawn again when the page loads,
+  from `GET /api/pending-shell` and `GET /api/pending-edits`, and stay on screen through a
+  rerender.
+- JavaScript tests run with `node --test tests/js/` (no new dependencies): date groups, theme
+  choice, the inline theme script on all three pages, toasts, the remove confirmation,
+  approval restore, per-chat controls. CI runs them.
+- `tests/test_static_ui.py`: unique ids, labelled controls and buttons, script lookups that
+  match the page, icon sprite coverage, no browser dialogs, colours only from tokens, and
+  WCAG AA contrast for every text colour on every surface in both themes.
+
+### Changed
+- New visual design from one set of tokens in `static/style.css` (colours, radii, spacing,
+  shadows, type sizes), with a softer dark background, neutral greys, and red kept for the
+  send button, active states and danger. One outline icon set replaces the text glyphs.
+- Every native control is themed: checkboxes, switch toggles, radios, selects, number, search
+  and file inputs, range sliders and progress bars, with focus rings and disabled states.
+- Settings tabs: Interface is split into General, Appearance and Account; admin tabs sit in
+  their own Admin group. Settings opens on General and each tab loads its data when opened,
+  instead of every tab's data on every open.
+- The send button turns into a stop button while a reply streams. A message that fails to
+  send is put back in the message box.
+- Phone layout: safe-area insets, 16px inputs, 44px touch targets, menus as bottom sheets,
+  message and chat actions always visible on touch screens.
+- Dialogs trap focus and hand it back when they close; form controls have accessible names.
+- Rating, deleting or editing a message keeps the scroll position.
+- The message box hint and the shortcuts sheet follow the "Ctrl+Enter sends" setting.
+- Vendor scripts load at the end of the page instead of blocking the first paint.
+- Regenerate, with its model chooser, is offered on the newest reply only.
+- Static files are sent gzip-compressed to browsers that accept it (about 548 KB of page,
+  style and script down to about 138 KB). API replies and streams are not compressed.
+- Testable browser logic moved into `static/uiLogic.js`.
+
+### Fixed
+- The login and setup pages now load the IBM Plex fonts: `/vendor/fonts.css` and
+  `/vendor/fonts/` are reachable without a login.
+- Non-admins no longer open Settings on the hidden Connections tab.
+- Text that was below WCAG AA contrast (hints, placeholders, group labels, and success and
+  warning text in the light theme).
+
 ## 1.1.0 - 2026-11-03
 
 ### Added

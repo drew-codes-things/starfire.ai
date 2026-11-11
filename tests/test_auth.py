@@ -237,3 +237,13 @@ def test_changing_the_password_logs_out_other_sessions(setup_client, users, sess
 
 def test_health_check_needs_no_login():
     assert auth.is_public("/api/health")
+
+
+@pytest.mark.parametrize("path", ["/vendor/fonts.css", "/vendor/fonts/ibm-plex-sans-latin-400-normal.woff2"])
+def test_fonts_load_on_the_login_and_setup_pages(path):
+    assert auth.is_public(path)
+
+
+@pytest.mark.parametrize("path", ["/vendor/marked.min.js", "/app.js", "/workspace.js", "/index.html", "/vendor/"])
+def test_app_code_still_needs_a_login(path):
+    assert not auth.is_public(path)

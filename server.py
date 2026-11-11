@@ -37,11 +37,11 @@ load_dotenv()
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 
 import auth
 import auth_routes
 import routes
+import static_files
 import user_data
 from config import config
 from mcp_manager import McpConnectionError, mcp_manager
@@ -142,7 +142,7 @@ async def health():
 
 app.include_router(auth_routes.router)
 app.include_router(routes.router)
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
+app.mount("/", static_files.compressed_static("static"), name="static")
 
 if __name__ == "__main__":
     import uvicorn

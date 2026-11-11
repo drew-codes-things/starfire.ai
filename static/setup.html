@@ -2,24 +2,47 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="theme-color" content="#0a0a0b" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+  <meta name="color-scheme" content="dark light" />
+  <meta name="theme-color" content="#19191c" />
   <title>Set up · starfire.ai</title>
   <link rel="icon" href="assets/logo.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="vendor/fonts.css" />
   <link rel="stylesheet" href="style.css" />
+  <script>
+    (function () {
+      var root = document.documentElement;
+      var choice = 'dark';
+      var sidebarClosed = false;
+      try {
+        choice = localStorage.getItem('sf_theme') || (localStorage.getItem('sf_light') === '1' ? 'light' : 'dark');
+        sidebarClosed = localStorage.getItem('sf_sidebar_closed') === '1';
+      } catch (error) {
+        choice = 'dark';
+      }
+      var light = choice === 'light' || (choice === 'system' && window.matchMedia('(prefers-color-scheme: light)').matches);
+      root.classList.toggle('light', light);
+      if (sidebarClosed || window.innerWidth <= 860) root.classList.add('sidebar-closed');
+      var meta = document.querySelector('meta[name="theme-color"]');
+      var background = getComputedStyle(root).getPropertyValue('--bg').trim();
+      if (meta && background) meta.setAttribute('content', background);
+    })();
+  </script>
 </head>
 <body class="login-page">
   <main class="login-card">
-    <img class="login-logo" src="assets/logo.svg" alt="" />
-    <h1>Welcome to starfire.ai</h1>
-    <p class="login-sub">Create your account. It's the admin account, and this page only works once.</p>
+    <div class="login-brand">
+      <img class="login-logo" src="assets/logo.svg" alt="" />
+      <span class="login-wordmark">starfire<span>.ai</span></span>
+    </div>
+    <h1>Create your account</h1>
+    <p class="login-sub">This is the admin account, and this page only works once.</p>
     <form id="setupForm" novalidate>
-      <label for="setupName">Name</label>
-      <input id="setupName" name="name" type="text" autocomplete="name" maxlength="256" />
+      <label for="setupName">Name <span class="optional">(optional)</span></label>
+      <input id="setupName" name="name" type="text" autocomplete="name" maxlength="256" autofocus />
       <label for="setupEmail">Email</label>
-      <input id="setupEmail" name="email" type="email" autocomplete="username" required autofocus />
-      <label for="setupPassword">Password (at least 10 characters)</label>
+      <input id="setupEmail" name="email" type="email" autocomplete="username" required />
+      <label for="setupPassword">Password <span class="optional">(at least 10 characters)</span></label>
       <input id="setupPassword" name="password" type="password" autocomplete="new-password" minlength="10" required />
       <label for="setupConfirm">Password again</label>
       <input id="setupConfirm" name="confirm" type="password" autocomplete="new-password" minlength="10" required />

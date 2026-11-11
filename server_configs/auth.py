@@ -24,11 +24,12 @@ MAX_FAILED_LOGINS = 5
 LOCKOUT_SECONDS = 15 * 60
 LOGIN_PAGE = "/login.html"
 SETUP_PAGE = "/setup.html"
-PUBLIC_PATHS = frozenset({LOGIN_PAGE, "/login.js", "/style.css", "/api/auth/login", "/api/auth/status", "/api/health"})
+PUBLIC_PATHS = frozenset({LOGIN_PAGE, "/login.js", "/style.css", "/vendor/fonts.css", "/api/auth/login", "/api/auth/status",
+                          "/api/health"})
 SETUP_PATHS = frozenset({SETUP_PAGE, "/setup.js", "/api/auth/setup"})
 MIN_PASSWORD_CHARS = 10
 MAX_FIELD_CHARS = 256
-PUBLIC_PREFIXES = ("/assets/",)
+PUBLIC_PREFIXES = ("/assets/", "/vendor/fonts/")
 ROLES = ("admin", "user")
 UNUSED_HASH = bcrypt.hashpw(b"starfire-timing-equaliser", bcrypt.gensalt()).decode()
 

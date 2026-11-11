@@ -53,8 +53,9 @@ The first time you open starfire it shows a setup page: choose your name, email 
 password (at least 10 characters). That makes the admin account, and the setup page closes
 for good. Until then, every other page and API call is locked, so set it up straight away
 on a new install. After that, every page and API call needs a login (kept for 30 days in an
-HttpOnly cookie; 5 wrong passwords lock that email from that address for 15 minutes).
-Change your password under **Settings → Interface → account**; that logs out every other browser. Forgot
+HttpOnly cookie; 5 wrong passwords lock that email from that address for 15 minutes). The
+login and setup pages can load only the stylesheet, the logo and the fonts without a login.
+Change your password under **Settings → Account**; that logs out every other browser. Forgot
 it? Reset it from the terminal on the machine starfire runs on (this also logs out every
 browser that was signed in):
 
@@ -105,29 +106,71 @@ below.
 
 ## Interface
 
-The layout follows [Open WebUI](https://github.com/open-webui/open-webui) - sidebar of chats
-on the left, model picker at the top, a centred conversation and a rounded chat box at the
-bottom - in starfire's terminal look.
+The layout is the familiar chat-app one: a collapsible sidebar of chats on the left, a compact
+model picker in the header, a centred conversation and a rounded message box. A new chat opens
+on a centred greeting with the message box in the middle and four suggestion chips under it;
+after the first message the box sits at the bottom. Everything is drawn from one set of design
+tokens (colours, radii, spacing, shadows) in `static/style.css`, with a dark and a light set.
 
-- **Sidebar**: new chat, search (`tag:name` searches by tag), pinned chats, folders (drag a
-  chat onto one; "new chat here" from a folder's menu), and chats grouped by date. Each chat's
+- **Sidebar**: new chat, Workspace and Notes shortcuts, search (`tag:name` searches by tag),
+  pinned chats, folders (drag a chat onto one; "New chat here" from a folder's menu), and chats
+  grouped Today, Yesterday, Previous 7 days, Previous 30 days and then by month. Each chat's
   `···` menu has pin, rename, clone, tags, move to folder, download (.json/.md), archive and
-  delete. **archived** at the bottom lists archived chats.
+  delete (with a confirmation). On phones the sidebar is a slide-over drawer with a scrim.
+- **Account menu** (bottom of the sidebar): Settings, Archived chats, Keyboard shortcuts and
+  Log out, under your name and email.
 - **Model picker**: searchable; the star sets the default model. Presets show up under it as
   workspace models. A chat reopens on the model it was last used with.
-- **Chat box**: `/` inserts a saved prompt, `#` attaches a Knowledge document, `@` sends the
-  next message to a different model. **+** uploads files (text files are attached inline; PDFs
-  are added to Knowledge and attached) and toggles tools - web search, deep research, image
-  generation and the rest - with the active ones shown as chips. Files can also be dropped or
-  pasted in. **mic** dictates; **call** is a hands-free voice conversation (browser speech
-  recognition and speech synthesis).
-- **controls**: system prompt plus temperature, top p, top k, max tokens, context length,
-  repeat penalty and seed. Ollama takes all of them; OpenAI-compatible APIs and Anthropic take
-  the ones they support.
-- **temporary**: a chat that is never saved to history.
-- **download**: the current chat as .json (re-importable), .md or .txt.
-- `Ctrl+Shift+O` new chat, `Ctrl+Shift+S` sidebar, `Ctrl+Shift+C` copy last reply,
-  `Ctrl+Shift+;` copy last code block, `Shift+Esc` focus the chat box, `Ctrl+K` command palette.
+- **Message box**: grows with its text up to a cap. `/` inserts a saved prompt, `#` attaches a
+  Knowledge document, `@` sends the next message to a different model. **+** uploads files
+  (text files are attached inline; PDFs are added to Knowledge and attached) and toggles tools
+  - web search, deep research, image generation and the rest - with the active ones shown as
+  chips. Files can also be dropped or pasted in. The microphone dictates; the waveform button
+  is a hands-free voice conversation (browser speech recognition and speech synthesis). The
+  send button turns into a stop button while a reply streams. If a message fails to send, its
+  text is put back in the box.
+- **Messages**: yours sit in a soft bubble on the right; replies are plain full-width text
+  under the starfire mark and the model name, with a typing indicator until the first words
+  arrive. Actions (copy, edit, read aloud, info, rate, continue, delete) appear on hover and
+  are always visible on touch screens; regenerate, with its model chooser, is on the newest
+  reply only. Deleting a message asks first.
+- **Header buttons**: temporary chat (never saved to history), compare models, download the
+  current chat as .json (re-importable), .md or .txt, and chat controls (system prompt plus
+  temperature, top p, top k, max tokens, context length, repeat penalty and seed; Ollama takes
+  all of them, OpenAI-compatible APIs and Anthropic take the ones they support). Controls are
+  kept per chat: what you set on a new chat is your default, each saved chat keeps its own
+  copy, and "Use my defaults" and "Save as my defaults" move settings between the two. Chats
+  saved before this existed use your defaults.
+- **Settings**: a tabbed dialog. General (chat behaviour, shortcuts, version), Appearance
+  (System, Light or Dark theme; chat bubbles; wide chat), Account (who you are, change
+  password), Chats and Usage; then Workspace (Models, Knowledge, Prompts, Tools), Personal
+  (Memory, Notes, Automations, Email) and, for admins, Admin (Connections, Audio & Images,
+  Hardware, Data, Accounts). Each tab loads its data when you open it.
+- **Themes**: the stored theme is applied before the page paints, so there is no flash; System
+  follows the operating system and switches live. The login and setup pages use the same theme.
+- **Feedback**: copy, save and error messages show as short toasts. Confirmations use
+  starfire's own dialog, and everything that removes something asks first. An offline banner
+  appears when the server cannot be reached.
+- **Approvals**: a shell command or file edit that is waiting for your answer is drawn again
+  when the page loads, so a reload or a second device does not lose it.
+- **Phones and tablets**: safe-area insets are respected, inputs are 16px so iOS does not zoom,
+  menus open as bottom sheets, and every control is at least 44px tall.
+
+### Keyboard shortcuts
+
+`Ctrl+/` (or `Cmd+/`) shows this list in the app; it is also under the account menu.
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl+Shift+O` | New chat |
+| `Shift+Esc` | Focus the message box |
+| `Esc` | Close the top dialog or menu, or stop the reply that is streaming |
+| `Enter` / `Shift+Enter` | Send / new line (swapped to `Ctrl+Enter` / `Enter` in Settings → General) |
+| `Ctrl+K` | Command palette |
+| `Ctrl+Shift+S` | Toggle the sidebar |
+| `Ctrl+Shift+C` | Copy the last reply |
+| `Ctrl+Shift+;` | Copy the last code block |
+| `Ctrl+/` | Show the shortcuts |
 
 ## Chat
 
@@ -145,12 +188,12 @@ up to twice, and the corrected version replaces it in the reply (**✓ fixed · 
 the original error in the tooltip). If it still fails, the original stays with **✗ syntax
 error** and the line number, so you know before you paste. The copy button is disabled while a
 block is being checked. Languages whose checker isn't installed on this machine are left
-unmarked. Switch the whole thing off under **Settings → Interface → chat**.
+unmarked. Switch the whole thing off under **Settings → General**.
 
 Your own messages have **edit**, **copy** and **delete**. Editing your
 message or regenerating branches the conversation - rather than mutating history in place,
 they create a new chat pointing back at the original up to that point (marked `↪` in the
-sidebar). A **stop** button appears while a reply is streaming. Every conversation autosaves
+sidebar). The send button becomes a stop button while a reply is streaming (`Esc` stops it too). Every conversation autosaves
 as you go, and the history sent to the model is trimmed to the context length (8192 tokens
 unless set in controls).
 
@@ -160,7 +203,7 @@ warns you before you enable tools for it, and the backend withholds the tools li
 model's requests either way.
 
 New chats get a title and up to three tags, and each reply can be followed by three suggested
-follow-up questions you can click to send (all three can be switched off in Settings → chat).
+follow-up questions you can click to send (all three can be switched off in Settings → General).
 These small jobs go to the chat's own model unless `TASK_MODEL` is set, in which case they go
 straight to that Ollama model instead. That keeps them out of an assistant's history and tool
 loop (Arty's brain, for example): point it at the model the assistant already has loaded, with
@@ -393,8 +436,8 @@ your current data** and can't be undone; back up first if you're not sure.
 ## Command palette
 
 `Ctrl+K` / `Cmd+K` opens a fuzzy-filterable list of actions - new chat, export, open any
-settings tab, compare models, toggle theme. Arrow keys to navigate, Enter to run, Escape to
-close.
+settings tab, compare models, toggle theme, keyboard shortcuts. Arrow keys to navigate, Enter
+to run, Escape to close.
 
 ## Docker
 
@@ -471,7 +514,9 @@ one-click backup/restore); deleting `data/.key` makes any stored keys unrecovera
   OpenAI-compatible server, over one unified streaming UI
 - Ollama auto-detected and auto-started on startup; one-click install guidance, manual add,
   or network-scan for anything else
-- Open WebUI-style layout: chat sidebar with folders, pins, tags, archive and date groups;
+- Light, dark and system themes from one token set, with no flash on load; toasts; a
+  keyboard shortcuts sheet; an account menu; phone layout with a drawer and bottom sheets
+- Chat-app layout: chat sidebar with folders, pins, tags, archive and date groups;
   searchable model picker with a default model; `/` prompts, `#` knowledge, `@` model
   mentions; file attachments; chat controls (system prompt + sampling params); temporary
   chats; hands-free voice call; reply rating, info, continue and in-place edit
@@ -505,6 +550,14 @@ one-click backup/restore); deleting `data/.key` makes any stored keys unrecovera
 - Multiple accounts, each with its own chats, memory, knowledge, notes, automations and email,
   managed by the admin from Settings → Accounts
 - Runs 100% locally unless you opt in to a hosted provider - no telemetry, no cloud accounts
+
+## Development
+
+`pip install -r requirements.txt pytest pyflakes`, then `python -m pytest -q` for the server
+and the static-file checks, and `node --test tests/js/` for the browser logic in
+`static/uiLogic.js` and the inline theme script (Node 20 or newer, no packages to install).
+The pages and scripts are served as written, with no build step; the server sends static
+files gzip-compressed to browsers that accept it and leaves API replies and streams alone.
 
 ## License
 

@@ -5,11 +5,12 @@ import logging
 import os
 import re
 import zipfile
+from typing import Annotated
 
 import httpx
 from fastapi import APIRouter, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import auth_routes
 import builtin_tools
@@ -960,6 +961,12 @@ class CreateChatSessionBody(BaseModel):
     parent_session_id: str = ""
     branch_point: int = -1
 
+MAX_SYSTEM_PROMPT_CHARS = 32000
+MAX_CHAT_PARAMS = 16
+MAX_CHAT_PARAM_NAME_CHARS = 40
+
+ChatParamName = Annotated[str, Field(min_length=1, max_length=MAX_CHAT_PARAM_NAME_CHARS)]
+
 class UpdateChatSessionBody(BaseModel):
     title: str | None = None
     messages: list[dict] | None = None
@@ -969,6 +976,24 @@ class UpdateChatSessionBody(BaseModel):
     folder_id: str | None = None
     archived: bool | None = None
     tags: list[str] | None = None
+    system_prompt: str | None = Field(default=None, max_length=MAX_SYSTEM_PROMPT_CHARS)
+    params: dict[ChatParamName, float] | None = Field(default=None, max_length=MAX_CHAT_PARAMS)
+
+def _session_detail(s) -> dict:
+    return {**_session_summary(s), "messages": s.messages, "system_prompt": s.system_prompt, "params": s.params}
+
+def _imported_controls(item: dict) -> dict:
+    controls = {}
+    prompt = item.get("system_prompt")
+    if isinstance(prompt, str):
+        controls["system_prompt"] = prompt[:MAX_SYSTEM_PROMPT_CHARS]
+    params = item.get("params")
+    if isinstance(params, dict):
+        numeric = {name: value for name, value in params.items()
+                   if isinstance(name, str) and 0 < len(name) <= MAX_CHAT_PARAM_NAME_CHARS
+                   and isinstance(value, (int, float)) and not isinstance(value, bool)}
+        controls["params"] = dict(list(numeric.items())[:MAX_CHAT_PARAMS])
+    return controls
 
 class ImportChatsBody(BaseModel):
     chats: list[dict]
@@ -1007,6 +1032,7 @@ def _imported_chat(item: dict) -> dict | None:
         "title": str(item.get("title") or inner.get("title") or "Imported chat")[:120],
         "messages": messages, "pinned": bool(item.get("pinned")), "archived": bool(item.get("archived")),
         "tags": tags, "model": str(item.get("model") or ""),
+        **_imported_controls(item),
     }
     for key, source in (("created", "created"), ("updated", "updated"), ("created", "created_at"), ("updated", "updated_at")):
         stamp = _iso_timestamp(item.get(source))
@@ -1077,7 +1103,7 @@ async def get_chat_session(session_id: str):
     session = chat_sessions.get(session_id)
     if not session:
         raise HTTPException(404, "session not found")
-    return {**_session_summary(session), "messages": session.messages}
+    return _session_detail(session)
 
 @router.put("/chat/sessions/{session_id}")
 async def update_chat_session(session_id: str, body: UpdateChatSessionBody):

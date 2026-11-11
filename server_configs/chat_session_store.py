@@ -28,6 +28,8 @@ class ChatSession:
     folder_id: str = ""
     archived: bool = False
     tags: list[str] = field(default_factory=list)
+    system_prompt: str | None = None
+    params: dict | None = None
     created: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -57,6 +59,7 @@ class ChatSessionStore:
                 branch_point=item.get("branch_point", -1),
                 folder_id=item.get("folder_id", ""), archived=item.get("archived", False),
                 tags=item.get("tags") or [],
+                system_prompt=item.get("system_prompt"), params=item.get("params"),
                 created=item.get("created", ""), updated=item.get("updated", ""),
             ))
         return sessions
@@ -124,7 +127,8 @@ class ChatSessionStore:
             return None
         return self.add(title=f"Clone of {source.title}", messages=copy.deepcopy(source.messages),
                         endpoint_id=source.endpoint_id, model=source.model, folder_id=source.folder_id,
-                        tags=list(source.tags))
+                        tags=list(source.tags), system_prompt=source.system_prompt,
+                        params=copy.deepcopy(source.params))
 
     def update(self, session_id: str, **fields) -> bool:
         sessions = self._load()

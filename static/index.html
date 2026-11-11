@@ -2,61 +2,132 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+  <meta name="color-scheme" content="dark light" />
+  <meta name="theme-color" content="#19191c" />
   <title>starfire.ai</title>
   <link rel="icon" href="assets/logo.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="vendor/fonts.css" />
   <link rel="stylesheet" href="style.css" />
   <link rel="stylesheet" href="vendor/highlight-themes.css" />
-  <script src="vendor/marked.min.js"></script>
-  <script src="vendor/highlight.min.js"></script>
-  <script src="vendor/purify.min.js"></script>
+  <script>
+    (function () {
+      var root = document.documentElement;
+      var choice = 'dark';
+      var sidebarClosed = false;
+      try {
+        choice = localStorage.getItem('sf_theme') || (localStorage.getItem('sf_light') === '1' ? 'light' : 'dark');
+        sidebarClosed = localStorage.getItem('sf_sidebar_closed') === '1';
+      } catch (error) {
+        choice = 'dark';
+      }
+      var light = choice === 'light' || (choice === 'system' && window.matchMedia('(prefers-color-scheme: light)').matches);
+      root.classList.toggle('light', light);
+      if (sidebarClosed || window.innerWidth <= 860) root.classList.add('sidebar-closed');
+      var meta = document.querySelector('meta[name="theme-color"]');
+      var background = getComputedStyle(root).getPropertyValue('--bg').trim();
+      if (meta && background) meta.setAttribute('content', background);
+    })();
+  </script>
 </head>
 <body>
+
+  <svg class="sr-only" aria-hidden="true" focusable="false" width="0" height="0">
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4 4"/></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+    <symbol id="i-chevron-up" viewBox="0 0 24 24"><path d="M6 15l6-6 6 6"/></symbol>
+    <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+    <symbol id="i-sidebar" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M9.5 4.5v15"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M11.5 4.5H7A2.5 2.5 0 0 0 4.5 7v10A2.5 2.5 0 0 0 7 19.5h10a2.5 2.5 0 0 0 2.5-2.5v-4.5"/><path d="M17.8 3.7l2.5 2.5-7.8 7.8-3 .5.5-3z"/></symbol>
+    <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M4.5 19.5l1-4L16.8 4.2l3 3L8.5 18.5z"/><path d="M14.5 6.5l3 3"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h9M19 7h1M4 17h1M11 17h9"/><circle cx="16" cy="7" r="2.5"/><circle cx="8" cy="17" r="2.5"/></symbol>
+    <symbol id="i-archive" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="4" rx="1.5"/><path d="M5.5 8.5v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-9M10 12.5h4"/></symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24"><path d="M14 4.5h3.5a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H14M10 8l-4 4 4 4M6 12h9"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+    <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="2"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="3.5" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v2.5"/></symbol>
+    <symbol id="i-wave" viewBox="0 0 24 24"><path d="M4 10v4M8 6.5v11M12 9v6M16 4.5v15M20 10v4"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2.5"/><path d="M15.5 8.5v-2a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v4h-4"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15M9.5 7V5a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v2M6.5 7l.8 11a2 2 0 0 0 2 1.8h5.4a2 2 0 0 0 2-1.8l.8-11"/></symbol>
+    <symbol id="i-more" viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="18" cy="12" r="1.5"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 4l2.4 5 5.6.8-4 3.9.9 5.5-4.9-2.6-4.9 2.6.9-5.5-4-3.9 5.6-.8z"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8v.01"/></symbol>
+    <symbol id="i-thumb" viewBox="0 0 24 24"><path d="M7.5 10.5v9h-2a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1zM7.5 10.5l3.7-6a1.9 1.9 0 0 1 2.6 2.2l-.8 3.3h5a2 2 0 0 1 2 2.4l-1.1 5.5a2 2 0 0 1-2 1.6H7.5"/></symbol>
+    <symbol id="i-volume" viewBox="0 0 24 24"><path d="M4.5 9.5v5h3l4.5 4v-13l-4.5 4zM16 9a4 4 0 0 1 0 6M18.5 6.5a7.5 7.5 0 0 1 0 11"/></symbol>
+    <symbol id="i-forward" viewBox="0 0 24 24"><path d="M6 6l6 6-6 6M13 6l6 6-6 6"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11M7 10.5l5 5 5-5M5 19.5h14"/></symbol>
+    <symbol id="i-columns" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="7" height="15" rx="2"/><rect x="13.5" y="4.5" width="7" height="15" rx="2"/></symbol>
+    <symbol id="i-temp" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5" stroke-dasharray="3 3.7"/><path d="M12 8v4.5l2.5 1.5"/></symbol>
+    <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2.5" y="6.5" width="19" height="11" rx="2.5"/><path d="M6.5 10.5h.01M10 10.5h.01M13.5 10.5h.01M17 10.5h.01M7.5 14h9"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/></symbol>
+    <symbol id="i-note" viewBox="0 0 24 24"><path d="M7 3.5h7.5l4 4V18.5a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2zM9 12h6M9 16h6"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></symbol>
+    <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M9 20h6M12 16.5V20"/></symbol>
+  </svg>
 
   <div class="app" id="app">
 
     <aside class="sidebar" id="sidebar" aria-label="Chats">
       <div class="sidebar-head">
         <a href="https://drew-gnr.xyz" class="topbar-link" aria-label="Drew's Realm">
-          <img src="assets/logo.svg" alt="Logo" class="topbar-logo">
+          <img src="assets/logo.svg" alt="" class="topbar-logo">
+          <span class="topbar-title">starfire.ai</span>
         </a>
-        <span class="topbar-title">starfire.ai</span>
-        <button class="icon-btn" id="sidebarCloseBtn" type="button" title="Close sidebar (ctrl+shift+s)" aria-label="Close sidebar">&laquo;</button>
+        <button class="icon-btn" id="sidebarCloseBtn" type="button" title="Close sidebar (Ctrl+Shift+S)" aria-label="Close sidebar"><svg class="icon" aria-hidden="true"><use href="#i-sidebar"/></svg></button>
       </div>
 
-      <button class="btn new-chat-btn" id="newChatBtn" type="button" title="New chat (ctrl+shift+o)">+ new chat</button>
+      <div class="sidebar-actions">
+        <button class="new-chat-btn" id="newChatBtn" type="button" title="New chat (Ctrl+Shift+O)"><svg class="icon" aria-hidden="true"><use href="#i-edit"/></svg><span>New chat</span></button>
+        <nav class="sidebar-nav" aria-label="Workspace">
+          <button class="sidebar-link" type="button" data-open-tab="presets"><svg class="icon" aria-hidden="true"><use href="#i-grid"/></svg><span>Workspace</span></button>
+          <button class="sidebar-link" type="button" data-open-tab="notes"><svg class="icon" aria-hidden="true"><use href="#i-note"/></svg><span>Notes</span></button>
+        </nav>
+      </div>
 
       <div class="sidebar-search">
-        <input id="sidebarSearch" type="search" placeholder="search chats… (tag:name)" autocomplete="off" spellcheck="false" />
+        <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+        <input id="sidebarSearch" type="search" placeholder="Search chats (tag:name)" aria-label="Search chats. Type tag:name to filter by tag" autocomplete="off" spellcheck="false" />
       </div>
-
-      <nav class="sidebar-nav" aria-label="Workspace">
-        <button class="sidebar-link" type="button" data-open-tab="presets">&#9656; workspace</button>
-        <button class="sidebar-link" type="button" data-open-tab="notes">&#9656; notes</button>
-      </nav>
 
       <div class="sidebar-scroll" id="sidebarScroll">
         <section class="sidebar-section" id="pinnedSection" hidden>
-          <h4 class="sidebar-heading">pinned</h4>
+          <h4 class="sidebar-heading">Pinned</h4>
           <ul class="chat-list" id="pinnedList"></ul>
         </section>
         <section class="sidebar-section">
-          <h4 class="sidebar-heading">folders <button class="icon-btn small" id="newFolderBtn" type="button" title="New folder" aria-label="New folder">+</button></h4>
+          <h4 class="sidebar-heading">Folders <button class="icon-btn small" id="newFolderBtn" type="button" title="New folder" aria-label="New folder"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></button></h4>
           <ul class="folder-list" id="folderList"></ul>
         </section>
-        <div id="chatGroups"></div>
+        <div id="chatGroups" aria-live="polite"><div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div></div>
       </div>
 
       <div class="sidebar-foot">
-        <div class="status">
+        <div class="status" role="status">
           <span class="dot" id="dot"></span>
           <span id="statusText">connecting…</span>
         </div>
-        <div class="sidebar-foot-actions">
-          <button class="btn ghost" id="archivedBtn" type="button">archived</button>
-          <button class="btn ghost" id="settingsBtn" type="button" title="Settings">settings</button>
-          <button class="btn ghost" id="logoutBtn" type="button" hidden>log out</button>
+        <div class="menu-wrap account-wrap">
+          <button class="account-btn" id="accountMenuBtn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="accountMenu">
+            <span class="avatar" id="accountAvatar" aria-hidden="true">s</span>
+            <span class="account-text">
+              <span class="account-name" id="accountName">Account</span>
+              <span class="account-sub" id="accountSub"></span>
+            </span>
+            <svg class="icon" aria-hidden="true"><use href="#i-chevron-up"/></svg>
+          </button>
+          <div class="menu up" id="accountMenu" role="menu" aria-label="Account" hidden>
+            <button type="button" role="menuitem" id="settingsBtn"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg><span>Settings</span></button>
+            <button type="button" role="menuitem" id="archivedBtn"><svg class="icon" aria-hidden="true"><use href="#i-archive"/></svg><span>Archived chats</span></button>
+            <button type="button" role="menuitem" id="shortcutsBtn"><svg class="icon" aria-hidden="true"><use href="#i-keyboard"/></svg><span>Keyboard shortcuts</span></button>
+            <div class="menu-sep"></div>
+            <button type="button" role="menuitem" id="logoutBtn" hidden><svg class="icon" aria-hidden="true"><use href="#i-logout"/></svg><span>Log out</span></button>
+          </div>
         </div>
       </div>
     </aside>
@@ -64,47 +135,50 @@
 
     <main class="main">
       <header class="chat-header">
-        <button class="icon-btn" id="sidebarOpenBtn" type="button" title="Open sidebar (ctrl+shift+s)" aria-label="Open sidebar">&equiv;</button>
+        <button class="icon-btn" id="sidebarOpenBtn" type="button" title="Open sidebar (Ctrl+Shift+S)" aria-label="Open sidebar"><svg class="icon" aria-hidden="true"><use href="#i-sidebar"/></svg></button>
+        <button class="icon-btn header-new-chat" id="clearBtn" type="button" title="New chat (Ctrl+Shift+O)" aria-label="New chat"><svg class="icon" aria-hidden="true"><use href="#i-edit"/></svg></button>
 
         <div class="model-picker" id="modelPicker">
-          <button class="model-picker-btn" id="modelPickerBtn" type="button" aria-haspopup="listbox" aria-expanded="false">
-            <span id="modelPickerLabel">select a model</span> <span class="caret">&#9662;</span>
+          <button class="model-picker-btn" id="modelPickerBtn" type="button" aria-haspopup="listbox" aria-expanded="false" title="Choose a model">
+            <span id="modelPickerLabel">Select a model</span> <span class="caret"><svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></span>
           </button>
           <div class="model-menu" id="modelMenu" hidden>
-            <input id="modelSearch" type="search" placeholder="search models…" autocomplete="off" spellcheck="false" />
+            <input id="modelSearch" type="search" placeholder="Search models" aria-label="Search models" autocomplete="off" spellcheck="false" />
             <ul id="modelMenuList" role="listbox" aria-label="Models"></ul>
           </div>
-          <select id="modelList" hidden aria-hidden="true"></select>
+          <select id="modelList" hidden aria-hidden="true" tabindex="-1"></select>
         </div>
-        <button class="icon-btn" id="setDefaultModelBtn" type="button" title="Set as default model" aria-label="Set as default model">&#9734;</button>
+        <button class="icon-btn" id="setDefaultModelBtn" type="button" title="Set as default model" aria-label="Set as default model" aria-pressed="false"><svg class="icon" aria-hidden="true"><use href="#i-star"/></svg></button>
 
         <div class="spacer"></div>
 
         <label class="temp-toggle" title="Temporary chat: not saved to history">
-          <input type="checkbox" id="tempChatToggle" />
-          <span>temporary</span>
+          <input type="checkbox" id="tempChatToggle" aria-label="Temporary chat" />
+          <svg class="icon" aria-hidden="true"><use href="#i-temp"/></svg>
+          <span>Temporary</span>
         </label>
-        <button class="btn ghost hide-narrow" id="compareBtn" type="button" title="Compare models side by side">compare</button>
-        <div class="menu-wrap">
-          <button class="btn ghost hide-narrow" id="exportBtn" type="button" aria-haspopup="menu">download</button>
+        <button class="icon-btn hide-narrow" id="compareBtn" type="button" title="Compare models side by side" aria-label="Compare models side by side"><svg class="icon" aria-hidden="true"><use href="#i-columns"/></svg></button>
+        <div class="menu-wrap hide-narrow">
+          <button class="icon-btn" id="exportBtn" type="button" aria-haspopup="menu" title="Download this chat" aria-label="Download this chat"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg></button>
           <div class="menu" id="exportMenu" role="menu" hidden>
-            <button type="button" role="menuitem" data-format="json">export chat (.json)</button>
-            <button type="button" role="menuitem" data-format="md">plain text (.md)</button>
-            <button type="button" role="menuitem" data-format="txt">plain text (.txt)</button>
+            <button type="button" role="menuitem" data-format="json">Export chat (.json)</button>
+            <button type="button" role="menuitem" data-format="md">Plain text (.md)</button>
+            <button type="button" role="menuitem" data-format="txt">Plain text (.txt)</button>
           </div>
         </div>
-        <button class="btn ghost" id="controlsBtn" type="button" title="Chat controls: system prompt &amp; parameters">controls</button>
-        <button class="btn ghost hide-narrow" id="clearBtn" type="button" title="New chat (ctrl+shift+o)">new chat</button>
+        <button class="icon-btn" id="controlsBtn" type="button" title="Chat controls: system prompt and parameters" aria-label="Chat controls"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg></button>
       </header>
 
-      <div class="capability-warning" id="capabilityWarning" hidden></div>
-      <div class="temp-banner" id="tempBanner" hidden>temporary chat - nothing here is saved to history</div>
+      <div class="offline-banner" id="offlineBanner" role="status" hidden>You are offline, or starfire cannot be reached. Messages will not send until the connection is back.</div>
+      <div class="capability-warning" id="capabilityWarning" role="status" hidden></div>
+      <div class="temp-banner" id="tempBanner" hidden>Temporary chat: nothing here is saved to history</div>
 
       <div class="chat-area">
-        <div class="output" id="output">
+        <div class="output" id="output" role="region" aria-label="Conversation">
           <div class="welcome" id="welcome">
-            <div class="welcome-brand">starfire<span class="dim">.ai</span></div>
-            <p class="info-line">local-first AI chat</p>
+            <img src="assets/logo.svg" alt="" class="welcome-logo" />
+            <h1 class="welcome-brand">starfire<span class="dim">.ai</span></h1>
+            <p class="info-line">Local-first AI chat</p>
           </div>
         </div>
         <div class="call-overlay" id="callOverlay" data-state="listening" role="dialog" aria-modal="true" aria-labelledby="callState" hidden>
@@ -114,58 +188,64 @@
           </div>
           <p class="call-state" id="callState" aria-live="polite">listening…</p>
           <p class="call-heard" id="callHeard"></p>
-          <button type="button" class="call-end" id="callEnd">end call</button>
+          <button type="button" class="call-end" id="callEnd">End call</button>
         </div>
-        <button class="scroll-bottom" id="scrollBottomBtn" type="button" title="Scroll to the newest message" aria-label="Scroll to bottom" hidden>&darr;</button>
+        <button class="scroll-bottom" id="scrollBottomBtn" type="button" title="Scroll to the newest message" aria-label="Scroll to the newest message" hidden><svg class="icon" aria-hidden="true"><use href="#i-arrow-down"/></svg></button>
 
         <div class="composer-wrap">
           <div class="composer-popup" id="composerPopup" hidden>
             <div class="composer-popup-title" id="composerPopupTitle"></div>
-            <ul id="composerPopupList" role="listbox"></ul>
+            <ul id="composerPopupList" role="listbox" aria-labelledby="composerPopupTitle"></ul>
           </div>
           <form class="composer" id="form">
             <div class="attach-chips" id="attachChips"></div>
-            <textarea id="msgInput" rows="1" placeholder="send a message…" disabled spellcheck="false"></textarea>
+            <textarea id="msgInput" rows="1" placeholder="Send a message…" aria-label="Message" disabled spellcheck="false"></textarea>
             <div class="composer-row">
               <div class="menu-wrap">
-                <button class="icon-btn" type="button" id="plusBtn" title="Attach files &amp; tools" aria-label="Attach files and tools" aria-haspopup="menu">+</button>
+                <button class="icon-btn" type="button" id="plusBtn" title="Attach files and tools" aria-label="Attach files and tools" aria-haspopup="menu"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></button>
                 <div class="menu up" id="plusMenu" role="menu" hidden>
-                  <button type="button" role="menuitem" data-act="upload">upload files</button>
-                  <button type="button" role="menuitem" data-act="knowledge">attach knowledge (#)</button>
-                  <button type="button" role="menuitem" data-act="prompts">insert a prompt (/)</button>
-                  <div class="menu-heading tools-only">tools</div>
+                  <button type="button" role="menuitem" data-act="upload">Upload files</button>
+                  <button type="button" role="menuitem" data-act="knowledge">Attach knowledge (#)</button>
+                  <button type="button" role="menuitem" data-act="prompts">Insert a prompt (/)</button>
+                  <div class="menu-heading tools-only">Tools</div>
                   <div id="plusMenuTools" class="tools-only"></div>
-                  <button type="button" role="menuitem" data-act="tool-settings" class="tools-only">more tool settings…</button>
+                  <button type="button" role="menuitem" data-act="tool-settings" class="tools-only">More tool settings…</button>
                   <p class="menu-note own-tools-only">Arty has its tools built in.</p>
                 </div>
-                <input type="file" id="attachFileInput" multiple hidden />
+                <input type="file" id="attachFileInput" aria-label="Attach files" multiple hidden />
               </div>
               <div class="active-tools" id="activeTools"></div>
               <div class="spacer"></div>
-              <button class="icon-btn" type="button" id="micBtn" title="Voice input" aria-label="Voice input" hidden>mic</button>
-              <button class="icon-btn" type="button" id="callBtn" title="Voice call: talk, hear the reply, repeat" aria-label="Voice call" hidden>call</button>
-              <button class="btn ghost" type="button" id="stopBtn" hidden>stop</button>
-              <button class="btn send" type="submit" id="sendBtn" disabled>send</button>
+              <button class="icon-btn" type="button" id="micBtn" title="Voice input" aria-label="Voice input" hidden><svg class="icon" aria-hidden="true"><use href="#i-mic"/></svg></button>
+              <button class="icon-btn" type="button" id="callBtn" title="Voice call: talk, hear the reply, repeat" aria-label="Voice call" hidden><svg class="icon" aria-hidden="true"><use href="#i-wave"/></svg></button>
+              <button class="send-btn stop" type="button" id="stopBtn" title="Stop the reply (Esc)" aria-label="Stop the reply" hidden><svg class="icon solid" aria-hidden="true"><use href="#i-stop"/></svg></button>
+              <button class="send-btn" type="submit" id="sendBtn" title="Send" aria-label="Send message" disabled><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg></button>
             </div>
           </form>
-          <p class="composer-hint">enter send &middot; shift+enter newline &middot; / prompts &middot; # knowledge &middot; @ model</p>
+          <div class="suggestions" id="suggestions"></div>
+          <p class="composer-hint" id="composerHint">Enter to send &middot; Shift+Enter for a new line &middot; / prompts &middot; # knowledge &middot; @ model</p>
         </div>
       </div>
     </main>
 
     <aside class="controls-panel" id="controlsPanel" aria-label="Chat controls" hidden>
       <div class="controls-head">
-        <span>chat controls</span>
-        <button class="icon-btn" id="controlsCloseBtn" type="button" aria-label="Close chat controls">&times;</button>
+        <span>Chat controls</span>
+        <button class="icon-btn" id="controlsCloseBtn" type="button" title="Close chat controls" aria-label="Close chat controls"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
       </div>
       <div class="controls-body">
-        <label class="controls-label" for="sysPrompt">system prompt</label>
-        <textarea id="sysPrompt" class="settings-textarea" rows="5" placeholder="optional system prompt…" spellcheck="false"></textarea>
+        <label class="controls-label" for="sysPrompt">System prompt</label>
+        <textarea id="sysPrompt" class="settings-textarea" rows="5" placeholder="Optional system prompt…" spellcheck="false"></textarea>
+        <p class="settings-hint" id="controlsScope" role="status"></p>
 
-        <div class="controls-label">advanced params</div>
+        <div class="controls-label">Advanced parameters</div>
         <p class="settings-hint">Blank = the model's default. Ollama takes all of these; hosted APIs take the ones they support.</p>
         <div class="param-grid" id="paramGrid"></div>
-        <button class="btn ghost" id="resetParamsBtn" type="button">reset params</button>
+        <div class="controls-actions">
+          <button class="btn ghost" id="resetParamsBtn" type="button">Reset parameters</button>
+          <button class="btn ghost" id="controlsUseDefaultsBtn" type="button" hidden>Use my defaults</button>
+          <button class="btn ghost" id="controlsSaveDefaultBtn" type="button" hidden>Save as my defaults</button>
+        </div>
       </div>
     </aside>
   </div>
@@ -173,44 +253,103 @@
   <div class="modal-overlay" id="settingsModal" hidden>
     <div class="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
       <div class="modal-header">
-        <span id="settingsTitle">settings</span>
-        <button class="btn ghost modal-close" id="settingsCloseBtn" aria-label="Close settings">×</button>
+        <span id="settingsTitle">Settings</span>
+        <button class="btn ghost modal-close" id="settingsCloseBtn" type="button" title="Close settings" aria-label="Close settings"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
       </div>
       <div class="settings-layout">
-        <nav class="settings-sidebar">
-          <div class="settings-group">workspace</div>
-          <button class="settings-tab" data-tab="presets">Models</button>
-          <button class="settings-tab" data-tab="documents">Knowledge</button>
-          <button class="settings-tab" data-tab="prompts">Prompts</button>
-          <button class="settings-tab" data-tab="tools">Tools</button>
-          <div class="settings-group">personal</div>
-          <button class="settings-tab" data-tab="memory">Memory</button>
-          <button class="settings-tab" data-tab="notes">Notes</button>
-          <button class="settings-tab" data-tab="automations">Automations</button>
-          <button class="settings-tab" data-tab="email">Email</button>
-          <div class="settings-group">settings</div>
-          <button class="settings-tab" data-tab="appearance">Interface</button>
-          <button class="settings-tab active admin-only" data-tab="providers">Connections</button>
-          <button class="settings-tab admin-only" data-tab="localgen">Audio &amp; Images</button>
-          <button class="settings-tab" data-tab="chats">Chats</button>
-          <button class="settings-tab" data-tab="usage">Usage</button>
-          <button class="settings-tab admin-only" data-tab="hardware">Hardware</button>
-          <button class="settings-tab admin-only" data-tab="data">Data</button>
-          <button class="settings-tab admin-only" data-tab="accounts">Accounts</button>
+        <nav class="settings-sidebar" aria-label="Settings sections">
+          <button class="settings-tab active" type="button" data-tab="general" aria-current="page">General</button>
+          <button class="settings-tab" type="button" data-tab="appearance">Appearance</button>
+          <button class="settings-tab" type="button" data-tab="account">Account</button>
+          <button class="settings-tab" type="button" data-tab="chats">Chats</button>
+          <button class="settings-tab" type="button" data-tab="usage">Usage</button>
+          <div class="settings-group">Workspace</div>
+          <button class="settings-tab" type="button" data-tab="presets">Models</button>
+          <button class="settings-tab" type="button" data-tab="documents">Knowledge</button>
+          <button class="settings-tab" type="button" data-tab="prompts">Prompts</button>
+          <button class="settings-tab" type="button" data-tab="tools">Tools</button>
+          <div class="settings-group">Personal</div>
+          <button class="settings-tab" type="button" data-tab="memory">Memory</button>
+          <button class="settings-tab" type="button" data-tab="notes">Notes</button>
+          <button class="settings-tab" type="button" data-tab="automations">Automations</button>
+          <button class="settings-tab" type="button" data-tab="email">Email</button>
+          <div class="settings-group admin-only">Admin</div>
+          <button class="settings-tab admin-only" type="button" data-tab="providers">Connections</button>
+          <button class="settings-tab admin-only" type="button" data-tab="localgen">Audio &amp; Images</button>
+          <button class="settings-tab admin-only" type="button" data-tab="hardware">Hardware</button>
+          <button class="settings-tab admin-only" type="button" data-tab="data">Data</button>
+          <button class="settings-tab admin-only" type="button" data-tab="accounts">Accounts</button>
         </nav>
         <div class="settings-panels">
 
-          <div class="settings-panel" data-panel="providers">
+          <div class="settings-panel" data-panel="general">
+            <div class="settings-card">
+              <h3>Chat</h3>
+              <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="autoTitle" /><span>Auto-generate chat titles</span></label></div>
+              <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="autoTags" /><span>Auto-tag new chats</span></label></div>
+              <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="followUps" /><span>Suggest follow-up questions after a reply</span></label></div>
+              <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="showSuggestions" /><span>Show prompt suggestions on a new chat</span></label></div>
+              <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="ctrlEnterSends" /><span>Ctrl+Enter sends (Enter adds a new line)</span></label></div>
+              <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="autoSpeak" /><span>Read replies aloud automatically</span></label></div>
+              <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="checkCode" /><span>Check code blocks for syntax errors and have the model fix them before you copy</span></label></div>
+              <p class="settings-hint">Python, JavaScript, TypeScript, shell, JSON, YAML, TOML, XML, Go, C, C++, Ruby and PHP are parsed or compiled, never run. The box shows the result; a block that fails is sent back to the model up to twice.</p>
+            </div>
+            <div class="settings-card">
+              <h3>Keyboard shortcuts</h3>
+              <p class="settings-hint">Press Ctrl+/ at any time to see every shortcut.</p>
+              <div class="settings-row"><button class="btn ghost" id="openShortcutsBtn" type="button">View shortcuts</button></div>
+            </div>
+            <div class="settings-card">
+              <h3>About</h3>
+              <p class="settings-hint" id="aboutVersion">starfire.ai</p>
+            </div>
+          </div>
+
+          <div class="settings-panel" data-panel="appearance" hidden>
+            <div class="settings-card">
+              <h3>Theme</h3>
+              <div class="segmented" role="radiogroup" aria-label="Theme">
+                <label><input type="radio" name="themeChoice" value="system" /><svg class="icon" aria-hidden="true"><use href="#i-monitor"/></svg><span>System</span></label>
+                <label><input type="radio" name="themeChoice" value="light" /><svg class="icon" aria-hidden="true"><use href="#i-sun"/></svg><span>Light</span></label>
+                <label><input type="radio" name="themeChoice" value="dark" /><svg class="icon" aria-hidden="true"><use href="#i-moon"/></svg><span>Dark</span></label>
+              </div>
+            </div>
+            <div class="settings-card">
+              <h3>Messages</h3>
+              <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="userBubbles" /><span>Show my messages as chat bubbles</span></label></div>
+              <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="wideChat" /><span>Wide chat (use the full window width)</span></label></div>
+            </div>
+          </div>
+
+          <div class="settings-panel" data-panel="account" hidden>
+            <div class="settings-card" id="accountCard" hidden>
+              <h3>Account</h3>
+              <p class="settings-hint" id="accountWho"></p>
+            </div>
+            <div class="settings-card">
+              <h3>Change password</h3>
+              <form id="passwordForm" novalidate>
+                <input type="text" id="passwordFormUser" class="sr-only" autocomplete="username" tabindex="-1" aria-hidden="true" readonly />
+                <div class="settings-row"><input type="password" id="currentPassword" placeholder="Current password" aria-label="Current password" autocomplete="current-password" /></div>
+                <div class="settings-row"><input type="password" id="newPassword" placeholder="New password (10+ characters)" aria-label="New password, at least 10 characters" autocomplete="new-password" /></div>
+                <div class="settings-row"><input type="password" id="confirmPassword" placeholder="New password again" aria-label="New password again" autocomplete="new-password" /></div>
+                <div class="settings-row"><button class="btn send" type="submit" id="passwordSubmit">Change password</button></div>
+              </form>
+              <p class="settings-hint" id="passwordStatus" role="status"></p>
+            </div>
+          </div>
+
+          <div class="settings-panel" data-panel="providers" hidden>
             <div class="settings-card">
               <h3>Add local (Ollama, LM Studio, llama.cpp, vLLM)</h3>
               <div class="settings-row">
-                <input id="localBaseUrl" type="text" placeholder="http://localhost:11434" autocomplete="off" spellcheck="false" />
-                <button class="btn ghost" id="addOllamaBtn" title="Fill the default Ollama endpoint">add ollama</button>
+                <input id="localBaseUrl" type="text" aria-label="Local server URL" placeholder="http://localhost:11434" autocomplete="off" spellcheck="false" />
+                <button type="button" class="btn ghost" id="addOllamaBtn" title="Fill the default Ollama endpoint">Use Ollama default</button>
               </div>
               <div class="settings-row">
-                <button class="btn ghost" id="discoverBtn" title="Scan common local ports for a running model server">scan network</button>
-                <button class="btn ghost" id="testLocalBtn">test</button>
-                <button class="btn send" id="addLocalBtn">add</button>
+                <button type="button" class="btn ghost" id="discoverBtn" title="Scan common local ports for a running model server">Scan network</button>
+                <button type="button" class="btn ghost" id="testLocalBtn">Test</button>
+                <button type="button" class="btn send" id="addLocalBtn">Add</button>
               </div>
               <p class="settings-hint" id="localTestResult"></p>
             </div>
@@ -218,21 +357,21 @@
             <div class="settings-card">
               <h3>Add API provider</h3>
               <div class="settings-row">
-                <select id="apiProviderSelect">
+                <select aria-label="API provider" id="apiProviderSelect">
                   <option value="openai" data-url="https://api.openai.com/v1">OpenAI</option>
                   <option value="anthropic" data-url="https://api.anthropic.com">Anthropic</option>
                   <option value="other" data-url="">Other (OpenAI-compatible)</option>
                 </select>
               </div>
               <div class="settings-row">
-                <input id="apiBaseUrl" type="text" placeholder="base URL" autocomplete="off" spellcheck="false" />
+                <input id="apiBaseUrl" type="text" aria-label="Base URL" placeholder="Base URL" autocomplete="off" spellcheck="false" />
               </div>
               <div class="settings-row">
-                <input id="apiKeyInput" type="password" placeholder="API key" autocomplete="off" spellcheck="false" />
+                <input id="apiKeyInput" type="password" aria-label="API key" placeholder="API key" autocomplete="off" spellcheck="false" />
               </div>
               <div class="settings-row">
-                <button class="btn ghost" id="testApiBtn">test</button>
-                <button class="btn send" id="addApiBtn">add</button>
+                <button type="button" class="btn ghost" id="testApiBtn">Test</button>
+                <button type="button" class="btn send" id="addApiBtn">Add</button>
               </div>
               <p class="settings-hint" id="apiTestResult"></p>
             </div>
@@ -245,35 +384,35 @@
 
           <div class="settings-panel" data-panel="chats" hidden>
             <div class="settings-card">
-              <h3>import &amp; export</h3>
+              <h3>Import &amp; export</h3>
               <p class="settings-hint">Exports every chat (archived ones too) as JSON. Import takes a starfire export or an Open WebUI chat export.</p>
               <div class="settings-row">
-                <button class="btn ghost" id="exportAllChatsBtn" type="button">export all chats</button>
+                <button class="btn ghost" id="exportAllChatsBtn" type="button">Export all chats</button>
               </div>
               <div class="settings-row">
-                <input id="importChatsFile" type="file" accept=".json,application/json" />
-                <button class="btn send" id="importChatsBtn" type="button">import</button>
+                <input aria-label="Chat export file" id="importChatsFile" type="file" accept=".json,application/json" />
+                <button class="btn send" id="importChatsBtn" type="button">Import</button>
               </div>
               <p class="settings-hint" id="importChatsResult"></p>
             </div>
             <div class="settings-card">
-              <h3>archive</h3>
+              <h3>Archive</h3>
               <div class="settings-row">
-                <button class="btn ghost" id="openArchivedBtn" type="button">view archived chats</button>
-                <button class="btn ghost" id="archiveAllChatsBtn" type="button">archive all chats</button>
+                <button class="btn ghost" id="openArchivedBtn" type="button">View archived chats</button>
+                <button class="btn ghost" id="archiveAllChatsBtn" type="button">Archive all chats</button>
               </div>
               <p class="settings-hint" id="archiveAllResult"></p>
             </div>
             <div class="settings-card">
-              <h3>tags</h3>
+              <h3>Tags</h3>
               <p class="settings-hint">Click a tag to filter the sidebar (same as searching tag:name).</p>
               <div class="tag-cloud" id="tagCloud"></div>
             </div>
             <div class="settings-card">
-              <h3>danger zone</h3>
-              <p class="settings-hint warning-text">&#9888;&#65039; Deletes every chat, archived ones included. Cannot be undone - export first if unsure.</p>
+              <h3>Danger zone</h3>
+              <p class="settings-hint warning-text">Deletes every chat, archived ones included. Cannot be undone - export first if unsure.</p>
               <div class="settings-row">
-                <button class="btn" id="deleteAllChatsBtn" type="button">delete all chats</button>
+                <button class="btn" id="deleteAllChatsBtn" type="button">Delete all chats</button>
               </div>
               <p class="settings-hint" id="deleteAllResult"></p>
             </div>
@@ -363,7 +502,7 @@
               <div class="settings-row">
                 <label class="theme-toggle warning">
                   <input type="checkbox" id="toggleEditFile" />
-                  <span>&#9888;&#65039; Edit files (writes to disk, with a diff shown in chat)</span>
+                  <span>Edit files (writes to disk, with a diff shown in chat)</span>
                 </label>
               </div>
               <div class="settings-row" id="editApprovalRow" hidden>
@@ -375,7 +514,7 @@
               <div class="settings-row">
                 <label class="theme-toggle warning">
                   <input type="checkbox" id="toggleRunShell" />
-                  <span>&#9888;&#65039; Run shell commands - no sandbox, executes directly on this machine</span>
+                  <span>Run shell commands - no sandbox, executes directly on this machine</span>
                 </label>
               </div>
               <div class="settings-row" id="shellApprovalRow" hidden>
@@ -384,23 +523,23 @@
                   <span>Ask me before each command runs - the command waits in the chat for approve/reject (recommended)</span>
                 </label>
               </div>
-              <p class="settings-hint">Add facts in the Memory tab, files in the Documents tab, jobs in Automations, accounts in Email, to-dos in Notes.</p>
+              <p class="settings-hint">Add facts in the Memory tab, files in the Knowledge tab, jobs in Automations, accounts in Email, to-dos in Notes.</p>
             </div>
 
             <div class="settings-card admin-only">
               <h3>Quick add (official MCP reference servers)</h3>
               <p class="settings-hint">Fetch and Memory are already installed and connected below - enable their checkbox to use them. Filesystem needs a directory choice, so it stays a manual add. Requires Node.js (npx) installed locally.</p>
               <div class="settings-row">
-                <input id="filesystemPath" type="text" placeholder="allowed directory (for filesystem)" autocomplete="off" spellcheck="false" />
-                <button class="btn ghost" id="browseDirBtn" type="button">browse…</button>
+                <input id="filesystemPath" type="text" aria-label="Allowed directory (for filesystem)" placeholder="Allowed directory (for filesystem)" autocomplete="off" spellcheck="false" />
+                <button class="btn ghost" id="browseDirBtn" type="button">Browse…</button>
               </div>
               <div class="dir-browser" id="dirBrowserBox" hidden>
                 <div class="dir-browser-path" id="dirBrowserPath"></div>
                 <ul class="endpoint-list" id="dirBrowserList"></ul>
-                <button class="btn send" id="dirBrowserSelectBtn" type="button">use this folder</button>
+                <button class="btn send" id="dirBrowserSelectBtn" type="button">Use this folder</button>
               </div>
               <div class="settings-row">
-                <button class="btn ghost" id="addFilesystemBtn">filesystem</button>
+                <button type="button" class="btn ghost" id="addFilesystemBtn">Filesystem</button>
               </div>
               <p class="settings-hint" id="mcpQuickAddResult"></p>
             </div>
@@ -411,15 +550,15 @@
                 credentials/config - pick one to see what it needs. Connection is tested live before it's saved,
                 same as everywhere else, so a wrong or outdated entry just fails cleanly.</p>
               <div class="settings-row">
-                <select id="mcpRepoSelect"><option value="">- choose a server -</option></select>
+                <select aria-label="MCP server" id="mcpRepoSelect"><option value="">Choose a server</option></select>
               </div>
               <div id="mcpRepoConfigureBox" hidden>
                 <div class="settings-row" id="mcpRepoPathRow" hidden>
-                  <input id="mcpRepoPath" type="text" placeholder="path" autocomplete="off" spellcheck="false" />
+                  <input id="mcpRepoPath" type="text" aria-label="Path" placeholder="Path" autocomplete="off" spellcheck="false" />
                 </div>
                 <div id="mcpRepoEnvFields"></div>
                 <div class="settings-row">
-                  <button class="btn send" id="mcpRepoAddBtn" type="button">add</button>
+                  <button class="btn send" id="mcpRepoAddBtn" type="button">Add</button>
                 </div>
               </div>
               <p class="settings-hint" id="mcpRepoResult"></p>
@@ -429,27 +568,27 @@
               <h3>Custom MCP server</h3>
               <p class="settings-hint">A local command (stdio), or a server that is already running at a URL (streamable HTTP, or the older SSE transport).</p>
               <div class="settings-row">
-                <input id="mcpName" type="text" placeholder="name" autocomplete="off" spellcheck="false" />
-                <select id="mcpTransport">
-                  <option value="stdio">local command (stdio)</option>
+                <input id="mcpName" type="text" aria-label="Name" placeholder="Name" autocomplete="off" spellcheck="false" />
+                <select aria-label="Transport" id="mcpTransport">
+                  <option value="stdio">Local command (stdio)</option>
                   <option value="http">URL (streamable HTTP)</option>
                   <option value="sse">URL (SSE)</option>
                 </select>
               </div>
               <div class="settings-row" id="mcpCommandRow">
-                <input id="mcpCommand" type="text" placeholder="command, e.g. npx" autocomplete="off" spellcheck="false" />
+                <input id="mcpCommand" type="text" aria-label="Command, e.g. npx" placeholder="Command, e.g. npx" autocomplete="off" spellcheck="false" />
               </div>
               <div class="settings-row" id="mcpArgsRow">
-                <input id="mcpArgs" type="text" placeholder="args, space-separated" autocomplete="off" spellcheck="false" />
+                <input id="mcpArgs" type="text" aria-label="Args, space-separated" placeholder="Args, space-separated" autocomplete="off" spellcheck="false" />
               </div>
               <div class="settings-row" id="mcpUrlRow" hidden>
-                <input id="mcpUrl" type="text" placeholder="http://localhost:3001/mcp" autocomplete="off" spellcheck="false" />
+                <input id="mcpUrl" type="text" aria-label="MCP server URL" placeholder="http://localhost:3001/mcp" autocomplete="off" spellcheck="false" />
               </div>
               <div class="settings-row" id="mcpAuthRow" hidden>
-                <input id="mcpAuthHeader" type="password" placeholder="Authorization header value, e.g. Bearer … (optional)" autocomplete="off" spellcheck="false" />
+                <input id="mcpAuthHeader" type="password" aria-label="Authorization header value, e.g. Bearer … (optional)" placeholder="Authorization header value, e.g. Bearer … (optional)" autocomplete="off" spellcheck="false" />
               </div>
               <div class="settings-row">
-                <button class="btn send" id="addMcpCustomBtn">add</button>
+                <button type="button" class="btn send" id="addMcpCustomBtn">Add</button>
               </div>
               <p class="settings-hint" id="mcpCustomResult"></p>
             </div>
@@ -464,27 +603,27 @@
             <div class="settings-card">
               <h3>Add a memory</h3>
               <div class="settings-row">
-                <input id="newMemoryText" type="text" placeholder="a fact to remember" autocomplete="off" spellcheck="false" />
-                <select id="newMemoryCategory">
-                  <option value="fact">fact</option>
-                  <option value="identity">identity</option>
-                  <option value="preference">preference</option>
-                  <option value="contact">contact</option>
-                  <option value="task">task</option>
+                <input id="newMemoryText" type="text" aria-label="A fact to remember" placeholder="A fact to remember" autocomplete="off" spellcheck="false" />
+                <select aria-label="Category" id="newMemoryCategory">
+                  <option value="fact">Fact</option>
+                  <option value="identity">Identity</option>
+                  <option value="preference">Preference</option>
+                  <option value="contact">Contact</option>
+                  <option value="task">Task</option>
                 </select>
-                <button class="btn send" id="addMemoryEntryBtn">add</button>
+                <button type="button" class="btn send" id="addMemoryEntryBtn">Add</button>
               </div>
               <p class="settings-hint">You can also just type "remember: ..." in the chat.</p>
             </div>
             <div class="settings-card">
               <h3>Remembered facts</h3>
               <div class="settings-row" id="memoryCategoryTabs">
-                <button class="btn ghost active" data-category="">all</button>
-                <button class="btn ghost" data-category="fact">fact</button>
-                <button class="btn ghost" data-category="identity">identity</button>
-                <button class="btn ghost" data-category="preference">preference</button>
-                <button class="btn ghost" data-category="contact">contact</button>
-                <button class="btn ghost" data-category="task">task</button>
+                <button type="button" class="btn ghost active" data-category="">All</button>
+                <button type="button" class="btn ghost" data-category="fact">Fact</button>
+                <button type="button" class="btn ghost" data-category="identity">Identity</button>
+                <button type="button" class="btn ghost" data-category="preference">Preference</button>
+                <button type="button" class="btn ghost" data-category="contact">Contact</button>
+                <button type="button" class="btn ghost" data-category="task">Task</button>
               </div>
               <ul class="endpoint-list" id="memoryList"></ul>
             </div>
@@ -494,8 +633,8 @@
             <div class="settings-card">
               <h3>Upload a document</h3>
               <div class="settings-row">
-                <input id="documentFile" type="file" accept=".txt,.md,.pdf" />
-                <button class="btn send" id="uploadDocumentBtn">upload</button>
+                <input aria-label="Document to upload" id="documentFile" type="file" accept=".txt,.md,.pdf" />
+                <button type="button" class="btn send" id="uploadDocumentBtn">Upload</button>
               </div>
               <p class="settings-hint" id="documentUploadResult"></p>
             </div>
@@ -509,47 +648,47 @@
             <div class="settings-card">
               <h3>New note</h3>
               <div class="settings-row">
-                <select id="noteTemplateSelect">
-                  <option value="">- start from a template -</option>
+                <select aria-label="Template" id="noteTemplateSelect">
+                  <option value="">Start from a template</option>
                 </select>
-                <button class="btn ghost" id="useTemplateBtn" type="button">use</button>
+                <button class="btn ghost" id="useTemplateBtn" type="button">Use</button>
               </div>
               <div class="settings-row">
-                <input id="noteTitle" type="text" placeholder="title" autocomplete="off" spellcheck="false" />
-                <select id="noteType">
-                  <option value="note">note</option>
-                  <option value="checklist">checklist</option>
+                <input id="noteTitle" type="text" aria-label="Title" placeholder="Title" autocomplete="off" spellcheck="false" />
+                <select aria-label="Note type" id="noteType">
+                  <option value="note">Note</option>
+                  <option value="checklist">Checklist</option>
                 </select>
               </div>
               <div class="settings-row" id="noteContentRow">
-                <input id="noteContent" type="text" placeholder="content" autocomplete="off" spellcheck="false" />
+                <input id="noteContent" type="text" aria-label="Content" placeholder="Content" autocomplete="off" spellcheck="false" />
               </div>
               <div class="settings-row" id="noteItemsRow" hidden>
-                <div style="flex:1">
+                <div class="grow">
                   <ul class="endpoint-list" id="noteItemsEditor"></ul>
                   <div class="settings-row">
-                    <input id="noteNewItem" type="text" placeholder="checklist item…" autocomplete="off" spellcheck="false" />
-                    <button class="btn ghost" id="noteAddItemBtn">add item</button>
+                    <input id="noteNewItem" type="text" aria-label="Checklist item" placeholder="Checklist item…" autocomplete="off" spellcheck="false" />
+                    <button type="button" class="btn ghost" id="noteAddItemBtn">Add item</button>
                   </div>
                 </div>
               </div>
               <div class="settings-row">
-                <input id="noteDueDate" type="text" placeholder="due date - e.g. &quot;tomorrow at 9am&quot;, &quot;next friday&quot;, or YYYY-MM-DD" autocomplete="off" spellcheck="false" />
-                <select id="noteRepeat">
-                  <option value="none">no repeat</option>
-                  <option value="daily">daily</option>
-                  <option value="weekly">weekly</option>
-                  <option value="monthly">monthly</option>
-                  <option value="yearly">yearly</option>
+                <input id="noteDueDate" type="text" aria-label="Due date" placeholder="Due date - e.g. &quot;tomorrow at 9am&quot;, &quot;next friday&quot;, or YYYY-MM-DD" autocomplete="off" spellcheck="false" />
+                <select aria-label="Repeat" id="noteRepeat">
+                  <option value="none">No repeat</option>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="yearly">Yearly</option>
                 </select>
               </div>
               <div class="settings-row">
-                <input id="noteLabel" type="text" placeholder="label (optional)" autocomplete="off" spellcheck="false" />
-                <input id="noteColor" type="text" placeholder="color (optional, e.g. #e5383b)" autocomplete="off" spellcheck="false" />
+                <input id="noteLabel" type="text" aria-label="Label (optional)" placeholder="Label (optional)" autocomplete="off" spellcheck="false" />
+                <input id="noteColor" type="text" aria-label="Color (optional, e.g. #e5383b)" placeholder="Color (optional, e.g. #e5383b)" autocomplete="off" spellcheck="false" />
               </div>
               <div class="settings-row">
-                <button class="btn send" id="createNoteBtn">add note</button>
-                <button class="btn ghost" id="saveAsTemplateBtn" type="button" title="Save the fields above as a reusable template">save as template</button>
+                <button type="button" class="btn send" id="createNoteBtn">Add note</button>
+                <button class="btn ghost" id="saveAsTemplateBtn" type="button" title="Save the fields above as a reusable template">Save as template</button>
               </div>
               <p class="settings-hint" id="noteCreateResult"></p>
             </div>
@@ -560,7 +699,7 @@
             <div class="settings-card">
               <h3>Notes</h3>
               <div class="settings-row">
-                <label class="theme-toggle"><input type="checkbox" id="showArchivedNotes" /><span>show archived</span></label>
+                <label class="theme-toggle"><input type="checkbox" id="showArchivedNotes" /><span>Show archived</span></label>
               </div>
               <ul class="endpoint-list" id="noteList"></ul>
             </div>
@@ -571,28 +710,28 @@
               <h3>New automation</h3>
               <p class="settings-hint">Sends a prompt to a model on a schedule and records the reply. Any tools you enable below are available to that run too.</p>
               <div class="settings-row">
-                <input id="taskName" type="text" placeholder="name" autocomplete="off" spellcheck="false" />
+                <input id="taskName" type="text" aria-label="Name" placeholder="Name" autocomplete="off" spellcheck="false" />
               </div>
               <div class="settings-row">
-                <input id="taskPrompt" type="text" placeholder="prompt to send" autocomplete="off" spellcheck="false" />
+                <input id="taskPrompt" type="text" aria-label="Prompt to send" placeholder="Prompt to send" autocomplete="off" spellcheck="false" />
               </div>
               <div class="settings-row">
-                <select id="taskEndpointSelect"></select>
+                <select aria-label="Model" id="taskEndpointSelect"></select>
               </div>
               <div class="settings-row">
-                <select id="taskSchedule">
-                  <option value="once">once</option>
-                  <option value="daily">daily</option>
-                  <option value="weekly">weekly</option>
-                  <option value="cron">cron</option>
+                <select aria-label="Schedule" id="taskSchedule">
+                  <option value="once">Once</option>
+                  <option value="daily">Daily</option>
+                  <option value="weekly">Weekly</option>
+                  <option value="cron">Cron</option>
                 </select>
-                <input id="taskTime" type="text" placeholder="HH:MM" style="max-width:70px" autocomplete="off" spellcheck="false" />
-                <input id="taskDay" type="text" placeholder="weekday (weekly)" style="max-width:140px" autocomplete="off" spellcheck="false" />
-                <input id="taskCron" type="text" placeholder="cron expression" autocomplete="off" spellcheck="false" />
+                <input id="taskTime" type="text" aria-label="Time (HH:MM)" placeholder="HH:MM" class="field-narrow" autocomplete="off" spellcheck="false" />
+                <input id="taskDay" type="text" aria-label="Weekday" placeholder="Weekday (weekly)" class="field-medium" autocomplete="off" spellcheck="false" />
+                <input id="taskCron" type="text" aria-label="Cron expression" placeholder="Cron expression" autocomplete="off" spellcheck="false" />
               </div>
               <div class="settings-row" id="taskToolCheckboxes"></div>
               <div class="settings-row">
-                <button class="btn send" id="createTaskBtn">create</button>
+                <button type="button" class="btn send" id="createTaskBtn">Create</button>
               </div>
               <p class="settings-hint" id="taskCreateResult"></p>
             </div>
@@ -610,22 +749,22 @@
             <div class="settings-card">
               <h3>Add account (app password)</h3>
               <div class="settings-row">
-                <input id="emailLabel" type="text" placeholder="label (optional)" autocomplete="off" spellcheck="false" />
+                <input id="emailLabel" type="text" aria-label="Label (optional)" placeholder="Label (optional)" autocomplete="off" spellcheck="false" />
               </div>
               <div class="settings-row">
-                <input id="emailAddress" type="text" placeholder="you@example.com" autocomplete="off" spellcheck="false" />
-                <input id="emailPassword" type="password" placeholder="app password" autocomplete="off" spellcheck="false" />
+                <input id="emailAddress" type="text" aria-label="Email address" placeholder="you@example.com" autocomplete="off" spellcheck="false" />
+                <input id="emailPassword" type="password" aria-label="App password" placeholder="App password" autocomplete="off" spellcheck="false" />
               </div>
               <div class="settings-row">
-                <input id="emailImapHost" type="text" placeholder="imap host" autocomplete="off" spellcheck="false" />
-                <input id="emailImapPort" type="text" placeholder="993" style="max-width:70px" autocomplete="off" spellcheck="false" />
+                <input id="emailImapHost" type="text" aria-label="IMAP host" placeholder="IMAP host" autocomplete="off" spellcheck="false" />
+                <input id="emailImapPort" type="text" aria-label="IMAP port" placeholder="993" class="field-narrow" autocomplete="off" spellcheck="false" />
               </div>
               <div class="settings-row">
-                <input id="emailSmtpHost" type="text" placeholder="smtp host (optional)" autocomplete="off" spellcheck="false" />
-                <input id="emailSmtpPort" type="text" placeholder="587" style="max-width:70px" autocomplete="off" spellcheck="false" />
+                <input id="emailSmtpHost" type="text" aria-label="SMTP host (optional)" placeholder="SMTP host (optional)" autocomplete="off" spellcheck="false" />
+                <input id="emailSmtpPort" type="text" aria-label="SMTP port" placeholder="587" class="field-narrow" autocomplete="off" spellcheck="false" />
               </div>
               <div class="settings-row">
-                <button class="btn send" id="addEmailAccountBtn">add</button>
+                <button type="button" class="btn send" id="addEmailAccountBtn">Add</button>
               </div>
               <p class="settings-hint" id="emailAddResult"></p>
             </div>
@@ -636,8 +775,8 @@
             <div class="settings-card" id="emailInboxCard" hidden>
               <h3>Inbox</h3>
               <div class="settings-row">
-                <select id="emailFolderSelect"></select>
-                <button class="btn ghost" id="emailRefreshBtn">refresh</button>
+                <select aria-label="Folder" id="emailFolderSelect"></select>
+                <button type="button" class="btn ghost" id="emailRefreshBtn">Refresh</button>
               </div>
               <div class="email-layout">
                 <ul class="endpoint-list email-message-list" id="emailMessageList"></ul>
@@ -651,32 +790,32 @@
               <p class="settings-hint">Checked automatically in the background every couple of minutes for accounts with
                 at least one enabled rule - not just when you open the inbox.</p>
               <div class="settings-row">
-                <select id="ruleAccountSelect"></select>
-                <select id="ruleFolder">
+                <select aria-label="Email account" id="ruleAccountSelect"></select>
+                <select aria-label="Folder" id="ruleFolder">
                   <option value="INBOX">INBOX</option>
                 </select>
               </div>
               <div class="settings-row">
-                <select id="ruleMatchField">
-                  <option value="from">from</option>
-                  <option value="subject">subject</option>
+                <select aria-label="Match field" id="ruleMatchField">
+                  <option value="from">From</option>
+                  <option value="subject">Subject</option>
                 </select>
-                <input id="ruleMatchValue" type="text" placeholder="contains…" autocomplete="off" spellcheck="false" />
+                <input id="ruleMatchValue" type="text" aria-label="Contains" placeholder="Contains…" autocomplete="off" spellcheck="false" />
               </div>
               <div class="settings-row">
-                <select id="ruleAction">
-                  <option value="add_note">add a note</option>
+                <select aria-label="Action" id="ruleAction">
+                  <option value="add_note">Add a note</option>
                   <option value="ai_summarize_note">AI-summarize into a note</option>
-                  <option value="mark_read">mark read</option>
-                  <option value="archive">archive</option>
-                  <option value="delete">delete</option>
+                  <option value="mark_read">Mark read</option>
+                  <option value="archive">Archive</option>
+                  <option value="delete">Delete</option>
                 </select>
               </div>
               <div class="settings-row" id="ruleModelRow" hidden>
-                <select id="ruleModelSelect"></select>
+                <select aria-label="Model" id="ruleModelSelect"></select>
               </div>
               <div class="settings-row">
-                <button class="btn send" id="createRuleBtn">add rule</button>
+                <button type="button" class="btn send" id="createRuleBtn">Add rule</button>
               </div>
               <p class="settings-hint" id="ruleCreateResult"></p>
               <ul class="endpoint-list" id="ruleList"></ul>
@@ -688,8 +827,8 @@
               <h3>Save current setup as a preset</h3>
               <p class="settings-hint">Captures the current model, system prompt, and enabled tools.</p>
               <div class="settings-row">
-                <input id="presetName" type="text" placeholder="preset name, e.g. coding" autocomplete="off" spellcheck="false" />
-                <button class="btn send" id="savePresetBtn">save current setup</button>
+                <input id="presetName" type="text" aria-label="Preset name, e.g. coding" placeholder="Preset name, e.g. coding" autocomplete="off" spellcheck="false" />
+                <button type="button" class="btn send" id="savePresetBtn">Save current setup</button>
               </div>
               <p class="settings-hint" id="presetSaveResult"></p>
             </div>
@@ -701,23 +840,23 @@
 
           <div class="settings-panel" data-panel="prompts" hidden>
             <div class="settings-card">
-              <h3 id="promptFormTitle">new prompt</h3>
+              <h3 id="promptFormTitle">New prompt</h3>
               <p class="settings-hint">Type /command in the chat box to insert it. Variables: {{CURRENT_DATE}}, {{CURRENT_TIME}}, {{CURRENT_WEEKDAY}}, {{CLIPBOARD}}.</p>
               <div class="settings-row">
-                <input id="promptCommand" type="text" placeholder="command, e.g. summarize" autocomplete="off" spellcheck="false" />
-                <input id="promptTitle" type="text" placeholder="title" autocomplete="off" spellcheck="false" />
+                <input id="promptCommand" type="text" aria-label="Command, e.g. summarize" placeholder="Command, e.g. summarize" autocomplete="off" spellcheck="false" />
+                <input id="promptTitle" type="text" aria-label="Title" placeholder="Title" autocomplete="off" spellcheck="false" />
               </div>
               <div class="settings-row">
-                <textarea id="promptContent" class="settings-textarea" rows="5" placeholder="prompt text…" spellcheck="false"></textarea>
+                <textarea id="promptContent" class="settings-textarea" rows="5" aria-label="Prompt text" placeholder="Prompt text…" spellcheck="false"></textarea>
               </div>
               <div class="settings-row">
-                <button class="btn send" id="savePromptBtn" type="button">save prompt</button>
-                <button class="btn ghost" id="cancelPromptEditBtn" type="button" hidden>cancel edit</button>
+                <button class="btn send" id="savePromptBtn" type="button">Save prompt</button>
+                <button class="btn ghost" id="cancelPromptEditBtn" type="button" hidden>Cancel edit</button>
               </div>
               <p class="settings-hint" id="promptSaveResult"></p>
             </div>
             <div class="settings-card">
-              <h3>prompts</h3>
+              <h3>Prompts</h3>
               <ul class="endpoint-list" id="promptList"></ul>
             </div>
           </div>
@@ -754,27 +893,27 @@
               <p class="settings-hint">No API key - ComfyUI is a plain local server, same trust model as Ollama.
                 Content is entirely up to whatever checkpoint you load; nothing here filters it.</p>
               <div class="settings-row">
-                <input id="comfyBaseUrl" type="text" placeholder="http://127.0.0.1:8188" autocomplete="off" spellcheck="false" />
-                <button class="btn ghost" id="comfyDetectBtn" type="button">detect</button>
+                <input id="comfyBaseUrl" type="text" aria-label="ComfyUI URL" placeholder="http://127.0.0.1:8188" autocomplete="off" spellcheck="false" />
+                <button class="btn ghost" id="comfyDetectBtn" type="button">Detect</button>
               </div>
               <p class="settings-hint" id="comfyStatus"></p>
               <div class="settings-row">
-                <input id="comfyCheckpointsDir" type="text" placeholder="path to ComfyUI/models/checkpoints" autocomplete="off" spellcheck="false" />
-                <button class="btn ghost" id="comfyBrowseBtn" type="button">browse…</button>
+                <input id="comfyCheckpointsDir" type="text" aria-label="Path to ComfyUI/models/checkpoints" placeholder="Path to ComfyUI/models/checkpoints" autocomplete="off" spellcheck="false" />
+                <button class="btn ghost" id="comfyBrowseBtn" type="button">Browse…</button>
               </div>
               <div class="dir-browser" id="comfyDirBrowserBox" hidden>
                 <div class="dir-browser-path" id="comfyDirBrowserPath"></div>
                 <ul class="endpoint-list" id="comfyDirBrowserList"></ul>
-                <button class="btn send" id="comfyDirBrowserSelectBtn" type="button">use this folder</button>
+                <button class="btn send" id="comfyDirBrowserSelectBtn" type="button">Use this folder</button>
               </div>
               <div class="settings-row">
-                <select id="comfyCheckpointSelect"><option value="">- default checkpoint -</option></select>
+                <select aria-label="Checkpoint" id="comfyCheckpointSelect"><option value="">Default checkpoint</option></select>
               </div>
               <div class="settings-row">
-                <input id="comfyNegativePrompt" type="text" placeholder="default negative prompt (optional)" autocomplete="off" spellcheck="false" />
+                <input id="comfyNegativePrompt" type="text" aria-label="Default negative prompt (optional)" placeholder="Default negative prompt (optional)" autocomplete="off" spellcheck="false" />
               </div>
               <div class="settings-row">
-                <button class="btn send" id="comfySaveBtn" type="button">save</button>
+                <button class="btn send" id="comfySaveBtn" type="button">Save</button>
               </div>
               <p class="settings-hint" id="comfySaveResult"></p>
             </div>
@@ -783,13 +922,13 @@
               <p class="settings-hint">Generic download by URL into your checkpoints folder above - works for any
                 checkpoint file (Hugging Face, Civitai, anywhere); nothing here curates or suggests specific ones.</p>
               <div class="settings-row">
-                <input id="comfyPullUrl" type="text" placeholder="direct download URL" autocomplete="off" spellcheck="false" />
-                <input id="comfyPullFilename" type="text" placeholder="filename.safetensors" autocomplete="off" spellcheck="false" />
+                <input id="comfyPullUrl" type="text" aria-label="Direct download URL" placeholder="Direct download URL" autocomplete="off" spellcheck="false" />
+                <input id="comfyPullFilename" type="text" aria-label="filename.safetensors" placeholder="filename.safetensors" autocomplete="off" spellcheck="false" />
               </div>
               <div class="settings-row">
-                <button class="btn send" id="comfyPullBtn" type="button">pull</button>
+                <button class="btn send" id="comfyPullBtn" type="button">Pull</button>
               </div>
-              <progress id="comfyPullProgress" class="pull-progress" max="100" hidden></progress>
+              <progress aria-label="Checkpoint download progress" id="comfyPullProgress" class="pull-progress" max="100" hidden></progress>
               <p class="settings-hint" id="comfyPullStatus"></p>
             </div>
 
@@ -797,10 +936,10 @@
               <h3>Local speech generation (Piper)</h3>
               <p class="settings-hint">No API key - runs as a local process, not a server.</p>
               <div class="settings-row">
-                <input id="piperVoicePath" type="text" placeholder="path to voice .onnx file - filled in automatically after a pull below" autocomplete="off" spellcheck="false" />
+                <input id="piperVoicePath" type="text" aria-label="Path to voice .onnx file - filled in automatically after a pull below" placeholder="Path to voice .onnx file - filled in automatically after a pull below" autocomplete="off" spellcheck="false" />
               </div>
               <div class="settings-row">
-                <button class="btn send" id="piperSaveBtn" type="button">save</button>
+                <button class="btn send" id="piperSaveBtn" type="button">Save</button>
               </div>
               <p class="settings-hint" id="piperSaveResult"></p>
             </div>
@@ -809,20 +948,20 @@
               <p class="settings-hint">Downloads from Piper's official voice repository (Hugging Face,
                 rhasspy/piper-voices) into the folder above - e.g. name "en_US-lessac", quality "medium".</p>
               <div class="settings-row">
-                <input id="piperVoiceName" type="text" placeholder="voice name, e.g. en_US-lessac" autocomplete="off" spellcheck="false" />
-                <select id="piperVoiceQuality">
-                  <option value="low">low</option>
-                  <option value="medium" selected>medium</option>
-                  <option value="high">high</option>
+                <input id="piperVoiceName" type="text" aria-label="Voice name, e.g. en_US-lessac" placeholder="Voice name, e.g. en_US-lessac" autocomplete="off" spellcheck="false" />
+                <select aria-label="Voice quality" id="piperVoiceQuality">
+                  <option value="low">Low</option>
+                  <option value="medium" selected>Medium</option>
+                  <option value="high">High</option>
                 </select>
               </div>
               <div class="settings-row">
-                <input id="piperVoicesDirForPull" type="text" placeholder="voices directory to download into" autocomplete="off" spellcheck="false" />
+                <input id="piperVoicesDirForPull" type="text" aria-label="Voices directory to download into" placeholder="Voices directory to download into" autocomplete="off" spellcheck="false" />
               </div>
               <div class="settings-row">
-                <button class="btn send" id="piperPullBtn" type="button">pull voice</button>
+                <button class="btn send" id="piperPullBtn" type="button">Pull voice</button>
               </div>
-              <progress id="piperPullProgress" class="pull-progress" max="100" hidden></progress>
+              <progress aria-label="Voice download progress" id="piperPullProgress" class="pull-progress" max="100" hidden></progress>
               <p class="settings-hint" id="piperPullStatus"></p>
             </div>
 
@@ -832,17 +971,17 @@
                 tell starfire which node/input holds the prompt text, and save it here. Runs against the ComfyUI
                 server configured above.</p>
               <div class="settings-row">
-                <input id="workflowName" type="text" placeholder="name, e.g. svd-video" autocomplete="off" spellcheck="false" />
+                <input id="workflowName" type="text" aria-label="Name, e.g. svd-video" placeholder="Name, e.g. svd-video" autocomplete="off" spellcheck="false" />
               </div>
               <div class="settings-row">
-                <textarea id="workflowJson" placeholder="paste exported workflow JSON here" rows="4" style="width:100%;font-family:var(--mono);background:var(--panel);color:var(--fg);border:1px solid var(--border);padding:6px 8px;"></textarea>
+                <textarea id="workflowJson" aria-label="Paste exported workflow JSON here" placeholder="Paste exported workflow JSON here" rows="4" class="settings-textarea code"></textarea>
               </div>
               <div class="settings-row">
-                <input id="workflowPromptNode" type="text" placeholder="prompt node id, e.g. 6" style="max-width:140px" autocomplete="off" spellcheck="false" />
-                <input id="workflowPromptKey" type="text" placeholder="input key, e.g. text" value="text" autocomplete="off" spellcheck="false" />
+                <input id="workflowPromptNode" type="text" aria-label="Prompt node id, e.g. 6" placeholder="Prompt node id, e.g. 6" class="field-medium" autocomplete="off" spellcheck="false" />
+                <input id="workflowPromptKey" type="text" aria-label="Input key, e.g. text" placeholder="Input key, e.g. text" value="text" autocomplete="off" spellcheck="false" />
               </div>
               <div class="settings-row">
-                <button class="btn send" id="saveWorkflowBtn" type="button">save workflow</button>
+                <button class="btn send" id="saveWorkflowBtn" type="button">Save workflow</button>
               </div>
               <p class="settings-hint" id="workflowSaveResult"></p>
               <ul class="endpoint-list" id="workflowList"></ul>
@@ -854,15 +993,15 @@
               <h3>Backup</h3>
               <p class="settings-hint">Downloads a zip of the whole data/ directory - endpoints, encrypted keys, memory,
                 documents, notes, chat sessions, everything.</p>
-              <button class="btn ghost" id="downloadBackupBtn">download backup</button>
+              <button type="button" class="btn ghost" id="downloadBackupBtn">Download backup</button>
             </div>
             <div class="settings-card">
               <h3>Restore</h3>
-              <p class="settings-hint warning-text">&#9888;&#65039; Overwrites your current data with the contents of the
+              <p class="settings-hint warning-text">Overwrites your current data with the contents of the
                 zip. This cannot be undone - back up first if you're unsure.</p>
               <div class="settings-row">
-                <input id="restoreFile" type="file" accept=".zip" />
-                <button class="btn send" id="restoreBackupBtn">restore</button>
+                <input aria-label="Backup zip to restore" id="restoreFile" type="file" accept=".zip" />
+                <button type="button" class="btn send" id="restoreBackupBtn">Restore</button>
               </div>
               <p class="settings-hint" id="restoreResult"></p>
             </div>
@@ -874,16 +1013,16 @@
               <p class="settings-hint">Each account has its own chats, memory, knowledge, notes, automations, email and prompts. Connections, MCP servers and local generation are shared and managed by admins.</p>
               <form id="accountForm" novalidate>
                 <div class="settings-row">
-                  <input id="newAccountName" type="text" placeholder="name" autocomplete="off" spellcheck="false" />
-                  <input id="newAccountEmail" type="email" placeholder="email" autocomplete="off" spellcheck="false" />
+                  <input id="newAccountName" type="text" aria-label="Name" placeholder="Name" autocomplete="off" spellcheck="false" />
+                  <input id="newAccountEmail" type="email" aria-label="Email" placeholder="Email" autocomplete="off" spellcheck="false" />
                 </div>
                 <div class="settings-row">
-                  <input id="newAccountPassword" type="password" placeholder="password (10+ characters)" autocomplete="new-password" />
-                  <select id="newAccountRole">
-                    <option value="user">user</option>
-                    <option value="admin">admin</option>
+                  <input id="newAccountPassword" type="password" aria-label="Password (10+ characters)" placeholder="Password (10+ characters)" autocomplete="new-password" />
+                  <select aria-label="Role" id="newAccountRole">
+                    <option value="user">User</option>
+                    <option value="admin">Admin</option>
                   </select>
-                  <button class="btn send" type="submit" id="createAccountBtn">add account</button>
+                  <button class="btn send" type="submit" id="createAccountBtn">Add account</button>
                 </div>
               </form>
               <p class="settings-hint" id="accountFormResult" role="status"></p>
@@ -891,57 +1030,6 @@
             <div class="settings-card">
               <h3>Accounts</h3>
               <ul class="endpoint-list" id="accountList"></ul>
-            </div>
-          </div>
-          <div class="settings-panel" data-panel="appearance" hidden>
-            <div class="settings-card">
-              <h3>theme</h3>
-              <div class="settings-row">
-                <label class="theme-toggle">
-                  <input type="checkbox" id="lightModeToggle" />
-                  <span>Light mode</span>
-                </label>
-              </div>
-            </div>
-            <div class="settings-card" id="accountCard" hidden>
-              <h3>account</h3>
-              <p class="settings-hint" id="accountWho"></p>
-              <form id="passwordForm" novalidate>
-                <div class="settings-row"><input type="password" id="currentPassword" placeholder="current password" autocomplete="current-password" /></div>
-                <div class="settings-row"><input type="password" id="newPassword" placeholder="new password (10+ characters)" autocomplete="new-password" /></div>
-                <div class="settings-row"><input type="password" id="confirmPassword" placeholder="new password again" autocomplete="new-password" /></div>
-                <div class="settings-row"><button class="btn" type="submit" id="passwordSubmit">change password</button></div>
-              </form>
-              <p class="settings-hint" id="passwordStatus" role="status"></p>
-            </div>
-            <div class="settings-card">
-              <h3>chat</h3>
-              <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="userBubbles" /><span>Show my messages as chat bubbles</span></label></div>
-              <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="wideChat" /><span>Wide chat (use the full window width)</span></label></div>
-              <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="autoTitle" /><span>Auto-generate chat titles</span></label></div>
-              <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="autoTags" /><span>Auto-tag new chats</span></label></div>
-              <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="followUps" /><span>Suggest follow-up questions after a reply</span></label></div>
-              <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="ctrlEnterSends" /><span>Ctrl+Enter sends (Enter adds a new line)</span></label></div>
-              <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="autoSpeak" /><span>Read replies aloud automatically</span></label></div>
-              <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="showSuggestions" /><span>Show prompt suggestions on a new chat</span></label></div>
-              <div class="settings-row"><label class="theme-toggle"><input type="checkbox" data-pref="checkCode" /><span>Check code blocks for syntax errors and have the model fix them before you copy</span></label></div>
-              <p class="settings-hint">Python, JavaScript, TypeScript, shell, JSON, YAML, TOML, XML, Go, C, C++, Ruby and PHP are parsed or compiled, never run. The box shows the result; a block that fails is sent back to the model up to twice.</p>
-            </div>
-            <div class="settings-card">
-              <h3>about</h3>
-              <p class="settings-hint" id="aboutVersion">starfire.ai</p>
-            </div>
-            <div class="settings-card">
-              <h3>keyboard shortcuts</h3>
-              <ul class="shortcut-list">
-                <li><kbd>ctrl</kbd>+<kbd>k</kbd> command palette</li>
-                <li><kbd>ctrl</kbd>+<kbd>shift</kbd>+<kbd>o</kbd> new chat</li>
-                <li><kbd>ctrl</kbd>+<kbd>shift</kbd>+<kbd>s</kbd> toggle sidebar</li>
-                <li><kbd>ctrl</kbd>+<kbd>shift</kbd>+<kbd>c</kbd> copy last reply</li>
-                <li><kbd>ctrl</kbd>+<kbd>shift</kbd>+<kbd>;</kbd> copy last code block</li>
-                <li><kbd>shift</kbd>+<kbd>esc</kbd> focus the chat box</li>
-                <li><kbd>/</kbd> prompts &middot; <kbd>#</kbd> knowledge &middot; <kbd>@</kbd> model, typed in the chat box</li>
-              </ul>
             </div>
           </div>
         </div>
@@ -952,13 +1040,13 @@
   <div class="modal-overlay" id="archivedModal" hidden>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="archivedTitle">
       <div class="modal-header">
-        <span id="archivedTitle">archived chats</span>
-        <button class="btn ghost modal-close" id="archivedCloseBtn" aria-label="Close archived chats">×</button>
+        <span id="archivedTitle">Archived chats</span>
+        <button class="btn ghost modal-close" id="archivedCloseBtn" type="button" title="Close" aria-label="Close archived chats"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
       </div>
       <div class="modal-body">
         <div class="settings-row">
-          <input id="archivedSearch" type="search" placeholder="search archived chats…" autocomplete="off" spellcheck="false" />
-          <button class="btn ghost" id="unarchiveAllBtn" type="button">unarchive all</button>
+          <input id="archivedSearch" type="search" placeholder="Search archived chats" aria-label="Search archived chats" autocomplete="off" spellcheck="false" />
+          <button class="btn ghost" id="unarchiveAllBtn" type="button">Unarchive all</button>
         </div>
         <ul class="endpoint-list" id="archivedList"></ul>
       </div>
@@ -966,14 +1054,14 @@
   </div>
 
   <div class="modal-overlay" id="dialogModal" hidden>
-    <div class="modal dialog-modal" role="alertdialog" aria-modal="true" aria-labelledby="dialogTitle">
+    <div class="modal dialog-modal" role="alertdialog" aria-modal="true" aria-labelledby="dialogTitle" aria-describedby="dialogText">
       <div class="modal-header"><span id="dialogTitle"></span></div>
       <div class="modal-body">
         <p class="dialog-text" id="dialogText"></p>
-        <input id="dialogInput" type="text" autocomplete="off" spellcheck="false" hidden />
+        <input id="dialogInput" type="text" aria-labelledby="dialogTitle" autocomplete="off" spellcheck="false" hidden />
         <div class="dialog-actions">
-          <button class="btn ghost" id="dialogCancelBtn" type="button">cancel</button>
-          <button class="btn send" id="dialogOkBtn" type="button">ok</button>
+          <button class="btn ghost" id="dialogCancelBtn" type="button">Cancel</button>
+          <button class="btn send" id="dialogOkBtn" type="button">OK</button>
         </div>
       </div>
     </div>
@@ -982,32 +1070,61 @@
   <div class="modal-overlay" id="compareModal" hidden>
     <div class="modal compare-modal" role="dialog" aria-modal="true" aria-labelledby="compareTitle">
       <div class="modal-header">
-        <span id="compareTitle">compare models</span>
-        <button class="btn ghost modal-close" id="compareCloseBtn" aria-label="Close compare">×</button>
+        <span id="compareTitle">Compare models</span>
+        <button class="btn ghost modal-close" id="compareCloseBtn" type="button" title="Close" aria-label="Close compare"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
       </div>
       <div class="compare-body">
         <form class="compare-prompt-row" id="compareForm">
-          <input id="comparePromptInput" type="text" placeholder="one prompt, sent to every column…" autocomplete="off" spellcheck="false" />
-          <button class="btn send" type="submit" id="compareSendBtn">send</button>
+          <input id="comparePromptInput" type="text" placeholder="One prompt, sent to every column…" aria-label="Prompt to send to every column" autocomplete="off" spellcheck="false" />
+          <button class="btn send" type="submit" id="compareSendBtn">Send</button>
         </form>
         <div class="compare-columns" id="compareColumns"></div>
-        <button class="btn ghost" type="button" id="compareAddColumnBtn">+ add model</button>
+        <button class="btn ghost" type="button" id="compareAddColumnBtn"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg><span>Add model</span></button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="shortcutsModal" hidden>
+    <div class="modal shortcuts-modal" role="dialog" aria-modal="true" aria-labelledby="shortcutsTitle">
+      <div class="modal-header">
+        <span id="shortcutsTitle">Keyboard shortcuts</span>
+        <button class="btn ghost modal-close" id="shortcutsCloseBtn" type="button" title="Close" aria-label="Close keyboard shortcuts"><svg class="icon" aria-hidden="true"><use href="#i-close"/></svg></button>
+      </div>
+      <div class="modal-body">
+        <ul class="shortcut-list">
+          <li><span>New chat</span><span class="shortcut-keys"><kbd data-mod>Ctrl</kbd><kbd>Shift</kbd><kbd>O</kbd></span></li>
+          <li><span>Focus the message box</span><span class="shortcut-keys"><kbd>Shift</kbd><kbd>Esc</kbd></span></li>
+          <li><span>Stop the reply</span><span class="shortcut-keys"><kbd>Esc</kbd></span></li>
+          <li><span>Send the message</span><span class="shortcut-keys" id="shortcutSendKeys"><kbd>Enter</kbd></span></li>
+          <li><span>New line</span><span class="shortcut-keys" id="shortcutNewlineKeys"><kbd>Shift</kbd><kbd>Enter</kbd></span></li>
+          <li><span>Command palette</span><span class="shortcut-keys"><kbd data-mod>Ctrl</kbd><kbd>K</kbd></span></li>
+          <li><span>Toggle the sidebar</span><span class="shortcut-keys"><kbd data-mod>Ctrl</kbd><kbd>Shift</kbd><kbd>S</kbd></span></li>
+          <li><span>Copy the last reply</span><span class="shortcut-keys"><kbd data-mod>Ctrl</kbd><kbd>Shift</kbd><kbd>C</kbd></span></li>
+          <li><span>Copy the last code block</span><span class="shortcut-keys"><kbd data-mod>Ctrl</kbd><kbd>Shift</kbd><kbd>;</kbd></span></li>
+          <li><span>Show these shortcuts</span><span class="shortcut-keys"><kbd data-mod>Ctrl</kbd><kbd>/</kbd></span></li>
+          <li><span>Prompts, knowledge, model (in the message box)</span><span class="shortcut-keys"><kbd>/</kbd><kbd>#</kbd><kbd>@</kbd></span></li>
+        </ul>
       </div>
     </div>
   </div>
 
   <div class="palette-overlay" id="paletteOverlay" hidden>
     <div class="palette-box" role="dialog" aria-modal="true" aria-label="Command palette">
-      <input id="paletteInput" type="text" placeholder="type a command…" autocomplete="off" spellcheck="false" />
-      <ul id="paletteList"></ul>
+      <input id="paletteInput" type="text" placeholder="Type a command…" aria-label="Command" role="combobox" aria-expanded="true" aria-controls="paletteList" autocomplete="off" spellcheck="false" />
+      <ul id="paletteList" role="listbox" aria-label="Commands"></ul>
     </div>
   </div>
 
   <div class="context-menu" id="chatMenu" role="menu" hidden></div>
+  <div class="toasts" id="toasts"></div>
 
+  <script src="vendor/marked.min.js"></script>
+  <script src="vendor/highlight.min.js"></script>
+  <script src="vendor/purify.min.js"></script>
   <script src="streamingSegmenter.js"></script>
   <script src="streamingRenderer.js"></script>
   <script src="providers.js"></script>
+  <script src="uiLogic.js"></script>
   <script src="app.js"></script>
   <script src="workspace.js"></script>
 </body>

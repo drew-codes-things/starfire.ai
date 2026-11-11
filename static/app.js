@@ -1,5 +1,21 @@
 'use strict';
 
+const COPY_FEEDBACK_MS = 1200;
+const CONTROLS_SAVE_DEBOUNCE_MS = 600;
+const NEAR_BOTTOM_PX = 40;
+
+function icon(name, extraClass = '') {
+  return `<svg class="icon${extraClass ? ' ' + extraClass : ''}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+}
+
+function showAccount(user) {
+  const name = user.name || user.email;
+  document.getElementById('accountName').textContent = name;
+  document.getElementById('accountSub').textContent = user.role === 'admin' ? `${user.email} · admin` : user.email;
+  document.getElementById('accountAvatar').textContent = name.trim().charAt(0) || 's';
+  document.getElementById('passwordFormUser').value = user.email;
+}
+
 const _rawFetch = window.fetch.bind(window);
 window.fetch = async (input, init = {}) => {
   const method = (init.method || 'GET').toUpperCase();
@@ -37,6 +53,7 @@ async function setUpLogout() {
   if (!response.ok) return;
   const user = await response.json();
   applyUserScope(user);
+  showAccount(user);
   button.title = `Logged in as ${user.email}`;
   button.hidden = false;
   button.addEventListener('click', async () => {
@@ -72,6 +89,7 @@ function setUpPasswordChange(user) {
       form.reset();
       status.className = 'settings-hint ok';
       status.textContent = 'password changed - other browsers have been logged out';
+      showToast('Password changed');
     } catch (error) {
       status.className = 'settings-hint error';
       status.textContent = `couldn't change it: ${error.message}`;
@@ -118,7 +136,6 @@ const settingsEls = {
   addApiBtn:      $('addApiBtn'),
   apiTestResult:  $('apiTestResult'),
   endpointList:   $('endpointList'),
-  lightModeToggle:$('lightModeToggle'),
   filesystemPath: $('filesystemPath'),
   browseDirBtn: $('browseDirBtn'),
   dirBrowserBox: $('dirBrowserBox'),
@@ -333,7 +350,8 @@ function appendMessageRow(role, idx, modelName, files, media = []) {
   if (role === 'ai') {
     const head = document.createElement('div');
     head.className = 'msg-head';
-    head.innerHTML = `<span class="msg-model">${escapeHtml(modelName || 'assistant')}</span>`;
+    head.innerHTML = '<span class="msg-avatar" aria-hidden="true"><img src="assets/logo.svg" alt="" /></span>' +
+      `<span class="msg-model">${escapeHtml(modelName || 'assistant')}</span>`;
     row.appendChild(head);
   }
   if (files && files.length) {
@@ -363,20 +381,41 @@ function appendMessageRow(role, idx, modelName, files, media = []) {
 }
 
 async function copyToClipboard(btn, text) {
+  if (btn.dataset.copying) return;
+  btn.dataset.copying = '1';
+  const original = btn.innerHTML;
+  const hasLabel = !!btn.querySelector('span');
+  let copied = true;
   try {
     await navigator.clipboard.writeText(text);
-    btn.textContent = 'copied';
   } catch (_) {
-    btn.textContent = 'failed';
+    copied = false;
   }
-  setTimeout(() => { btn.textContent = 'copy'; }, 1200);
+  btn.innerHTML = icon(copied ? 'check' : 'close') + (hasLabel ? `<span>${copied ? 'Copied' : 'Failed'}</span>` : '');
+  showToast(copied ? 'Copied to clipboard' : 'Could not copy to the clipboard', copied ? 'info' : 'error');
+  setTimeout(() => {
+    btn.innerHTML = original;
+    delete btn.dataset.copying;
+  }, COPY_FEEDBACK_MS);
+}
+
+const ACTION_ICONS = {
+  copy: ['copy'], edit: ['pencil'], delete: ['trash'], info: ['info'], listen: ['volume'],
+  '+1': ['thumb'], '-1': ['thumb', 'flip'], continue: ['forward'], regenerate: ['refresh'],
+};
+
+function labelActionButton(btn, label, title) {
+  const [name, extraClass] = ACTION_ICONS[label] || [];
+  btn.innerHTML = name ? icon(name, extraClass) : escapeHtml(label);
+  btn.title = title;
+  btn.setAttribute('aria-label', title);
 }
 
 function addCopyButton(actions, getText) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'line-action-btn';
-  btn.textContent = 'copy';
+  labelActionButton(btn, 'copy', 'Copy');
   btn.onclick = () => copyToClipboard(btn, getText());
   actions.appendChild(btn);
 }
@@ -453,7 +492,7 @@ function decorateCodeBlocks(container, text, checks) {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'code-copy-btn';
-      btn.textContent = 'copy';
+      btn.innerHTML = icon('copy') + '<span>Copy</span>';
       btn.title = 'Copy this code';
       btn.onclick = () => copyToClipboard(btn, code ? code.textContent : pre.textContent);
       head.appendChild(btn);
@@ -547,7 +586,7 @@ function addEditButton(actions, idx) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'line-action-btn';
-  btn.textContent = 'edit';
+  labelActionButton(btn, 'edit', 'Edit and resend');
   btn.onclick = () => startEdit(idx);
   actions.appendChild(btn);
 }
@@ -555,7 +594,10 @@ function addEditButton(actions, idx) {
 function addRegenerateButton(actions, idx) {
 
   const select = document.createElement('select');
-  select.className = 'regen-model-select';
+  els.output.querySelectorAll('.regen-control').forEach(control => control.remove());
+  select.className = 'regen-model-select regen-control';
+  select.title = 'Model to regenerate with';
+  select.setAttribute('aria-label', 'Model to regenerate with');
   for (const m of models) {
     const opt = document.createElement('option');
     opt.value = m.id;
@@ -569,7 +611,8 @@ function addRegenerateButton(actions, idx) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'line-action-btn';
-  btn.textContent = 'regenerate';
+  btn.classList.add('regen-control');
+  labelActionButton(btn, 'regenerate', 'Regenerate with the chosen model');
   btn.onclick = async () => {
     let userIdx = idx - 1;
     while (userIdx >= 0 && messages[userIdx].role !== 'user') userIdx--;
@@ -596,7 +639,7 @@ function addListenButton(actions, getText) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'line-action-btn';
-  btn.textContent = 'listen';
+  labelActionButton(btn, 'listen', 'Read aloud');
   btn.onclick = () => speakText(getText());
   actions.appendChild(btn);
 }
@@ -609,7 +652,38 @@ function diffToHtml(diffText) {
     if (line.startsWith('+')) return `<span class="diff-line-add">${esc}</span>`;
     if (line.startsWith('-')) return `<span class="diff-line-remove">${esc}</span>`;
     return `<span class="diff-line-context">${esc}</span>`;
-  }).join('\n');
+  }).join('');
+}
+
+const openApprovals = new Map();
+
+function trackApproval(pendingId, card) {
+  card.dataset.pendingId = pendingId;
+  openApprovals.set(pendingId, card);
+}
+
+function showOpenApprovals() {
+  if (!openApprovals.size) return;
+  const w = $('welcome');
+  if (w) w.remove();
+  openApprovals.forEach(card => els.output.appendChild(card));
+  els.output.scrollTop = els.output.scrollHeight;
+}
+
+async function restorePendingApprovals() {
+  try {
+    const [shell, edits] = await Promise.all(['/api/pending-shell', '/api/pending-edits'].map(async url => {
+      const r = await fetch(url);
+      return r.ok ? r.json() : {};
+    }));
+    for (const card of pendingApprovalCards(shell.commands, edits.edits)) {
+      if (openApprovals.has(card.id)) continue;
+      if (card.kind === 'shell') renderShellApprovalCard(card.data);
+      else renderDiffCard(JSON.stringify(card.data));
+    }
+  } catch (e) {
+    console.warn('starfire.ai: could not load pending approvals', e);
+  }
 }
 
 function renderDiffCard(resultJson) {
@@ -626,6 +700,7 @@ function renderDiffCard(resultJson) {
     `<pre>${diffToHtml(data.diff || '')}</pre>`;
 
   if (data.staged && data.pending_id) {
+    trackApproval(data.pending_id, card);
     const actionsRow = document.createElement('div');
     actionsRow.className = 'diff-card-actions';
     const approveBtn = document.createElement('button');
@@ -634,6 +709,7 @@ function renderDiffCard(resultJson) {
     rejectBtn.type = 'button'; rejectBtn.className = 'btn ghost'; rejectBtn.textContent = 'reject';
     approveBtn.onclick = async () => {
       approveBtn.disabled = true; rejectBtn.disabled = true;
+      openApprovals.delete(data.pending_id);
       try {
         const r = await fetch(`/api/pending-edits/${data.pending_id}/approve`, { method: 'POST' });
         actionsRow.textContent = r.ok ? 'approved - written to disk' : 'failed to approve';
@@ -641,6 +717,7 @@ function renderDiffCard(resultJson) {
     };
     rejectBtn.onclick = async () => {
       approveBtn.disabled = true; rejectBtn.disabled = true;
+      openApprovals.delete(data.pending_id);
       try {
         await fetch(`/api/pending-edits/${data.pending_id}/reject`, { method: 'POST' });
         actionsRow.textContent = 'rejected - no changes written';
@@ -670,8 +747,10 @@ function renderShellApprovalCard(data) {
   approveBtn.type = 'button'; approveBtn.className = 'btn send'; approveBtn.textContent = 'run it';
   const rejectBtn = document.createElement('button');
   rejectBtn.type = 'button'; rejectBtn.className = 'btn ghost'; rejectBtn.textContent = 'reject';
+  trackApproval(data.pending_id, card);
   const decide = async (approved) => {
     approveBtn.disabled = true; rejectBtn.disabled = true;
+    openApprovals.delete(data.pending_id);
     try {
       const r = await fetch(`/api/pending-shell/${data.pending_id}/${approved ? 'approve' : 'reject'}`, { method: 'POST' });
       actionsRow.textContent = r.ok ? (approved ? 'approved - running…' : 'rejected - not run') : 'that command is no longer waiting';
@@ -784,7 +863,7 @@ function startEdit(idx) {
   autosizeEditTextarea(ta);
   ta.focus();
 
-  cancelBtn.onclick = () => rerenderAll();
+  cancelBtn.onclick = () => rerenderInPlace();
   saveBtn.onclick = async () => {
     const newText = ta.value.trim();
     if (!newText) return;
@@ -893,8 +972,7 @@ function addActionButton(actions, label, title, onClick) {
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'line-action-btn';
-  btn.textContent = label;
-  btn.title = title;
+  labelActionButton(btn, label, title);
   btn.onclick = onClick;
   actions.appendChild(btn);
   return btn;
@@ -912,7 +990,7 @@ function addRatingButtons(actions, idx) {
 function rateMessage(idx, value) {
   if (!messages[idx] || busy) return;
   messages[idx].rating = messages[idx].rating === value ? 0 : value;
-  rerenderAll();
+  rerenderInPlace();
   persistSession();
 }
 
@@ -932,11 +1010,17 @@ function toggleMessageInfo(row, idx) {
   row.appendChild(info);
 }
 
-function deleteMessage(idx) {
+async function deleteMessage(idx) {
   if (busy || !messages[idx]) return;
-  const count = messages[idx].role === 'user' && messages[idx + 1] && messages[idx + 1].role === 'assistant' ? 2 : 1;
+  const target = messages[idx];
+  const count = target.role === 'user' && messages[idx + 1] && messages[idx + 1].role === 'assistant' ? 2 : 1;
+  const ok = await showDialog({
+    title: count === 2 ? 'Delete this message and its reply?' : 'Delete this message?',
+    text: 'This cannot be undone.', okLabel: 'Delete', danger: true,
+  });
+  if (!ok || busy || messages[idx] !== target) return;
   messages.splice(idx, count);
-  rerenderAll();
+  rerenderInPlace();
   persistSession();
 }
 
@@ -959,11 +1043,11 @@ function startEditReply(idx) {
   contentEl.appendChild(controls);
   autosizeEditTextarea(ta);
   ta.focus();
-  cancelBtn.onclick = () => rerenderAll();
+  cancelBtn.onclick = () => rerenderInPlace();
   saveBtn.onclick = () => {
     messages[idx].content = ta.value;
     delete messages[idx].code_checks;
-    rerenderAll();
+    rerenderInPlace();
     persistSession();
   };
 }
@@ -998,7 +1082,7 @@ function addActionButtons(role, row, actions, idx) {
   addActionButton(actions, 'info', 'Model, time and size', () => toggleMessageInfo(row, idx));
   addRatingButtons(actions, idx);
   addActionButton(actions, 'continue', 'Continue this reply', () => continueResponse(idx));
-  addRegenerateButton(actions, idx);
+  if (isLastAssistantMessage(messages, idx)) addRegenerateButton(actions, idx);
   addActionButton(actions, 'delete', 'Delete this reply', () => deleteMessage(idx));
 }
 
@@ -1009,23 +1093,61 @@ function rerenderAll() {
     else if (m.role === 'assistant') renderStaticMessage('ai', m, idx);
   });
   if (!messages.length) renderWelcome();
+  showOpenApprovals();
+}
+
+function rerenderInPlace() {
+  const scrollTop = els.output.scrollTop;
+  const wasNearBottom = els.output.scrollHeight - scrollTop - els.output.clientHeight < NEAR_BOTTOM_PX;
+  rerenderAll();
+  if (!wasNearBottom) els.output.scrollTop = scrollTop;
+}
+
+function welcomeBody() {
+  if (models.length) {
+    const model = currentModel();
+    return '<p class="info-line">Local-first AI chat. How can I help?</p>' +
+      `<p class="welcome-model">${escapeHtml(model ? model.id : '')}</p>`;
+  }
+  if (!document.body.classList.contains('is-admin')) {
+    return '<p class="info-line">No models yet. Ask an admin to add a connection.</p>';
+  }
+  return '<p class="info-line">No models yet. Add Ollama or an API provider to start chatting.</p>' +
+    '<button class="btn send" type="button" id="welcomeConnectBtn">Add a connection</button>';
 }
 
 function renderWelcome() {
-  const model = currentModel();
-  const modelLine = models.length
-    ? `<p class="welcome-model">${escapeHtml(model ? model.id : '')}</p>` +
-      '<p class="info-line">// local-first AI chat · how can I help?</p>'
-    : '<p class="info-line">// no models yet - open settings → connections to add Ollama or an API provider</p>';
   els.output.innerHTML =
     '<div class="welcome" id="welcome">' +
     '<img src="assets/logo.svg" alt="" class="welcome-logo" />' +
-    '<div class="welcome-brand">starfire<span class="dim">.ai</span></div>' +
-    modelLine +
-    '<div class="suggestions" id="suggestions"></div>' +
+    '<h1 class="welcome-brand">starfire<span class="dim">.ai</span></h1>' +
+    welcomeBody() +
     '</div>';
+  const connect = $('welcomeConnectBtn');
+  if (connect) connect.onclick = () => openSettings('providers');
   if (window.renderSuggestions) window.renderSuggestions($('suggestions'));
 }
+
+function showTypingIndicator(modelName) {
+  const el = document.createElement('div');
+  el.className = 'typing';
+  el.setAttribute('role', 'status');
+  el.innerHTML =
+    '<span class="msg-avatar" aria-hidden="true"><img src="assets/logo.svg" alt="" /></span>' +
+    `<span class="sr-only">${escapeHtml(modelName)} is replying</span>` +
+    '<span class="typing-dots" aria-hidden="true"><span></span><span></span><span></span></span>';
+  els.output.appendChild(el);
+  els.output.scrollTop = els.output.scrollHeight;
+  return el;
+}
+
+function setOffline(isOffline) {
+  const banner = $('offlineBanner');
+  if (banner) banner.hidden = !isOffline;
+}
+
+window.addEventListener('offline', () => setOffline(true));
+window.addEventListener('online', () => setOffline(false));
 
 function saveDraft() {
   try { localStorage.setItem('sf_draft_messages', JSON.stringify(messages)); } catch (_) {}
@@ -1052,6 +1174,7 @@ async function persistSession() {
       method: 'PUT', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         messages, endpoint_id: model ? model.endpoint_id : '', model: model ? model.id : '',
+        ...currentChatControls(),
         ...(folderId ? { folder_id: folderId } : {}),
       }),
     });
@@ -1071,6 +1194,7 @@ async function restoreSession() {
       if (r.ok) {
         const session = await r.json();
         messages = session.messages || [];
+        showSessionControls(session);
         selectModel(session.endpoint_id, session.model);
         rerenderAll();
         onChatChanged();
@@ -1131,12 +1255,14 @@ async function loadModels() {
     }
 
     setStatus('ready', els.modelList.value);
+    setOffline(false);
     warmModel(currentModel());
     els.input.disabled   = false;
     els.sendBtn.disabled = false;
     els.input.focus();
   } catch (e) {
     setStatus('error', 'cannot reach starfire backend');
+    setOffline(true);
     printLine('error: ' + e.message, 'err');
   }
 }
@@ -1168,8 +1294,15 @@ async function send(text, overrideModel, extra = {}) {
   messages.push(userMessage);
   const userRow = appendMessageRow('user', userIdx, null, userMessage.files, userMessage.attachments);
   userRow.content.textContent = text;
+  userRow.row.classList.add('fresh');
   addActionButtons('user', userRow.row, userRow.actions, userIdx);
   saveDraft();
+  const sentFromComposer = els.input.value.trim() === text;
+  if (sentFromComposer) {
+    els.input.value = '';
+    els.input.style.height = 'auto';
+  }
+  const typing = showTypingIndicator(model.id);
 
   let aiLine = null;
   let aiActions = null;
@@ -1224,8 +1357,10 @@ async function send(text, overrideModel, extra = {}) {
           if (obj.delta) {
             if (!gotToken) { gotToken = true; setStatus('ready', model.id); }
             if (!aiLine) {
+              typing.remove();
               const created = appendMessageRow('ai', aiIdx, model.id);
               aiLine = created.content; aiActions = created.actions; aiRow = created.row;
+              aiRow.classList.add('fresh');
               aiLine.classList.add('streaming');
               renderer = createStreamRenderer(aiLine, { render: markdownRender });
             }
@@ -1289,6 +1424,10 @@ async function send(text, overrideModel, extra = {}) {
     } else if (!aborted) {
       messages.splice(userIdx, 1);
       rerenderAll();
+      if (sentFromComposer && !els.input.value) {
+        els.input.value = text;
+        els.input.style.height = Math.min(els.input.scrollHeight, COMPOSER_MAX_HEIGHT_PX) + 'px';
+      }
     }
     if (aborted) {
       setStatus('ready', model.id);
@@ -1300,13 +1439,12 @@ async function send(text, overrideModel, extra = {}) {
     }
     if (callModeActive()) setTimeout(() => speakThenListen("Sorry, that didn't work. Try again."), 0);
   } finally {
+    typing.remove();
     busy                   = false;
     abortController        = null;
     els.input.disabled     = false;
     els.sendBtn.disabled   = false;
     els.stopBtn.hidden      = true;
-    els.input.value        = '';
-    els.input.style.height = 'auto';
     els.input.focus();
   }
 }
@@ -1403,6 +1541,7 @@ function exportChat(format = 'md') {
 function clearChat() {
   messages = [];
   currentSessionId = null;
+  showChatControls(defaultChatControls());
   try {
     localStorage.removeItem('sf_current_session');
     localStorage.removeItem('sf_draft_messages');
@@ -1480,38 +1619,43 @@ els.input.addEventListener('input', () => {
 });
 
 try { els.sysPrompt.value = localStorage.getItem('sf_sys') || ''; } catch (_) {}
-els.sysPrompt.addEventListener('input', () => {
-  try { localStorage.setItem('sf_sys', els.sysPrompt.value); } catch (_) {}
-});
+els.sysPrompt.addEventListener('input', () => onChatControlsEdited());
+
+const SETTINGS_TAB_LOADERS = {
+  chats: () => { refreshChatManagement(); },
+  usage: () => { refreshUsage(); },
+  presets: () => { refreshPresetList(); },
+  documents: () => { refreshDocumentList(); },
+  prompts: () => { refreshPromptList(); },
+  tools: () => { refreshMcpServerList(); refreshMcpRepository(); },
+  memory: () => { refreshMemoryList(); },
+  notes: () => { refreshNoteList(); refreshNoteTemplateList(); },
+  automations: () => { refreshTaskEndpointOptions(); refreshTaskList(); refreshTaskRunList(); },
+  email: () => { refreshEmailAccountList(); refreshEmailRules(); },
+  providers: () => { refreshEndpointList(); },
+  localgen: () => { refreshLocalGen(); },
+  hardware: () => { refreshHardware(); refreshOllamaStatus(); },
+  accounts: () => { refreshAccounts(); },
+};
+
+function showSettingsTab(tab) {
+  settingsEls.tabs.forEach(t => {
+    t.classList.toggle('active', t === tab);
+    if (t === tab) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
+  });
+  settingsEls.panels.forEach(p => { p.hidden = p.dataset.panel !== tab.dataset.tab; });
+  const load = SETTINGS_TAB_LOADERS[tab.dataset.tab];
+  if (load) load();
+}
 
 function openSettings(tabName) {
   settingsEls.modal.hidden = false;
   if (isNarrowScreen()) setSidebarOpen(false);
-  if (tabName) {
-    const tab = [...settingsEls.tabs].find(t => t.dataset.tab === tabName);
-    if (tab) tab.click();
-  }
-  refreshEndpointList();
-  refreshMcpServerList();
-  refreshMcpRepository();
-  refreshMemoryList();
-  refreshDocumentList();
-  refreshTaskEndpointOptions();
-  refreshTaskList();
-  refreshTaskRunList();
-  refreshEmailAccountList();
-  refreshEmailRules();
-  refreshNoteList();
-  refreshNoteTemplateList();
+  const wanted = typeof tabName === 'string' ? [...settingsEls.tabs].find(t => t.dataset.tab === tabName) : null;
+  const tab = wanted || [...settingsEls.tabs].find(t => t.classList.contains('active')) || settingsEls.tabs[0];
+  showSettingsTab(tab);
+  tab.focus();
   startNoteReminderTimer();
-  refreshPresetList();
-  refreshUsage();
-  refreshHardware();
-  refreshOllamaStatus();
-  refreshLocalGen();
-  refreshChatManagement();
-  refreshPromptList();
-  refreshAccounts();
 }
 function closeSettings() {
   settingsEls.modal.hidden = true;
@@ -1525,11 +1669,7 @@ settingsEls.modal.addEventListener('click', e => {
 });
 
 settingsEls.tabs.forEach(tab => {
-  tab.addEventListener('click', () => {
-    settingsEls.tabs.forEach(t => t.classList.remove('active'));
-    tab.classList.add('active');
-    settingsEls.panels.forEach(p => { p.hidden = p.dataset.panel !== tab.dataset.tab; });
-  });
+  tab.addEventListener('click', () => showSettingsTab(tab));
 });
 
 async function refreshEndpointList() {
@@ -1547,8 +1687,9 @@ async function refreshEndpointList() {
       li.innerHTML =
         `<span class="endpoint-label">${escapeHtml(ep.label || ep.base_url)}</span>` +
         `<span class="endpoint-meta">${escapeHtml(ep.provider)}</span>` +
-        `<button class="endpoint-remove" title="Remove">×</button>`;
+        `<button class="endpoint-remove" type="button" title="Remove" aria-label="Remove">×</button>`;
       li.querySelector('.endpoint-remove').onclick = async () => {
+        if (!await confirmRemove(ep.label || ep.base_url)) return;
         await fetch('/api/model-endpoints/' + ep.id, { method: 'DELETE' });
         await refreshEndpointList();
         await loadModels();
@@ -1717,12 +1858,13 @@ async function refreshMcpServerList() {
         `<label class="theme-toggle"><input type="checkbox" ${checked} /></label>` +
         `<span class="endpoint-label">${escapeHtml(s.name)}</span>` +
         `<span class="endpoint-meta">${s.transport && s.transport !== 'stdio' ? escapeHtml(s.url) + ' · ' : ''}${s.tool_count} tool(s)${s.connected ? '' : ' · not running'}</span>` +
-        `<button class="endpoint-remove admin-only" title="Remove">×</button>`;
+        `<button class="endpoint-remove admin-only" type="button" title="Remove" aria-label="Remove">×</button>`;
       li.querySelector('input[type="checkbox"]').onchange = e => {
         if (e.target.checked) enabledMcpServers.add(s.id); else enabledMcpServers.delete(s.id);
         saveEnabledMcpServers();
       };
       li.querySelector('.endpoint-remove').onclick = async () => {
+        if (!await confirmRemove(s.name)) return;
         await fetch('/api/mcp/servers/' + s.id, { method: 'DELETE' });
         enabledMcpServers.delete(s.id);
         saveEnabledMcpServers();
@@ -1770,7 +1912,7 @@ async function refreshMcpRepository() {
     const r = await fetch('/api/mcp/repository');
     const { repository = [] } = await r.json();
     mcpRepository = repository;
-    settingsEls.mcpRepoSelect.innerHTML = '<option value="">- choose a server -</option>';
+    settingsEls.mcpRepoSelect.innerHTML = '<option value="">Choose a server</option>';
     for (const entry of repository) {
       const opt = document.createElement('option');
       opt.value = entry.id;
@@ -2058,6 +2200,7 @@ async function openSession(id) {
     currentSessionId = id;
     try { localStorage.setItem('sf_current_session', id); } catch (_) {}
     messages = session.messages || [];
+    showSessionControls(session);
     selectModel(session.endpoint_id, session.model);
     rerenderAll();
     closeSettings();
@@ -2087,7 +2230,7 @@ async function refreshMemoryList() {
         `<label class="theme-toggle" title="pin"><input type="checkbox" ${pinChecked} /></label>` +
         `<span class="endpoint-label">${escapeHtml(m.text)}</span>` +
         `<span class="endpoint-meta">${escapeHtml(m.category)}</span>` +
-        `<button class="endpoint-remove" title="Remove">×</button>`;
+        `<button class="endpoint-remove" type="button" title="Remove" aria-label="Remove">×</button>`;
       li.querySelector('input[type="checkbox"]').onchange = async e => {
         await fetch('/api/memory/' + m.id + '/pin', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -2095,6 +2238,7 @@ async function refreshMemoryList() {
         });
       };
       li.querySelector('.endpoint-remove').onclick = async () => {
+        if (!await confirmRemove('this memory')) return;
         await fetch('/api/memory/' + m.id, { method: 'DELETE' });
         await refreshMemoryList();
       };
@@ -2139,8 +2283,9 @@ async function refreshDocumentList() {
       li.innerHTML =
         `<span class="endpoint-label">${escapeHtml(d.filename)}</span>` +
         `<span class="endpoint-meta">${d.chunk_count} chunk(s)</span>` +
-        `<button class="endpoint-remove" title="Remove">×</button>`;
+        `<button class="endpoint-remove" type="button" title="Remove" aria-label="Remove">×</button>`;
       li.querySelector('.endpoint-remove').onclick = async () => {
+        if (!await confirmRemove(d.filename)) return;
         await fetch('/api/documents/' + d.id, { method: 'DELETE' });
         await refreshDocumentList();
       };
@@ -2201,7 +2346,7 @@ function renderTaskToolCheckboxes() {
     const input = document.createElement('input');
     input.type = 'checkbox'; input.value = id;
     wrap.appendChild(input);
-    wrap.appendChild(document.createTextNode(label));
+    wrap.appendChild(document.createTextNode(sentenceCase(label.replace('⚠️ ', ''))));
     box.appendChild(wrap);
   }
 }
@@ -2225,7 +2370,7 @@ async function refreshTaskList() {
         `<span class="endpoint-meta">${escapeHtml(scheduleLabel)} · ${escapeHtml(t.status)} · next ${t.next_run ? new Date(t.next_run).toLocaleString() : '-'}</span>` +
         `<button class="btn ghost" data-act="toggle">${t.status === 'active' ? 'pause' : 'resume'}</button>` +
         `<button class="btn ghost" data-act="run">run now</button>` +
-        `<button class="endpoint-remove" title="Remove">×</button>`;
+        `<button class="endpoint-remove" type="button" title="Remove" aria-label="Remove">×</button>`;
       li.querySelector('[data-act="toggle"]').onclick = async () => {
         await fetch(`/api/tasks/${t.id}/${t.status === 'active' ? 'pause' : 'resume'}`, { method: 'POST' });
         await refreshTaskList();
@@ -2236,6 +2381,7 @@ async function refreshTaskList() {
         await refreshTaskRunList();
       };
       li.querySelector('.endpoint-remove').onclick = async () => {
+        if (!await confirmRemove('this automation')) return;
         await fetch('/api/tasks/' + t.id, { method: 'DELETE' });
         await refreshTaskList();
       };
@@ -2322,9 +2468,10 @@ async function refreshEmailAccountList() {
         `<span class="endpoint-label">${escapeHtml(a.label)}</span>` +
         `<span class="endpoint-meta">${escapeHtml(a.email_address)}</span>` +
         `<button class="btn ghost" data-act="open">open</button>` +
-        `<button class="endpoint-remove" title="Remove">×</button>`;
+        `<button class="endpoint-remove" type="button" title="Remove" aria-label="Remove">×</button>`;
       li.querySelector('[data-act="open"]').onclick = () => openEmailInbox(a.id);
       li.querySelector('.endpoint-remove').onclick = async () => {
+        if (!await confirmRemove('this email account')) return;
         await fetch('/api/email/accounts/' + a.id, { method: 'DELETE' });
         if (currentEmailAccountId === a.id) { currentEmailAccountId = null; settingsEls.emailInboxCard.hidden = true; }
         await refreshEmailAccountList();
@@ -2534,7 +2681,7 @@ async function refreshEmailRules() {
         `<span class="endpoint-label">${escapeHtml(rule.match_field)} contains "${escapeHtml(rule.match_value)}"</span>` +
         `<span class="endpoint-meta">${escapeHtml(accountLabel)}/${escapeHtml(rule.folder)} &rarr; ${escapeHtml(rule.action)}</span>` +
         `<label class="theme-toggle"><input type="checkbox" ${rule.enabled ? 'checked' : ''} /><span>on</span></label>` +
-        `<button class="endpoint-remove" title="Remove">×</button>`;
+        `<button class="endpoint-remove" type="button" title="Remove" aria-label="Remove">×</button>`;
       li.querySelector('input[type="checkbox"]').onchange = async e => {
         await fetch(`/api/email/rules/${rule.id}`, {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' },
@@ -2542,6 +2689,7 @@ async function refreshEmailRules() {
         });
       };
       li.querySelector('.endpoint-remove').onclick = async () => {
+        if (!await confirmRemove('this rule')) return;
         await fetch('/api/email/rules/' + rule.id, { method: 'DELETE' });
         await refreshEmailRules();
       };
@@ -2598,7 +2746,7 @@ function renderPendingNoteItems() {
   pendingNoteItems.forEach((item, idx) => {
     const li = document.createElement('li');
     li.className = 'note-item-row';
-    li.innerHTML = `<span class="note-item-text">${escapeHtml(item.text)}</span><button class="endpoint-remove" title="Remove">×</button>`;
+    li.innerHTML = `<span class="note-item-text">${escapeHtml(item.text)}</span><button class="endpoint-remove" type="button" title="Remove" aria-label="Remove">×</button>`;
     li.querySelector('.endpoint-remove').onclick = () => {
       pendingNoteItems.splice(idx, 1);
       renderPendingNoteItems();
@@ -2626,7 +2774,7 @@ async function refreshNoteTemplateList() {
     const r = await fetch('/api/note-templates');
     const { templates = [] } = await r.json();
 
-    settingsEls.noteTemplateSelect.innerHTML = '<option value="">- start from a template -</option>';
+    settingsEls.noteTemplateSelect.innerHTML = '<option value="">Start from a template</option>';
     for (const t of templates) {
       const opt = document.createElement('option');
       opt.value = t.id;
@@ -2645,8 +2793,9 @@ async function refreshNoteTemplateList() {
       li.innerHTML =
         `<span class="endpoint-label">${escapeHtml(t.name)}</span>` +
         `<span class="endpoint-meta">${escapeHtml(t.note_type)}</span>` +
-        `<button class="endpoint-remove" title="Remove">×</button>`;
+        `<button class="endpoint-remove" type="button" title="Remove" aria-label="Remove">×</button>`;
       li.querySelector('.endpoint-remove').onclick = async () => {
+        if (!await confirmRemove('this template')) return;
         await fetch('/api/note-templates/' + t.id, { method: 'DELETE' });
         await refreshNoteTemplateList();
       };
@@ -2678,7 +2827,10 @@ settingsEls.useTemplateBtn.onclick = async () => {
 };
 
 settingsEls.saveAsTemplateBtn.onclick = async () => {
-  const name = prompt('Template name?', settingsEls.noteTitle.value.trim() || 'Untitled template');
+  const name = await showDialog({
+    title: 'Save as template', text: 'Name this template.',
+    input: settingsEls.noteTitle.value.trim() || 'Untitled template', okLabel: 'Save',
+  });
   if (!name) return;
   try {
     const r = await fetch('/api/note-templates', {
@@ -2777,14 +2929,14 @@ async function refreshNoteList() {
         aiButton +
         `<button class="btn ghost" data-act="pin">${n.pinned ? 'unpin' : 'pin'}</button>` +
         `<button class="btn ghost" data-act="archive">${n.archived ? 'unarchive' : 'archive'}</button>` +
-        `<button class="endpoint-remove" title="Remove">×</button>`;
+        `<button class="endpoint-remove" type="button" title="Remove" aria-label="Remove">×</button>`;
       li.appendChild(header);
 
       const aiBtn = header.querySelector('[data-act="ai-improve"]');
       if (aiBtn) {
         aiBtn.onclick = async () => {
           const model = currentModel();
-          if (!model) { alert('select a model in the header first'); return; }
+          if (!model) { showToast('Select a model in the header first', 'error'); return; }
           aiBtn.textContent = 'improving…';
           aiBtn.disabled = true;
           try {
@@ -2849,6 +3001,7 @@ async function refreshNoteList() {
         await refreshNoteList();
       };
       header.querySelector('.endpoint-remove').onclick = async () => {
+        if (!await confirmRemove('this note')) return;
         await fetch('/api/notes/' + n.id, { method: 'DELETE' });
         await refreshNoteList();
       };
@@ -2919,9 +3072,10 @@ async function refreshPresetList() {
         `<span class="endpoint-label">${escapeHtml(p.name)}</span>` +
         `<span class="endpoint-meta">${escapeHtml(p.model || 'no model set')}</span>` +
         `<button class="btn ghost" data-act="apply">apply</button>` +
-        `<button class="endpoint-remove" title="Remove">×</button>`;
+        `<button class="endpoint-remove" type="button" title="Remove" aria-label="Remove">×</button>`;
       li.querySelector('[data-act="apply"]').onclick = () => applyPreset(p);
       li.querySelector('.endpoint-remove').onclick = async () => {
+        if (!await confirmRemove('this preset')) return;
         await fetch('/api/presets/' + p.id, { method: 'DELETE' });
         await refreshPresetList();
       };
@@ -2958,7 +3112,7 @@ settingsEls.savePresetBtn.onclick = async () => {
 
 function applyPreset(p) {
   els.sysPrompt.value = p.system_prompt || '';
-  try { localStorage.setItem('sf_sys', els.sysPrompt.value); } catch (_) {}
+  onChatControlsEdited();
   if (p.model) {
     const opt = [...els.modelList.options].find(o => o.value === p.model && o.dataset.endpointId === p.endpoint_id);
     if (opt) els.modelList.value = opt.value;
@@ -3116,7 +3270,7 @@ async function refreshComfyUI() {
       : 'not connected';
     settingsEls.comfyStatus.className = 'settings-hint ' + (status.connected ? 'ok' : '');
 
-    settingsEls.comfyCheckpointSelect.innerHTML = '<option value="">- default checkpoint -</option>';
+    settingsEls.comfyCheckpointSelect.innerHTML = '<option value="">Default checkpoint</option>';
     for (const name of status.checkpoints) {
       const opt = document.createElement('option');
       opt.value = name; opt.textContent = name;
@@ -3287,8 +3441,9 @@ async function refreshWorkflowList() {
       li.innerHTML =
         `<span class="endpoint-label">${escapeHtml(w.name)}</span>` +
         `<span class="endpoint-meta">node ${escapeHtml(w.prompt_node_id)} / ${escapeHtml(w.prompt_input_key)}</span>` +
-        `<button class="endpoint-remove" title="Remove">×</button>`;
+        `<button class="endpoint-remove" type="button" title="Remove" aria-label="Remove">×</button>`;
       li.querySelector('.endpoint-remove').onclick = async () => {
+        if (!await confirmRemove('this workflow')) return;
         await fetch('/api/custom-workflows/' + w.id, { method: 'DELETE' });
         await refreshWorkflowList();
       };
@@ -3347,7 +3502,12 @@ settingsEls.downloadBackupBtn.onclick = () => {
 settingsEls.restoreBackupBtn.onclick = async () => {
   const file = settingsEls.restoreFile.files[0];
   if (!file) return;
-  if (!confirm('This overwrites your current data with the contents of this backup. This cannot be undone. Continue?')) return;
+  const confirmed = await showDialog({
+    title: 'Restore this backup?',
+    text: 'This overwrites your current data with the contents of this backup. This cannot be undone.',
+    okLabel: 'Restore', danger: true,
+  });
+  if (!confirmed) return;
   settingsEls.restoreResult.textContent = 'restoring…';
   settingsEls.restoreResult.className = 'settings-hint';
   try {
@@ -3400,7 +3560,7 @@ async function refreshAccounts() {
         `<select class="account-role"><option value="user">user</option><option value="admin">admin</option></select>` +
         `<button class="btn ghost account-reset" type="button">reset password</button>` +
         `<button class="btn ghost account-toggle" type="button">${user.disabled ? 'enable' : 'disable'}</button>` +
-        `<button class="endpoint-remove" title="Delete this account and its data">×</button>`;
+        `<button class="endpoint-remove" type="button" title="Delete this account and its data" aria-label="Delete this account and its data">×</button>`;
       const role = li.querySelector('.account-role');
       role.value = user.role;
       role.disabled = isSelf;
@@ -3451,7 +3611,7 @@ if (accountEls.form) {
     try {
       const user = await accountRequest('POST', '/api/auth/users', body);
       accountEls.form.reset();
-      setAccountResult(`added ${user.email} (${user.role}) - send them the password; they can change it under Settings → Interface`, 'ok');
+      setAccountResult(`added ${user.email} (${user.role}) - send them the password; they can change it under Settings → Account`, 'ok');
       refreshAccounts();
     } catch (e) {
       setAccountResult(e.message, 'error');
@@ -3567,12 +3727,15 @@ function buildPaletteActions() {
     { label: 'New folder', run: createFolder },
     { label: 'Open settings', run: openSettings },
     { label: 'Compare models', run: openCompare },
-    { label: 'Toggle light/dark theme', run: () => settingsEls.lightModeToggle.click() },
+    { label: 'Toggle light/dark theme', run: toggleLightDark },
+    { label: 'Keyboard shortcuts', run: openShortcuts },
   ];
+  const isAdmin = document.body.classList.contains('is-admin');
   for (const tab of document.querySelectorAll('.settings-tab')) {
+    if (tab.classList.contains('admin-only') && !isAdmin) continue;
     paletteActions.push({
       label: 'Settings → ' + tab.textContent,
-      run: () => { openSettings(); tab.click(); },
+      run: () => openSettings(tab.dataset.tab),
     });
   }
 }
@@ -3585,10 +3748,13 @@ function renderPalette(filter) {
   matches.forEach((action, idx) => {
     const li = document.createElement('li');
     li.textContent = action.label;
+    li.setAttribute('role', 'option');
+    li.setAttribute('aria-selected', String(idx === 0));
     if (idx === 0) li.classList.add('active');
     li.onclick = () => runPaletteAction(action);
     paletteEls.list.appendChild(li);
   });
+  if (!matches.length) paletteEls.list.innerHTML = '<li class="palette-empty">No matching commands</li>';
   return matches;
 }
 
@@ -3628,12 +3794,21 @@ paletteEls.input.addEventListener('keydown', e => {
   } else {
     return;
   }
-  items.forEach((li, idx) => li.classList.toggle('active', idx === paletteActiveIndex));
+  items.forEach((li, idx) => {
+    li.classList.toggle('active', idx === paletteActiveIndex);
+    li.setAttribute('aria-selected', String(idx === paletteActiveIndex));
+  });
+  if (items[paletteActiveIndex]) items[paletteActiveIndex].scrollIntoView({ block: 'nearest' });
 });
 
 function closeTopmostLayer() {
   if (!paletteEls.overlay.hidden) { closePalette(); return true; }
   if (!$('dialogModal').hidden) return false;
+  if (document.querySelector('.menu:not([hidden]), .model-menu:not([hidden]), .context-menu:not([hidden])')) {
+    closeAllMenus();
+    return true;
+  }
+  if (!$('shortcutsModal').hidden) { closeShortcuts(); return true; }
   if (!compareEls.modal.hidden) { closeCompare(); return true; }
   if (!archivedEls.modal.hidden) { archivedEls.modal.hidden = true; return true; }
   if (!settingsEls.modal.hidden) { closeSettings(); return true; }
@@ -3646,9 +3821,79 @@ document.addEventListener('keydown', e => {
   if ((e.metaKey || e.ctrlKey) && key === 'k') {
     e.preventDefault();
     if (paletteEls.overlay.hidden) openPalette(); else closePalette();
-  } else if (key === 'escape' && !e.defaultPrevented) {
-    if (closeTopmostLayer()) e.preventDefault();
+  } else if ((e.metaKey || e.ctrlKey) && key === '/') {
+    e.preventDefault();
+    if ($('shortcutsModal').hidden) openShortcuts(); else closeShortcuts();
+  } else if (key === 'escape' && !e.shiftKey && !e.defaultPrevented) {
+    if (closeTopmostLayer()) {
+      e.preventDefault();
+    } else if (busy && abortController && $('dialogModal').hidden) {
+      e.preventDefault();
+      abortController.abort();
+    }
   }
+});
+
+const LAYER_SELECTOR = '.palette-overlay:not([hidden]), .modal-overlay:not([hidden])';
+const FOCUSABLE_SELECTOR = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+const LAYER_ORDER = ['settingsModal', 'archivedModal', 'compareModal', 'shortcutsModal', 'dialogModal', 'paletteOverlay'];
+let focusBeforeLayers = null;
+const focusInsideLayer = {};
+
+function topLayer() {
+  const open = [...document.querySelectorAll(LAYER_SELECTOR)];
+  open.sort((x, y) => LAYER_ORDER.indexOf(x.id) - LAYER_ORDER.indexOf(y.id));
+  return open[open.length - 1] || null;
+}
+
+function focusableIn(root) {
+  return [...root.querySelectorAll(FOCUSABLE_SELECTOR)].filter(el => !el.disabled && el.offsetParent !== null);
+}
+
+document.addEventListener('focusin', e => {
+  const layer = e.target.closest ? e.target.closest('.palette-overlay, .modal-overlay') : null;
+  if (layer) focusInsideLayer[layer.id] = e.target;
+  else focusBeforeLayers = e.target;
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Tab') return;
+  const layer = topLayer();
+  if (!layer) return;
+  const items = focusableIn(layer);
+  if (!items.length) return;
+  const first = items[0];
+  const last = items[items.length - 1];
+  if (!layer.contains(document.activeElement)) {
+    e.preventDefault();
+    first.focus();
+  } else if (e.shiftKey && document.activeElement === first) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && document.activeElement === last) {
+    e.preventDefault();
+    first.focus();
+  }
+});
+
+function returnFocusAfterClose(closed) {
+  delete focusInsideLayer[closed.id];
+  if (closed.contains(document.activeElement) === false && document.activeElement !== document.body) return;
+  const layer = topLayer();
+  const remembered = layer ? (focusInsideLayer[layer.id] || focusableIn(layer)[0]) : focusBeforeLayers;
+  const isVisible = el => !!el && el.isConnected && el.offsetParent !== null;
+  const menuOpener = remembered && remembered.closest ? remembered.closest('.menu-wrap') : null;
+  const target = [remembered, menuOpener && menuOpener.querySelector('button'), els.input].find(isVisible);
+  if (target) target.focus();
+}
+
+const layerObserver = new MutationObserver(records => {
+  for (const record of records) {
+    if (record.target.hidden) returnFocusAfterClose(record.target);
+  }
+});
+document.querySelectorAll('.palette-overlay, .modal-overlay').forEach(layer => {
+  layerObserver.observe(layer, { attributes: true, attributeFilter: ['hidden'] });
 });
 
 const SpeechRecognitionCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -3811,18 +4056,57 @@ async function showFollowUps(row, model) {
   }
 }
 
-function applyTheme(light) {
-  document.documentElement.classList.toggle('light', light);
+const THEME_FADE_MS = 260;
+const systemPrefersLight = window.matchMedia('(prefers-color-scheme: light)');
+const themeInputs = document.querySelectorAll('input[name="themeChoice"]');
+
+function storedTheme() {
+  try {
+    return themeChoiceFrom(key => localStorage.getItem(key));
+  } catch (_) {
+    return 'dark';
+  }
 }
-let storedLight = false;
-try { storedLight = localStorage.getItem('sf_light') === '1'; } catch (_) {}
-applyTheme(storedLight);
-settingsEls.lightModeToggle.checked = storedLight;
-settingsEls.lightModeToggle.addEventListener('change', () => {
-  applyTheme(settingsEls.lightModeToggle.checked);
-  try { localStorage.setItem('sf_light', settingsEls.lightModeToggle.checked ? '1' : '0'); } catch (_) {}
+
+function isLightTheme(choice) {
+  return themeIsLight(choice, systemPrefersLight.matches);
+}
+
+function applyTheme(choice, animate = false) {
+  const root = document.documentElement;
+  if (animate) {
+    root.classList.add('theme-fade');
+    setTimeout(() => root.classList.remove('theme-fade'), THEME_FADE_MS);
+  }
+  root.classList.toggle('light', isLightTheme(choice));
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', getComputedStyle(root).getPropertyValue('--bg').trim());
+  themeInputs.forEach(input => { input.checked = input.value === choice; });
+}
+
+function setTheme(choice) {
+  try {
+    localStorage.setItem('sf_theme', choice);
+    localStorage.setItem('sf_light', choice === 'light' ? '1' : '0');
+  } catch (_) {}
+  applyTheme(choice, true);
+}
+
+function toggleLightDark() {
+  setTheme(isLightTheme(storedTheme()) ? 'dark' : 'light');
+}
+
+applyTheme(storedTheme());
+themeInputs.forEach(input => {
+  input.addEventListener('change', () => { if (input.checked) setTheme(input.value); });
+});
+systemPrefersLight.addEventListener('change', () => {
+  if (storedTheme() === 'system') applyTheme('system', true);
 });
 
-loadAppConfig().then(() => loadModels()).then(() => { restoreSession(); checkModelToolCapability(); });
+loadAppConfig().then(() => loadModels()).then(() => restoreSession()).then(() => {
+  checkModelToolCapability();
+  restorePendingApprovals();
+});
 
 setUpLogout().catch(error => console.error('starfire.ai: could not check the login', error));

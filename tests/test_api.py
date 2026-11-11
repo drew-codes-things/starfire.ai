@@ -194,3 +194,64 @@ def test_mcp_server_add_validates_remote_urls(client, monkeypatch):
     listed = client.get("/api/mcp/servers").json()["servers"][0]
     assert listed["transport"] == "http" and listed["url"] == "http://localhost:3001/mcp"
     assert "headers" not in listed
+
+
+def test_chat_controls_are_saved_with_the_chat(client):
+    session_id = client.post("/api/chat/sessions", json={"title": "Tuned chat"}).json()["id"]
+    untouched = client.get(f"/api/chat/sessions/{session_id}").json()
+    assert untouched["system_prompt"] is None and untouched["params"] is None
+
+    controls = {"system_prompt": "Answer in one line.", "params": {"temperature": 0.2, "num_ctx": 4096}}
+    assert client.put(f"/api/chat/sessions/{session_id}", json=controls).status_code == 200
+    saved = client.get(f"/api/chat/sessions/{session_id}").json()
+    assert saved["system_prompt"] == "Answer in one line."
+    assert saved["params"] == {"temperature": 0.2, "num_ctx": 4096}
+
+    assert client.put(f"/api/chat/sessions/{session_id}", json={"title": "Renamed"}).status_code == 200
+    assert client.get(f"/api/chat/sessions/{session_id}").json()["system_prompt"] == "Answer in one line."
+
+    clone = client.post(f"/api/chat/sessions/{session_id}/clone").json()
+    assert client.get(f"/api/chat/sessions/{clone['id']}").json()["params"] == {"temperature": 0.2, "num_ctx": 4096}
+
+    cleared = {"system_prompt": "", "params": {}}
+    assert client.put(f"/api/chat/sessions/{session_id}", json=cleared).status_code == 200
+    emptied = client.get(f"/api/chat/sessions/{session_id}").json()
+    assert emptied["system_prompt"] == "" and emptied["params"] == {}
+
+
+@pytest.mark.parametrize("controls", [
+    {"params": {"temperature": "hot"}},
+    {"params": ["temperature", 1]},
+    {"params": {"x" * 80: 1}},
+    {"params": {f"key{i}": i for i in range(40)}},
+    {"system_prompt": "x" * 40000},
+])
+def test_chat_controls_reject_bad_values(client, controls):
+    session_id = client.post("/api/chat/sessions", json={"title": "Strict chat"}).json()["id"]
+    assert client.put(f"/api/chat/sessions/{session_id}", json=controls).status_code == 422
+    assert client.get(f"/api/chat/sessions/{session_id}").json()["params"] is None
+
+
+def test_exported_chats_keep_their_controls_when_imported(client):
+    export = [{"title": "Tuned", "system_prompt": "Be brief.", "params": {"top_p": 0.5, "bad": "text"},
+               "messages": [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]}]
+    assert client.post("/api/chat/sessions/import", json={"chats": export}).json()["imported"] == 1
+    session_id = client.get("/api/chat/sessions").json()["sessions"][0]["id"]
+    imported = client.get(f"/api/chat/sessions/{session_id}").json()
+    assert imported["system_prompt"] == "Be brief." and imported["params"] == {"top_p": 0.5}
+
+
+def test_pending_approvals_are_listed_for_their_owner_only(client):
+    import file_edit_tool
+    import user_data
+
+    edit_id = file_edit_tool.stage("/tmp/demo.txt", "new", "--- a\n+++ b\n", user_data.current_user_id.get())
+    other_id = file_edit_tool.stage("/tmp/other.txt", "new", "diff", "someone-else")
+    try:
+        listed = client.get("/api/pending-edits").json()["edits"]
+        assert [edit["id"] for edit in listed] == [edit_id]
+        assert listed[0]["path"] == "/tmp/demo.txt" and listed[0]["diff"].startswith("--- a")
+        assert client.get("/api/pending-shell").json() == {"commands": []}
+    finally:
+        file_edit_tool.remove_pending(edit_id, user_data.current_user_id.get())
+        file_edit_tool.remove_pending(other_id, "someone-else")
