@@ -9,62 +9,14 @@ const QR_LIGHT = '#ffffff';
 const QR_DARK = '#000000';
 const FORBIDDEN = 403;
 
-function el(tag, props = {}, ...children) {
-  const node = document.createElement(tag);
-  for (const [key, value] of Object.entries(props)) {
-    if (value === undefined || value === null || value === false) continue;
-    if (key === 'class') node.className = value;
-    else if (key.startsWith('on') && typeof value === 'function') node.addEventListener(key.slice(2), value);
-    else if (key === 'value') node.value = value;
-    else node.setAttribute(key, value === true ? '' : String(value));
-  }
-  for (const child of children.flat()) {
-    if (child === null || child === undefined || child === false) continue;
-    node.append(child instanceof Node ? child : String(child));
-  }
-  return node;
-}
-
 function svg(tag, attributes) {
   const node = document.createElementNS(SVG_NAMESPACE, tag);
   for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, String(value));
   return node;
 }
 
-class RequestFailed extends Error {
-  constructor(status, message) {
-    super(message);
-    this.status = status;
-  }
-}
-
-async function call(method, path, body) {
-  const init = { method, headers: { Accept: 'application/json' } };
-  if (method !== 'GET') init.headers['X-Starfire-Client'] = '1';
-  if (body !== undefined) {
-    init.headers['Content-Type'] = 'application/json';
-    init.body = JSON.stringify(body);
-  }
-  let response;
-  try {
-    response = await fetch(`${API}${path}`, init);
-  } catch {
-    throw new RequestFailed(0, "Couldn't reach starfire. Check the connection and try again.");
-  }
-  if (response.status === 401) {
-    window.location.replace(`/login.html?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
-    throw new RequestFailed(401, 'Log in first.');
-  }
-  const answer = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const detail = typeof answer.detail === 'string' ? answer.detail : `Request failed (${response.status}).`;
-    throw new RequestFailed(response.status, detail);
-  }
-  return answer;
-}
-
-function hint(text, tone) {
-  return el('p', { class: `settings-hint${tone ? ` ${tone}` : ''}`, role: 'status' }, text);
+function call(method, path, body) {
+  return callApi(API, method, path, body);
 }
 
 function qrImage(text, label) {
@@ -119,6 +71,25 @@ function renderApprove(card, code) {
   });
 }
 
+function remoteControlSwitch(card, device) {
+  const toggle = el('input', {
+    type: 'checkbox', class: 'switch', checked: Boolean(device.remote_control),
+    'aria-label': `Let ${device.name || 'this device'} control Arty CLI`,
+  });
+  toggle.addEventListener('change', async () => {
+    toggle.disabled = true;
+    try {
+      await call('POST', `/${encodeURIComponent(device.id)}/remote-control`, { allow: toggle.checked });
+    } catch (error) {
+      toggle.checked = !toggle.checked;
+      card.append(hint(error.message, 'error'));
+    } finally {
+      toggle.disabled = false;
+    }
+  });
+  return el('label', { class: 'arty-remote-switch', title: 'Can follow and steer Arty CLI sessions' }, toggle, 'Arty CLI');
+}
+
 async function renderDevices(card) {
   const list = el('ul', { class: 'arty-device-list' });
   card.replaceChildren(el('h3', {}, 'Approved devices'), list);
@@ -130,6 +101,7 @@ async function renderDevices(card) {
     }
     list.replaceChildren(...devices.map((device) => el('li', {},
       el('span', { class: 'grow' }, deviceLine(device, navigator.language)),
+      remoteControlSwitch(card, device),
       twoStep('Turn off', 'Tap again to turn off', async () => {
         try {
           await call('DELETE', `/${encodeURIComponent(device.id)}`);

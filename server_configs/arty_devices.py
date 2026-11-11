@@ -40,6 +40,10 @@ class KeyBody(BaseModel):
     name: str = Field(min_length=1, max_length=MAX_NAME_CHARS)
 
 
+class RemoteControlBody(BaseModel):
+    allow: StrictBool
+
+
 def normalised_code(raw: str) -> str:
     letters = SEPARATORS.sub("", str(raw or "")).upper()
     if not CODE_LETTERS.fullmatch(letters):
@@ -84,11 +88,12 @@ def brain_message(response: httpx.Response) -> str:
     return message if isinstance(message, str) else ""
 
 
-async def ask_brain(method: str, path: str, json_body: dict | None = None, params: dict | None = None) -> dict:
+async def ask_brain(method: str, path: str, json_body: dict | None = None, params: dict | None = None,
+                    timeout: float = BRAIN_TIMEOUT_SECONDS, passed_on: frozenset[int] = frozenset(PASSED_ON)) -> dict:
     key = brain_key()
     address = brain_address()
     try:
-        async with httpx.AsyncClient(timeout=BRAIN_TIMEOUT_SECONDS, transport=brain_transport) as client:
+        async with httpx.AsyncClient(timeout=timeout, transport=brain_transport) as client:
             response = await client.request(method, f"{address.removesuffix(API_SUFFIX)}{path}", json=json_body,
                                             params=params, headers={"Authorization": f"Bearer {key}"})
     except httpx.HTTPError as error:
@@ -96,7 +101,7 @@ async def ask_brain(method: str, path: str, json_body: dict | None = None, param
         raise HTTPException(502, f"Arty isn't answering at {address}. Check it's running.") from error
     if response.status_code in REFUSED:
         raise HTTPException(502, f"Arty refused starfire's key. {NO_KEY}")
-    if response.status_code in PASSED_ON:
+    if response.status_code in passed_on:
         raise HTTPException(response.status_code, brain_message(response) or CODE_RAN_OUT)
     if response.status_code >= 400:
         raise HTTPException(502, f"Arty answered {response.status_code}: {brain_message(response) or 'no details'}")
@@ -153,6 +158,13 @@ async def list_devices(request: Request):
 async def turn_off(request: Request, device_id: int):
     require_admin(request)
     await ask_brain("DELETE", f"{API_SUFFIX}/devices/{device_id}")
+    return {"ok": True}
+
+
+@router.post("/{device_id}/remote-control")
+async def switch_remote_control(request: Request, device_id: int, body: RemoteControlBody):
+    require_admin(request)
+    await ask_brain("POST", f"{API_SUFFIX}/devices/{device_id}/remote-control", json_body={"allow": body.allow})
     return {"ok": True}
 
 

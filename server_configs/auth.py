@@ -60,7 +60,7 @@ def _now_iso() -> str:
 ADMIN_ONLY_PREFIXES = ("/api/model-endpoints", "/api/mcp/servers", "/api/comfyui", "/api/piper",
                        "/api/custom-workflows", "/api/hardware", "/api/restore", "/api/auth/users")
 ADMIN_ONLY_PATHS = frozenset({"/api/backup"})
-ADMIN_ONLY_FOR_EVERY_METHOD = ("/api/arty-devices",)
+ADMIN_ONLY_FOR_EVERY_METHOD = ("/api/arty-devices", "/api/arty-cli")
 READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 

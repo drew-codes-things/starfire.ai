@@ -462,6 +462,7 @@ html.light .topbar-logo, html.light .welcome-logo, html.light .login-logo, html.
   transition: background-color var(--dur) var(--ease);
 }
 .sidebar-link:hover, .new-chat-btn:hover { background: var(--hover); }
+a.sidebar-link { text-decoration: none; }
 .sidebar-link .icon, .new-chat-btn .icon { color: var(--muted); }
 .new-chat-btn { font-weight: 500; }
 
@@ -1591,6 +1592,18 @@ body.login-page {
 .arty-qr-slot { display: grid; place-items: center; margin: var(--s-3) 0; }
 .arty-qr { width: min(240px, 70vw); height: auto; border-radius: var(--r-lg); }
 .arty-back { margin-top: var(--s-5); font-size: var(--fs-sm); }
+.arty-remote-switch { display: inline-flex; align-items: center; gap: var(--s-2); color: var(--muted); font-size: var(--fs-xs); white-space: nowrap; }
+.arty-cli-card { max-width: 760px; }
+.arty-cli-transcript { display: flex; flex-direction: column; margin: var(--s-4) 0; }
+.arty-cli-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.arty-cli-note { margin: 0 0 var(--s-3); color: var(--muted); font-size: var(--fs-sm); text-align: center; }
+.arty-cli-tool { margin: 0 0 var(--s-3); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--bg-sunken); overflow: hidden; }
+.arty-cli-tool-name { display: block; padding: var(--s-1) var(--s-3); border-bottom: 1px solid var(--line); color: var(--muted); font-family: var(--mono); font-size: var(--fs-xs); }
+.arty-cli-tool pre { max-height: 240px; margin: 0; padding: var(--s-2) var(--s-3); overflow: auto; font-family: var(--mono); font-size: var(--fs-xs); white-space: pre-wrap; overflow-wrap: anywhere; }
+.arty-cli-permission { border-color: var(--accent); }
+.arty-cli-composer { display: flex; flex-direction: column; gap: var(--s-2); margin-top: var(--s-3); }
+.arty-cli-composer textarea { width: 100%; resize: vertical; }
+.arty-cli-badge { color: var(--accent); font-size: var(--fs-xs); white-space: nowrap; }
 
 .own-tools-only { display: none; }
 body.own-tools .own-tools-only { display: block; }
