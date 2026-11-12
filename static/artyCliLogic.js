@@ -46,10 +46,16 @@ function openRequests(waiting, events) {
   return [...open.values()];
 }
 
+const FIRST_POLL = Object.freeze({ after: 0, wait: 0 });
+
+function nextPoll(previous, read, waitSeconds) {
+  return { after: Number(read?.next) || previous.after, wait: waitSeconds };
+}
+
 function isSessionId(value) {
   return SESSION_ID.test(String(value ?? ''));
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { sessionLine, eventView, permissionText, openRequests, isSessionId };
+  module.exports = { sessionLine, eventView, permissionText, openRequests, FIRST_POLL, nextPoll, isSessionId };
 }

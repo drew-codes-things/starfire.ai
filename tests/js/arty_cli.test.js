@@ -45,3 +45,10 @@ test('only real session ids are used in addresses', () => {
   assert.equal(logic.isSessionId('../devices'), false);
   assert.equal(logic.isSessionId('0123456789ABCDEF'), false);
 });
+
+test('after the first read every poll waits, even before the session has any events', () => {
+  assert.deepEqual(logic.FIRST_POLL, { after: 0, wait: 0 });
+  assert.deepEqual(logic.nextPoll(logic.FIRST_POLL, { next: 0 }, 20), { after: 0, wait: 20 });
+  assert.deepEqual(logic.nextPoll({ after: 4, wait: 20 }, { next: 7 }, 20), { after: 7, wait: 20 });
+  assert.deepEqual(logic.nextPoll({ after: 4, wait: 20 }, {}, 20), { after: 4, wait: 20 });
+});

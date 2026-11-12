@@ -108,7 +108,7 @@ async function followSession(page, sessionId, isCurrent) {
   const form = composer(sessionId, problems);
   const back = el('button', { type: 'button', class: 'btn ghost', onclick: () => openSession(null) }, 'All sessions');
   page.replaceChildren(el('div', { class: 'settings-row' }, back), title, transcript, waiting, problems, form);
-  let after = 0;
+  let poll = FIRST_POLL;
   let pendingWaiting = [];
   const seen = [];
   const showWaiting = () => {
@@ -117,7 +117,7 @@ async function followSession(page, sessionId, isCurrent) {
   while (isCurrent()) {
     let read;
     try {
-      read = await call('GET', `/sessions/${sessionId}/events?after=${after}&wait=${after ? WAIT_SECONDS : 0}`);
+      read = await call('GET', `/sessions/${sessionId}/events?after=${poll.after}&wait=${poll.wait}`);
     } catch (error) {
       if (ENDED_STATUSES.has(error.status)) {
         title.textContent = 'This session has ended.';
@@ -132,15 +132,15 @@ async function followSession(page, sessionId, isCurrent) {
     problems.replaceChildren();
     if (read.session) {
       title.textContent = sessionLine(read.session);
-      if (!after) pendingWaiting = read.session.waiting_for || [];
+      if (poll === FIRST_POLL) pendingWaiting = read.session.waiting_for || [];
     }
-    if (read.missed && after) transcript.append(el('p', { class: 'arty-cli-note' }, 'Some older lines were dropped.'));
+    if (read.missed && poll.after) transcript.append(el('p', { class: 'arty-cli-note' }, 'Some older lines were dropped.'));
     for (const event of read.events || []) {
       seen.push(event);
       const view = eventView(event);
       if (view) transcript.append(eventLine(view));
     }
-    after = Number(read.next) || after;
+    poll = nextPoll(poll, read, WAIT_SECONDS);
     showWaiting();
     transcript.lastElementChild?.scrollIntoView({ block: 'end' });
     if (read.ended) {
