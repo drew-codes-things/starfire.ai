@@ -99,3 +99,60 @@ def test_tool_context_only_allows_host_tools_for_active_admins(monkeypatch, role
     with user_data.run_as("someone-else"):
         assert routes._tool_context().may_use_host_tools is False
     assert routes._tool_context().may_use_host_tools is False
+
+
+class FakeMcpManager:
+    def __init__(self):
+        self.calls = []
+
+    def get_all_openai_schemas(self, enabled_ids):
+        return [{"type": "function", "function": {"name": f"mcp__{server_id}__write_file", "parameters": {}}}
+                for server_id in sorted(enabled_ids)]
+
+    async def call_tool(self, qualified_name, arguments):
+        self.calls.append(qualified_name)
+        return "written on the host"
+
+
+def run_one_tool_call(monkeypatch, may_use_host_tools, enabled_server_ids, tool_name):
+    import agent_loop
+
+    manager = FakeMcpManager()
+    offered_tools = []
+    replies = iter([("tool_calls", [{"id": "c1", "name": tool_name, "arguments": {}}]), ("delta", "finished")])
+
+    async def fake_stream(base_url, api_key, model, messages, system, options, tools=None, **kwargs):
+        offered_tools.append([tool["function"]["name"] for tool in tools or []])
+        yield next(replies)
+
+    monkeypatch.setattr(agent_loop, "mcp_manager", manager)
+    monkeypatch.setattr(agent_loop, "stream_chat_once", fake_stream)
+
+    async def collect():
+        return [chunk async for chunk in agent_loop.run_chat_with_tools(
+            "http://model", None, "m", [{"role": "user", "content": "write it"}], None, None,
+            enabled_server_ids, set(), context(may_use_host_tools))]
+
+    events = [json.loads(chunk.decode()[len("data:"):]) for chunk in asyncio.run(collect())]
+    results = [event["tool_result"]["result"] for event in events if "tool_result" in event]
+    return manager.calls, offered_tools[0], results
+
+
+def test_accounts_that_are_not_admins_cannot_use_mcp_servers(monkeypatch):
+    calls, offered, results = run_one_tool_call(monkeypatch, False, {"fs"}, "mcp__fs__write_file")
+    assert calls == []
+    assert offered == []
+    assert results[0].startswith("error: only an admin account can use MCP server tools")
+
+
+def test_admins_can_use_the_mcp_servers_they_enabled(monkeypatch):
+    calls, offered, results = run_one_tool_call(monkeypatch, True, {"fs"}, "mcp__fs__write_file")
+    assert offered == ["mcp__fs__write_file"]
+    assert calls == ["mcp__fs__write_file"]
+    assert results == ["written on the host"]
+
+
+def test_mcp_servers_that_were_not_enabled_for_the_chat_are_refused(monkeypatch):
+    calls, _, results = run_one_tool_call(monkeypatch, True, {"fs"}, "mcp__github__write_file")
+    assert calls == []
+    assert results[0].startswith("error: the MCP server github is not enabled for this chat")

@@ -11,7 +11,8 @@ async def run_chat_with_tools(base_url: str, api_key: str | None, model: str, me
                                system: str | None, options: dict | None, enabled_server_ids: set[str],
                                enabled_builtin_tools: set[str], ctx: "builtin_tools.ToolContext",
                                max_tools: int | None = None):
-    tools = builtin_tools.schemas_for(enabled_builtin_tools) + mcp_manager.get_all_openai_schemas(enabled_server_ids)
+    usable_server_ids = frozenset(enabled_server_ids) if ctx.may_use_host_tools else frozenset()
+    tools = builtin_tools.schemas_for(enabled_builtin_tools) + mcp_manager.get_all_openai_schemas(usable_server_ids)
     if max_tools is not None:
         tools = tools[:max_tools]
     working_messages = list(messages)
@@ -52,7 +53,7 @@ async def run_chat_with_tools(base_url: str, api_key: str | None, model: str, me
         for call in tool_calls:
             yield _sse_line({"tool_start": call["name"]})
             result = ""
-            async for kind, payload in _execute_tool(call, ctx):
+            async for kind, payload in _execute_tool(call, ctx, usable_server_ids):
                 if kind == "event":
                     yield _sse_line(payload)
                 else:
@@ -64,17 +65,31 @@ async def run_chat_with_tools(base_url: str, api_key: str | None, model: str, me
 
     yield _sse_line({"error": "tool-call round limit reached"})
 
-async def _call_tool(call: dict, ctx: "builtin_tools.ToolContext") -> str:
+def _mcp_server_id(tool_name: str) -> str:
+    return tool_name.split("__", 2)[1] if tool_name.count("__") >= 2 else ""
+
+def _refuse_mcp_call(tool_name: str, ctx: "builtin_tools.ToolContext", usable_server_ids: frozenset[str]) -> str | None:
+    if not ctx.may_use_host_tools:
+        return "error: only an admin account can use MCP server tools, because they act on the server"
+    server_id = _mcp_server_id(tool_name)
+    if server_id not in usable_server_ids:
+        return f"error: the MCP server {server_id} is not enabled for this chat"
+    return None
+
+async def _call_tool(call: dict, ctx: "builtin_tools.ToolContext", usable_server_ids: frozenset[str]) -> str:
     try:
         if call["name"].startswith("mcp__"):
+            refusal = _refuse_mcp_call(call["name"], ctx, usable_server_ids)
+            if refusal:
+                return refusal
             return await mcp_manager.call_tool(call["name"], call["arguments"])
         return await builtin_tools.call_builtin_tool(call["name"], call["arguments"], ctx)
     except Exception as e:
         return f"error: {e}"
 
-async def _execute_tool(call: dict, ctx: "builtin_tools.ToolContext"):
+async def _execute_tool(call: dict, ctx: "builtin_tools.ToolContext", usable_server_ids: frozenset[str] = frozenset()):
     events = getattr(ctx, "events", None)
-    task = asyncio.ensure_future(_call_tool(call, ctx))
+    task = asyncio.ensure_future(_call_tool(call, ctx, usable_server_ids))
     if events is None:
         yield "result", await task
         return
