@@ -173,6 +173,7 @@
       <div class="offline-banner" id="offlineBanner" role="status" hidden>You are offline, or starfire cannot be reached. Messages will not send until the connection is back.</div>
       <div class="capability-warning" id="capabilityWarning" role="status" hidden></div>
       <div class="temp-banner" id="tempBanner" hidden>Temporary chat: nothing here is saved to history</div>
+      <div class="temp-banner side-banner" id="sideBanner" hidden><span>Side chat: it sees the chat so far, and nothing here is saved or added to it</span><button class="btn ghost" id="sideChatCloseBtn" type="button">Back to chat</button></div>
 
       <div class="chat-area">
         <div class="output" id="output" role="region" aria-label="Conversation">
@@ -1109,6 +1110,7 @@
           <li><span>Copy the last code block</span><span class="shortcut-keys"><kbd data-mod>Ctrl</kbd><kbd>Shift</kbd><kbd>;</kbd></span></li>
           <li><span>Show these shortcuts</span><span class="shortcut-keys"><kbd data-mod>Ctrl</kbd><kbd>/</kbd></span></li>
           <li><span>Prompts, knowledge, model (in the message box)</span><span class="shortcut-keys"><kbd>/</kbd><kbd>#</kbd><kbd>@</kbd></span></li>
+          <li><span>Side chat about this chat (in the message box)</span><span class="shortcut-keys"><kbd>/side</kbd><kbd>/btw</kbd></span></li>
         </ul>
       </div>
     </div>
@@ -1131,6 +1133,7 @@
   <script src="streamingRenderer.js"></script>
   <script src="providers.js"></script>
   <script src="uiLogic.js"></script>
+  <script src="sideChat.js"></script>
   <script src="app.js"></script>
   <script src="workspace.js"></script>
 </body>

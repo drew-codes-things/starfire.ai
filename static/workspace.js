@@ -112,7 +112,7 @@ function showDialog({ title, text = '', input, okLabel = 'ok', danger = false, a
 
 const tempChatToggle = $('tempChatToggle');
 
-function isTemporaryChat() { return tempChatToggle.checked; }
+function isTemporaryChat() { return tempChatToggle.checked || isSideChatOpen(); }
 
 tempChatToggle.addEventListener('change', () => {
   $('tempBanner').hidden = !tempChatToggle.checked;
@@ -368,7 +368,7 @@ async function cloneChat(session) {
 
 async function archiveChat(session, archived = true) {
   await updateChat(session.id, { archived });
-  if (archived && session.id === currentSessionId) clearChat();
+  if (archived && isChatOpen(session.id)) clearChat();
 }
 
 async function deleteChat(session) {
@@ -383,7 +383,7 @@ async function deleteChat(session) {
   } catch (e) {
     showToast(e.message, 'error');
   }
-  if (session.id === currentSessionId) clearChat();
+  if (isChatOpen(session.id)) clearChat();
   refreshSidebar();
 }
 
@@ -1203,6 +1203,7 @@ let popupItems = [];
 let popupIndex = 0;
 let popupTrigger = null;
 let documentCache = null;
+const SIDE_CHAT_HINT = 'side chat: ask about this chat without adding to it';
 
 function closeComposerPopup() {
   popupEls.box.hidden = true;
@@ -1229,10 +1230,13 @@ async function updateComposerPopup() {
   if (trigger.char === '/') {
     if (!promptCache.length) await loadPrompts();
     popupEls.title.textContent = 'prompts';
-    items = promptCache
+    const sideChatItems = sideChatCommandsMatching(trigger.query)
+      .map(command => ({ key: '/' + command, sub: SIDE_CHAT_HINT, pick: pickSideChatCommand }));
+    const promptItems = promptCache
       .filter(p => p.command.startsWith(trigger.query) || p.title.toLowerCase().includes(trigger.query))
       .map(p => ({ key: '/' + p.command, sub: p.title, pick: () => pickPrompt(p) }));
-    if (!promptCache.length) items = [{ key: 'no prompts yet', sub: 'add some in workspace → prompts', pick: () => openSettings('prompts') }];
+    if (!promptCache.length) promptItems.push({ key: 'no prompts yet', sub: 'add some in workspace → prompts', pick: () => openSettings('prompts') });
+    items = trigger.query ? [...sideChatItems, ...promptItems] : [...promptItems, ...sideChatItems];
   } else if (trigger.char === '#') {
     if (!documentCache) {
       try { ({ documents: documentCache = [] } = await apiJson('/api/documents')); } catch (_) { documentCache = []; }
@@ -1280,6 +1284,13 @@ async function pickPrompt(prompt) {
   closeComposerPopup();
   els.input.value = await expandPromptVariables(prompt.content);
   els.input.dispatchEvent(new Event('input'));
+  els.input.focus();
+}
+
+function pickSideChatCommand() {
+  closeComposerPopup();
+  els.input.value = '';
+  startSideChat('');
   els.input.focus();
 }
 

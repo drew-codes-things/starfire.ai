@@ -725,6 +725,8 @@ html.sidebar-closed #sidebarOpenBtn, html.sidebar-closed .header-new-chat { disp
   text-align: center;
 }
 .temp-banner::first-letter { text-transform: uppercase; }
+.side-banner:not([hidden]) { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--s-2) var(--s-3); }
+.side-banner .btn { color: inherit; border-color: currentColor; }
 .offline-banner { background: var(--accent-tint); color: var(--accent-text); }
 
 .chat-area {

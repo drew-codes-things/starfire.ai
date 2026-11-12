@@ -301,6 +301,7 @@ let models   = [];
 let abortController = null;
 let currentSessionId = null;
 try { currentSessionId = localStorage.getItem('sf_current_session') || null; } catch (_) {}
+let sideChat = null;
 
 let enabledMcpServers = new Set();
 try { enabledMcpServers = new Set(JSON.parse(localStorage.getItem('sf_mcp_enabled') || '[]')); } catch (_) {}
@@ -875,6 +876,10 @@ function startEdit(idx) {
 
 async function forkSession(uptoIdx) {
   const forkedMessages = messages.slice(0, uptoIdx);
+  if (isTemporaryChat()) {
+    messages = forkedMessages;
+    return;
+  }
   const parentId = currentSessionId;
   try {
     const r = await fetch('/api/chat/sessions', {
@@ -1150,6 +1155,7 @@ window.addEventListener('offline', () => setOffline(true));
 window.addEventListener('online', () => setOffline(false));
 
 function saveDraft() {
+  if (isSideChatOpen()) return;
   try { localStorage.setItem('sf_draft_messages', JSON.stringify(messages)); } catch (_) {}
 }
 
@@ -1322,7 +1328,7 @@ async function send(text, overrideModel, extra = {}) {
       body:    JSON.stringify({
         endpoint_id: model.endpoint_id,
         model:       model.id,
-        messages:    apiMessages(messages),
+        messages:    apiMessages(sideChatContext(sideChat, messages)),
         system:      els.sysPrompt.value.trim() || undefined,
         options:     chatOptions(),
         enabled_mcp_servers: modelHasOwnTools(model) ? [] : [...enabledMcpServers],
@@ -1475,7 +1481,7 @@ async function continueResponse(idx) {
       signal: abortController.signal,
       body: JSON.stringify({
         endpoint_id: model.endpoint_id, model: model.id,
-        messages: [...apiMessages(messages.slice(0, idx + 1)), { role: 'user', content: CONTINUE_INSTRUCTION }],
+        messages: [...apiMessages(sideChatContext(sideChat, messages.slice(0, idx + 1))), { role: 'user', content: CONTINUE_INSTRUCTION }],
         system: els.sysPrompt.value.trim() || undefined,
         options: chatOptions(),
       }),
@@ -1539,6 +1545,7 @@ function exportChat(format = 'md') {
 }
 
 function clearChat() {
+  discardSideChat();
   messages = [];
   currentSessionId = null;
   showChatControls(defaultChatControls());
@@ -1549,6 +1556,60 @@ function clearChat() {
   rerenderAll();
   onChatChanged();
 }
+
+function isSideChatOpen() {
+  return sideChat !== null;
+}
+
+function isChatOpen(sessionId) {
+  return sessionId === currentSessionId || (isSideChatOpen() && sessionId === sideChat.mainSessionId);
+}
+
+function enterSideChat() {
+  sideChat = createSideChat(messages, currentSessionId);
+  messages = [];
+  currentSessionId = null;
+  $('sideBanner').hidden = false;
+  rerenderAll();
+}
+
+function startSideChat(question, overrideModel, extra) {
+  if (busy) return;
+  if (!isSideChatOpen()) enterSideChat();
+  if (question) send(question, overrideModel, extra);
+}
+
+function discardSideChat() {
+  sideChat = null;
+  $('sideBanner').hidden = true;
+}
+
+function leaveSideChat() {
+  if (busy || !isSideChatOpen()) return;
+  messages = sideChat.mainMessages;
+  currentSessionId = sideChat.mainSessionId;
+  discardSideChat();
+  rerenderAll();
+  onChatChanged();
+}
+
+function toggleSideChat() {
+  if (isSideChatOpen()) leaveSideChat();
+  else startSideChat('');
+}
+
+function submitSideChatCommand(question) {
+  els.input.value = question;
+  els.input.style.height = 'auto';
+  if (!question) {
+    startSideChat('');
+    return;
+  }
+  const { overrideModel, extra } = takeComposerExtras(question);
+  startSideChat(question, overrideModel, extra);
+}
+
+$('sideChatCloseBtn').onclick = leaveSideChat;
 
 els.stopBtn.onclick = () => { if (abortController) abortController.abort(); };
 
@@ -1601,6 +1662,11 @@ els.form.addEventListener('submit', e => {
   e.preventDefault();
   const t = els.input.value.trim();
   if (!t || busy) return;
+  const sideCommand = parseSideChatCommand(t);
+  if (sideCommand) {
+    submitSideChatCommand(sideCommand.question);
+    return;
+  }
   const { overrideModel, extra } = takeComposerExtras(t);
   send(t, overrideModel, extra);
 });
@@ -2199,6 +2265,7 @@ async function openSession(id) {
     const session = await r.json();
     currentSessionId = id;
     try { localStorage.setItem('sf_current_session', id); } catch (_) {}
+    discardSideChat();
     messages = session.messages || [];
     showSessionControls(session);
     selectModel(session.endpoint_id, session.model);
@@ -3723,6 +3790,7 @@ function buildPaletteActions() {
     { label: 'Toggle sidebar', run: toggleSidebar },
     { label: 'Toggle chat controls', run: toggleControls },
     { label: 'Toggle temporary chat', run: () => $('tempChatToggle').click() },
+    { label: 'Toggle side chat', run: toggleSideChat },
     { label: 'Archived chats', run: openArchived },
     { label: 'New folder', run: createFolder },
     { label: 'Open settings', run: openSettings },

@@ -164,6 +164,9 @@ tokens (colours, radii, spacing, shadows) in `static/style.css`, with a dark and
   arrive. Actions (copy, edit, read aloud, info, rate, continue, delete) appear on hover and
   are always visible on touch screens; regenerate, with its model chooser, is on the newest
   reply only. Deleting a message asks first.
+- **Side chats**: type `/side` or `/btw` (with or without a question) to ask something on the
+  side. The side chat sees the chat so far, nothing in it is saved, and the main chat is left
+  as it was; "Back to chat" (or "Toggle side chat" in the command palette) returns to it.
 - **Header buttons**: temporary chat (never saved to history), compare models, download the
   current chat as .json (re-importable), .md or .txt, and chat controls (system prompt plus
   temperature, top p, top k, max tokens, context length, repeat penalty and seed; Ollama takes
@@ -552,7 +555,8 @@ one-click backup/restore); deleting `data/.key` makes any stored keys unrecovera
 - Chat-app layout: chat sidebar with folders, pins, tags, archive and date groups;
   searchable model picker with a default model; `/` prompts, `#` knowledge, `@` model
   mentions; file attachments; chat controls (system prompt + sampling params); temporary
-  chats; hands-free voice call; reply rating, info, continue and in-place edit
+  chats; `/side` and `/btw` side chats; hands-free voice call; reply rating, info, continue
+  and in-place edit
 - Conversation branching (edit/regenerate fork into a new session rather than overwriting
   history), autosaved chats with search, JSON export/import (including Open WebUI exports)
 - Encrypted local API-key storage, no plaintext secrets on disk
