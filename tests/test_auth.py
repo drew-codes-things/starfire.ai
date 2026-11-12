@@ -281,6 +281,10 @@ def test_the_arty_devices_api_is_admin_only_even_to_read():
     assert not auth.is_admin_only("GET", "/api/model-endpoints")
 
 
+def test_only_admins_can_list_the_server_folders():
+    assert auth.is_admin_only("GET", "/api/browse-dir")
+
+
 def test_the_login_page_can_read_where_to_go_next():
     assert auth.is_public("/loginNext.js")
 
