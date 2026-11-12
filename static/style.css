@@ -437,7 +437,7 @@ html.sidebar-closed .sidebar {
   visibility: hidden;
   transition: margin-left var(--dur-rise) var(--ease), visibility 0s var(--dur-rise);
 }
-.sidebar-scrim { display: none; }
+.sidebar-scrim, .controls-scrim { display: none; }
 
 .sidebar-head {
   display: flex;
@@ -538,6 +538,8 @@ a.sidebar-link { text-decoration: none; }
 .chat-item:hover .chat-item-menu-btn, .chat-item.active .chat-item-menu-btn, .chat-item-menu-btn:focus-visible,
 .folder-row:hover .folder-menu-btn, .folder-menu-btn:focus-visible { opacity: 1; }
 .chat-item-tags { flex-shrink: 0; max-width: 34%; overflow: hidden; text-overflow: ellipsis; color: var(--faint); font-size: var(--fs-xs); font-weight: 400; }
+.chat-item .chat-item-title { flex: 0 1 auto; }
+.chat-item .chat-item-tags { flex: 1 1 0; min-width: 0; max-width: none; text-align: right; }
 .chat-item-branch { color: var(--faint); }
 .folder-children { list-style: none; margin-left: var(--s-4); padding-left: var(--s-2); border-left: 1px solid var(--line); }
 .folder-empty { padding: var(--s-1) var(--s-3); color: var(--faint); font-size: var(--fs-sm); }
@@ -1325,14 +1327,14 @@ button.chip:hover { background: var(--hover); }
 .settings-hint { min-height: 1.2em; color: var(--muted); font-size: var(--fs-sm); line-height: 1.5; }
 .settings-card > .settings-hint:not(:empty) { margin-bottom: var(--s-3); }
 .settings-card > .settings-hint:last-child { margin-bottom: 0; }
-#aboutVersion::first-letter { text-transform: none; }
+#aboutVersion::first-letter, .settings-hint:has(> code:first-child)::first-letter, .tag-cloud .chip-label::first-letter { text-transform: none; }
 .settings-hint.ok { color: var(--ok); }
 .settings-hint.error { color: var(--danger); }
 .settings-hint.warning-text { color: var(--warn); }
 .settings-textarea { width: 100%; font-size: var(--fs-sm); }
 .settings-textarea.code { font-family: var(--mono); }
-.settings-row > .field-narrow { flex: 0 1 96px; }
-.settings-row > .field-medium { flex: 0 1 168px; }
+.settings-row > input.field-narrow { flex: 0 1 96px; }
+.settings-row > input.field-medium { flex: 0 1 168px; }
 
 .theme-toggle {
   display: flex;
@@ -1390,7 +1392,7 @@ button.chip:hover { background: var(--hover); }
 .compare-column-header select { flex: 1; min-width: 0; max-width: none; }
 .compare-column-output { flex: 1; padding: var(--s-4); overflow-y: auto; font-size: var(--fs-md); }
 .compare-column-output:empty::before { content: attr(data-empty); color: var(--faint); }
-.modal-close, .compare-remove { width: var(--control-h); padding: 0; border-color: transparent; color: var(--muted); font-size: var(--fs-xl); }
+.btn.modal-close, .btn.compare-remove { width: var(--control-h); padding: 0; border-color: transparent; color: var(--muted); font-size: var(--fs-xl); }
 
 .palette-overlay { z-index: 300; align-items: flex-start; padding-top: 12vh; }
 .palette-box {
@@ -1527,7 +1529,7 @@ button.chip:hover { background: var(--hover); }
 .toasts {
   position: fixed;
   left: 50%;
-  bottom: calc(var(--s-5) + var(--safe-bottom));
+  top: calc(var(--s-4) + var(--safe-top));
   z-index: 400;
   display: flex;
   flex-direction: column;
@@ -1549,11 +1551,11 @@ button.chip:hover { background: var(--hover); }
   font-weight: 500;
   line-height: 1.35;
   pointer-events: auto;
-  animation: rise-in var(--dur-rise) var(--ease);
+  animation: pop-in var(--dur-rise) var(--ease);
 }
 .toast::first-letter { text-transform: uppercase; }
 .toast.error { background: var(--accent-fill); color: var(--on-accent); }
-.toast.leaving { opacity: 0; transform: translateY(calc(var(--rise) / 2)); transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease); }
+.toast.leaving { opacity: 0; transform: translateY(calc(var(--rise) / -2)); transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease); }
 
 body.login-page {
   display: flex;
@@ -1854,7 +1856,7 @@ body:not(.is-admin) .admin-only { display: none !important; }
     box-shadow: var(--shadow-2);
   }
   html.sidebar-closed .sidebar { margin-left: calc(-1 * min(var(--sidebar-width), 86vw) - var(--safe-left) - 48px); }
-  .sidebar-scrim:not([hidden]) { display: block; position: fixed; inset: 0; z-index: 110; background: var(--scrim); animation: fade-in var(--dur) var(--ease); }
+  .sidebar-scrim:not([hidden]), .controls-scrim:not([hidden]) { display: block; position: fixed; inset: 0; z-index: 110; background: var(--scrim); animation: fade-in var(--dur) var(--ease); }
   html.sidebar-closed .sidebar-scrim { display: none; }
   #sidebarOpenBtn, .header-new-chat { display: inline-flex; }
   .chat-header { padding-left: calc(var(--s-2) + var(--safe-left)); padding-right: calc(var(--s-2) + var(--safe-right)); }
@@ -1908,11 +1910,22 @@ body:not(.is-admin) .admin-only { display: none !important; }
   .line-row.role-user .line { max-width: 92%; }
   .model-picker-btn { max-width: 44vw; padding: 0 var(--s-2); }
   .login-card { padding: var(--s-5); }
-  .arty-cli-card .arty-cli-composer { flex-wrap: wrap; justify-content: flex-end; }
-  .arty-cli-composer textarea { flex-basis: 100%; }
-  .toasts {
- bottom: calc(104px + var(--safe-bottom)); }
-
+  .settings-row > input:not([type="checkbox"], [type="radio"], [type="file"], .field-narrow, .field-medium), .settings-row > select { flex-basis: 220px; }
+  body.login-page:has(.arty-cli-live) { padding: 0; }
+  .arty-cli-card.arty-cli-live {
+    max-width: none;
+    height: 100dvh;
+    padding: calc(var(--s-3) + var(--safe-top)) var(--s-3) calc(var(--s-3) + var(--safe-bottom));
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .arty-cli-live .login-brand, .arty-cli-live .arty-back { display: none; }
+  .arty-cli-live .arty-cli-top { gap: var(--s-2); padding-bottom: var(--s-2); }
+  .arty-cli-live .arty-cli-header { display: grid; flex: 1; grid-template-columns: minmax(0, auto) minmax(0, 1fr); align-items: baseline; gap: 0 var(--s-2); }
+  .arty-cli-live .arty-cli-name { overflow: hidden; font-size: var(--fs-lg); text-overflow: ellipsis; white-space: nowrap; }
+  .arty-cli-live .arty-cli-state { grid-row: 1; grid-column: 2; }
+  .arty-cli-live .arty-cli-details { grid-column: 1 / -1; overflow: hidden; font-size: var(--fs-xs); text-overflow: ellipsis; white-space: nowrap; }
   .menu, .menu.up, .model-menu, .context-menu {
     position: fixed;
     top: auto !important;

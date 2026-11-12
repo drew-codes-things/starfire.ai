@@ -155,6 +155,7 @@ window.addEventListener('resize', () => {
   wasNarrowScreen = narrow;
   setSidebarOpen(narrow ? false : !storedSidebarClosed());
   if (narrow) toggleControls(false);
+  else $('controlsScrim').hidden = true;
 });
 
 $('sidebarCloseBtn').onclick = () => setSidebarOpen(false);
@@ -977,9 +978,11 @@ function toggleControls(force) {
   const panel = $('controlsPanel');
   panel.hidden = typeof force === 'boolean' ? !force : !panel.hidden;
   $('controlsBtn').classList.toggle('active', !panel.hidden);
+  $('controlsScrim').hidden = panel.hidden || !isNarrowScreen();
 }
 
 $('controlsBtn').onclick = () => toggleControls();
+$('controlsScrim').onclick = () => toggleControls(false);
 $('controlsCloseBtn').onclick = () => toggleControls(false);
 $('resetParamsBtn').onclick = () => { chatParams = {}; renderParamGrid(); onChatControlsEdited(); };
 $('controlsUseDefaultsBtn').onclick = () => { showChatControls(defaultChatControls()); onChatControlsEdited(); };

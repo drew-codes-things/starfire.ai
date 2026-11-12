@@ -183,3 +183,33 @@ def test_the_offline_fallback_treats_arty_and_its_old_name_as_bringing_their_own
     assert fallback, "app.js has no own_tools_models fallback"
     names = re.findall(r"'([^']+)'", fallback.group(1))
     assert {"Arty", "assistant-core", "arty/*"} == set(names)
+
+
+NARROW_BLOCK = re.compile(r"@media \(max-width: 860px\) \{(.*?)^\}", re.S | re.M)
+PHONE_BLOCK = re.compile(r"@media \(max-width: 600px\) \{(.*?)^\}", re.S | re.M)
+
+
+def test_the_chat_controls_get_a_backdrop_on_small_screens_that_closes_them():
+    assert 'id="controlsScrim"' in read("index.html")
+    assert ".controls-scrim:not([hidden])" in NARROW_BLOCK.search(read("style.css")).group(1)
+    workspace = read("workspace.js")
+    assert "$('controlsScrim').hidden = panel.hidden || !isNarrowScreen();" in workspace
+    assert "$('controlsScrim').onclick = () => toggleControls(false);" in workspace
+
+
+def test_toasts_sit_at_the_top_so_they_never_cover_the_message_box():
+    toasts = re.search(r"^\.toasts \{(.*?)^\}", read("style.css"), re.S | re.M).group(1)
+    assert "top:" in toasts and "bottom:" not in toasts
+    assert ".toasts" not in PHONE_BLOCK.search(read("style.css")).group(1)
+
+
+def test_narrow_settings_fields_outrank_the_rule_that_makes_fields_share_a_row():
+    css = read("style.css")
+    assert ".settings-row > input.field-narrow { flex: 0 1 96px; }" in css
+    assert ".settings-row > input.field-medium { flex: 0 1 168px; }" in css
+
+
+def test_the_phone_arty_cli_live_view_drops_the_brand_and_fills_the_screen():
+    phone = PHONE_BLOCK.search(read("style.css")).group(1)
+    assert ".arty-cli-live .login-brand, .arty-cli-live .arty-back { display: none; }" in phone
+    assert "body.login-page:has(.arty-cli-live) { padding: 0; }" in phone
