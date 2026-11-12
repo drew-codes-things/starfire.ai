@@ -103,6 +103,11 @@ function chatTitleFrom(messages, textBeingSent = '') {
   return (shown || textBeingSent || '').trim().slice(0, CHAT_TITLE_CHARS) || UNTITLED_CHAT;
 }
 
+function firstUnusedModel(models, usedKeys, keyOf) {
+  const used = new Set(usedKeys);
+  return models.find(model => !used.has(keyOf(model))) || models[0] || null;
+}
+
 function isLastAssistantMessage(messages, index) {
   if (!messages[index] || messages[index].role !== 'assistant') return false;
   return !messages.slice(index + 1).some(message => message.role === 'assistant');
@@ -143,7 +148,7 @@ if (typeof module !== 'undefined' && module.exports) {
     DAY_MS, TOAST_MS, TOAST_ERROR_MS, TOAST_FADE_MS,
     sentenceCase, dateGroupLabel, themeChoiceFrom, themeIsLight, showToast, removalQuestion, confirmRemove,
     pendingApprovalCards, resolveChatControls, isLastAssistantMessage,
-    CHAT_TITLE_CHARS, submitOnEnter, closeOnEscape, chatTitleFrom,
+    CHAT_TITLE_CHARS, submitOnEnter, closeOnEscape, chatTitleFrom, firstUnusedModel,
     MAX_SPOKEN_CHARS, takeSpokenSentences, speakableText, spokenPieces,
   };
 }

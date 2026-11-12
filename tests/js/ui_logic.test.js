@@ -243,6 +243,16 @@ test('a branch cut before the first message is named after the text being sent, 
   assert.equal(logic.chatTitleFrom([{ role: 'user', content: '' }], 'Second try'), 'Second try');
 });
 
+test('a new compare column takes the first model no other column shows', () => {
+  const models = [{ endpoint_id: 'a', id: 'one' }, { endpoint_id: 'a', id: 'two' }, { endpoint_id: 'b', id: 'one' }];
+  const key = model => model.endpoint_id + '/' + model.id;
+  assert.equal(logic.firstUnusedModel(models, [], key), models[0]);
+  assert.equal(logic.firstUnusedModel(models, ['a/one'], key), models[1]);
+  assert.equal(logic.firstUnusedModel(models, ['a/one', 'a/two'], key), models[2]);
+  assert.equal(logic.firstUnusedModel(models, ['a/one', 'a/two', 'b/one'], key), models[0]);
+  assert.equal(logic.firstUnusedModel([], [], key), null);
+});
+
 test('Escape on a menu or dialog closes it and is used up, so it cannot also close what is behind or stop a reply', () => {
   let closed = 0;
   const onKey = logic.closeOnEscape(() => { closed += 1; });

@@ -1389,6 +1389,7 @@ button.chip:hover { background: var(--hover); }
 .compare-column-header { display: flex; align-items: center; gap: var(--s-2); padding: var(--s-2); border-bottom: 1px solid var(--line); background: var(--bg-sunken); }
 .compare-column-header select { flex: 1; min-width: 0; max-width: none; }
 .compare-column-output { flex: 1; padding: var(--s-4); overflow-y: auto; font-size: var(--fs-md); }
+.compare-column-output:empty::before { content: attr(data-empty); color: var(--faint); }
 .modal-close, .compare-remove { width: var(--control-h); padding: 0; border-color: transparent; color: var(--muted); font-size: var(--fs-xl); }
 
 .palette-overlay { z-index: 300; align-items: flex-start; padding-top: 12vh; }

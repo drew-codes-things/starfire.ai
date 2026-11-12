@@ -3770,7 +3770,18 @@ function compareModelOptionsHtml() {
   ).join('');
 }
 
+const COMPARE_EMPTY_TEXT = 'The reply shows here';
+const COMPARE_WAITING_TEXT = 'Waiting for the reply…';
+
+function comparedModelKeys() {
+  return [...compareEls.columns.querySelectorAll('.compare-model-select')]
+    .map(select => select.selectedOptions[0])
+    .filter(Boolean)
+    .map(option => modelKey({ endpoint_id: option.dataset.endpointId, id: option.value }));
+}
+
 function addCompareColumn() {
+  const unusedModel = firstUnusedModel(models, comparedModelKeys(), modelKey);
   const col = document.createElement('div');
   col.className = 'compare-column';
   col.innerHTML =
@@ -3778,7 +3789,8 @@ function addCompareColumn() {
       `<select class="compare-model-select">${compareModelOptionsHtml()}</select>` +
       `<button class="btn ghost compare-remove" type="button" title="Remove column" aria-label="Remove column">×</button>` +
     `</div>` +
-    `<div class="compare-column-output line ai"></div>`;
+    `<div class="compare-column-output line ai" data-empty="${COMPARE_EMPTY_TEXT}"></div>`;
+  if (unusedModel) col.querySelector('.compare-model-select').selectedIndex = models.indexOf(unusedModel);
   col.querySelector('.compare-remove').onclick = () => {
     if (compareEls.columns.children.length > 1) col.remove();
   };
@@ -3806,6 +3818,7 @@ async function runCompareColumn(col, prompt) {
   const opt = select.selectedOptions[0];
   if (!opt) { output.textContent = 'no model selected'; return; }
   output.textContent = '';
+  output.dataset.empty = COMPARE_WAITING_TEXT;
   let full = '';
   try {
     const r = await fetch('/api/chat_stream', {
