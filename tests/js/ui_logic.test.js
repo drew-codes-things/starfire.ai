@@ -176,3 +176,21 @@ test('labels start with a capital letter', () => {
   assert.equal(logic.sentenceCase('web search'), 'Web search');
   assert.equal(logic.sentenceCase(''), '');
 });
+
+test('finished sentences are taken for speaking and the unfinished end is kept', () => {
+  assert.deepEqual(logic.takeSpokenSentences('Hey you. Come closer! I want'),
+    { sentences: ['Hey you.', 'Come closer!'], rest: 'I want' });
+  assert.deepEqual(logic.takeSpokenSentences('"Stay," she says. '), { sentences: ['"Stay," she says.'], rest: '' });
+  assert.deepEqual(logic.takeSpokenSentences('One line\nand the next'), { sentences: ['One line'], rest: 'and the next' });
+  assert.deepEqual(logic.takeSpokenSentences('No end yet'), { sentences: [], rest: 'No end yet' });
+  assert.deepEqual(logic.takeSpokenSentences('Wait...'), { sentences: [], rest: 'Wait...' });
+});
+
+test('spoken text drops markdown marks and long sentences are cut at spaces', () => {
+  assert.equal(logic.speakableText('*leans in* **closer**  _now_'), 'leans in closer now');
+  const long = Array(200).fill('word').join(' ');
+  const pieces = logic.spokenPieces(long);
+  assert.ok(pieces.every(piece => piece.length <= logic.MAX_SPOKEN_CHARS));
+  assert.equal(pieces.join(' '), long);
+  assert.deepEqual(logic.spokenPieces('Short.'), ['Short.']);
+});

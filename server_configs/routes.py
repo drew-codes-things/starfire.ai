@@ -1,4 +1,5 @@
 import asyncio
+import fnmatch
 import io
 import json
 import logging
@@ -9,7 +10,7 @@ from typing import Annotated
 
 import httpx
 from fastapi import APIRouter, HTTPException, UploadFile
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 import auth_routes
@@ -21,6 +22,7 @@ import file_edit_tool
 import hardware_probe
 import helper_tasks
 import model_capabilities
+import model_voices
 import ollama_manager
 import shell_tool
 from agent_loop import run_chat_with_tools
@@ -186,11 +188,29 @@ async def list_models():
                     result.append({"id": m.get("id"), "endpoint_id": e.id, "provider": e.provider})
     return {"models": result}
 
+def _brings_own_tools(model: str) -> bool:
+    return any(fnmatch.fnmatchcase(model, pattern) for pattern in config.own_tools_patterns())
+
+
+async def _warm_brain_model(endpoint, model: str) -> None:
+    key = _api_key_for(endpoint.id, endpoint.provider)
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.post(endpoint.base_url.rstrip("/") + "/warm", json={"model": model}, headers=headers)
+            await r.aclose()
+    except httpx.HTTPError as error:
+        logging.getLogger(__name__).info("couldn't ask %s to warm %s: %s", endpoint.base_url, model, error)
+
+
 @router.post("/warm")
 async def warm(body: dict):
     endpoint_id = body.get("endpoint_id")
     model = body.get("model")
     endpoint = endpoints.get(endpoint_id) if endpoint_id else None
+    if endpoint and endpoint.provider == "openai" and isinstance(model, str) and _brings_own_tools(model):
+        await _warm_brain_model(endpoint, model)
+        return {"ok": True}
     if not endpoint or endpoint.provider != "ollama" or not model:
         return {"ok": True}
     from providers import _ollama_api_root
@@ -211,7 +231,35 @@ async def get_config():
         "version": VERSION,
         "own_tools_models": config.own_tools_patterns(),
         "inline_media_prefixes": config.media_prefixes(),
+        "voice_models": [rule.pattern for rule in _voice_rules()],
     }
+
+
+def _voice_rules() -> list[model_voices.VoiceRule]:
+    try:
+        return model_voices.parse_rules(config.model_voices)
+    except model_voices.VoiceError as error:
+        logging.getLogger(__name__).error("MODEL_VOICES is ignored until it is fixed: %s", error)
+        return []
+
+
+class SpeakBody(BaseModel):
+    model: str
+    text: str
+
+
+@router.post("/speak")
+async def speak(body: SpeakBody):
+    rule = model_voices.rule_for(body.model, _voice_rules())
+    if rule is None:
+        raise HTTPException(404, "this model has no server voice")
+    try:
+        audio = await model_voices.speak(body.text, rule, config.voices_folder())
+    except model_voices.VoiceError as error:
+        raise HTTPException(400, str(error)) from error
+    except model_voices.VoiceUnavailable as error:
+        raise HTTPException(503, str(error)) from error
+    return Response(audio, media_type="audio/wav")
 
 def _list_dirs(path: str) -> dict:
     base = os.path.abspath(os.path.expanduser(path or "~"))

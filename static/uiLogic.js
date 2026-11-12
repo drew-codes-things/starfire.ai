@@ -84,10 +84,41 @@ function isLastAssistantMessage(messages, index) {
   return !messages.slice(index + 1).some(message => message.role === 'assistant');
 }
 
+const SPOKEN_SENTENCE = /[^.!?\n]*(?:[.!?]+["'\u201d\u2019)\]]*\s+|\n+)/g;
+const MAX_SPOKEN_CHARS = 500;
+
+function takeSpokenSentences(text) {
+  const sentences = [];
+  let used = 0;
+  for (const match of text.matchAll(SPOKEN_SENTENCE)) {
+    if (match[0].trim()) sentences.push(match[0].trim());
+    used = match.index + match[0].length;
+  }
+  return { sentences, rest: text.slice(used) };
+}
+
+function speakableText(text) {
+  return text.replace(/[*_#`~>]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function spokenPieces(sentence, limit = MAX_SPOKEN_CHARS) {
+  const pieces = [];
+  let rest = sentence;
+  while (rest.length > limit) {
+    const cut = rest.lastIndexOf(' ', limit);
+    const at = cut > 0 ? cut : limit;
+    pieces.push(rest.slice(0, at).trim());
+    rest = rest.slice(at).trim();
+  }
+  if (rest) pieces.push(rest);
+  return pieces;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     DAY_MS, TOAST_MS, TOAST_ERROR_MS, TOAST_FADE_MS,
     sentenceCase, dateGroupLabel, themeChoiceFrom, themeIsLight, showToast, removalQuestion, confirmRemove,
     pendingApprovalCards, resolveChatControls, isLastAssistantMessage,
+    MAX_SPOKEN_CHARS, takeSpokenSentences, speakableText, spokenPieces,
   };
 }

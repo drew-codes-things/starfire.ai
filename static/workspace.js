@@ -1387,6 +1387,7 @@ function stopCall() {
   $('callOverlay').hidden = true;
   try { callRecognition.abort(); } catch (_) {}
   if (window.speechSynthesis) window.speechSynthesis.cancel();
+  stopServerSpeech();
 }
 
 function speakThenListen(text) {

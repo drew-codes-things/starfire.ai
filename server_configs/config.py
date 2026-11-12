@@ -18,12 +18,17 @@ class AppConfig(BaseSettings):
     arty_phone_url: str = ""
     arty_access_client_id: str = ""
     arty_access_client_secret: str = ""
+    model_voices: str = ""
+    model_voices_dir: str = ""
 
     def own_tools_patterns(self) -> list[str]:
         return [p.strip() for p in self.own_tools_models.split(",") if p.strip()]
 
     def media_prefixes(self) -> list[str]:
         return [p.strip() for p in self.inline_media_prefixes.split(",") if p.strip()]
+
+    def voices_folder(self) -> str:
+        return self.model_voices_dir or os.path.join(self.data_dir, "voices")
 
 config = AppConfig()
 

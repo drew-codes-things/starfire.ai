@@ -520,6 +520,8 @@ rather use that instead)
 | `ARTY_ACCESS_CLIENT_ID` / `ARTY_ACCESS_CLIENT_SECRET` | _(unset)_ | Cloudflare Access service token put in the phone setup QR code, only when both are set |
 | `OWN_TOOLS_MODELS` | `Arty,assistant-core,arty/*,own/*` | Comma-separated model ids (with `*` wildcards) that bring their own tools: the tools menu hides for them and starfire sends them none (`assistant-core` is Arty's old name, kept for saved chats; `own/*` are the brain's own models, which run with Arty's tools) |
 | `INLINE_MEDIA_PREFIXES` | `/arty-files/` | Comma-separated path prefixes whose image and video links render inline in replies; links to another host with one of these paths load through this server instead |
+| `MODEL_VOICES` | (empty) | Comma-separated `pattern=voice.onnx@speed` rules giving models a server voice (Piper, `*` wildcards, speed 0.5 to 2, default 1). With read-aloud or a voice call on, a matching model's reply is spoken sentence by sentence while it streams, instead of by the browser at the end |
+| `MODEL_VOICES_DIR` | `<DATA_DIR>/voices` | Folder holding the `.onnx` voices (and their `.onnx.json`) named in `MODEL_VOICES` |
 
 Hosted-provider API keys are **not** set via environment variables - add them through the
 Settings UI so they're encrypted at rest rather than sitting in plaintext in `.env`.

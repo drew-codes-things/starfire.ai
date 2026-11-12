@@ -904,7 +904,7 @@ async function forkSession(uptoIdx) {
 
 const ARTY_MEDIA = { image: /\.(png|jpe?g|gif|webp)$/i, video: /\.(mp4|webm|mov|m4v)$/i };
 
-const appConfig = { version: '', own_tools_models: ['Arty', 'assistant-core', 'arty/*', 'own/*'], inline_media_prefixes: ['/arty-files/'] };
+const appConfig = { version: '', own_tools_models: ['Arty', 'assistant-core', 'arty/*', 'own/*'], inline_media_prefixes: ['/arty-files/'], voice_models: [] };
 
 async function loadAppConfig() {
   try {
@@ -917,10 +917,73 @@ async function loadAppConfig() {
     const data = await r.json();
     if (Array.isArray(data.own_tools_models)) appConfig.own_tools_models = data.own_tools_models;
     if (Array.isArray(data.inline_media_prefixes)) appConfig.inline_media_prefixes = data.inline_media_prefixes;
+    if (Array.isArray(data.voice_models)) appConfig.voice_models = data.voice_models;
     appConfig.version = data.version || '';
   } catch (_) {}
   const about = $('aboutVersion');
   if (about) about.textContent = 'starfire.ai' + (appConfig.version ? ' ' + appConfig.version : '');
+}
+
+let activeSpeaker = null;
+
+function modelHasServerVoice(model) {
+  return !!model && appConfig.voice_models.some(pattern => globMatch(model.id, pattern));
+}
+
+function createServerSpeaker(model, onSpeaking) {
+  let pending = '';
+  let queue = Promise.resolve();
+  let stopped = false;
+  let playing = null;
+
+  const fetchAudio = text => fetch('/api/speak', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: model.id, text }),
+  }).then(r => (r.ok ? r.blob() : null)).catch(() => null);
+
+  const play = blob => new Promise(resolve => {
+    const url = URL.createObjectURL(blob);
+    playing = new Audio(url);
+    const done = () => { URL.revokeObjectURL(url); resolve(); };
+    playing.onended = done;
+    playing.onerror = done;
+    playing.play().catch(done);
+  });
+
+  const say = sentence => {
+    for (const piece of spokenPieces(speakableText(sentence))) {
+      const audio = fetchAudio(piece);
+      queue = queue.then(async () => {
+        const blob = await audio;
+        if (!blob || stopped) return;
+        if (onSpeaking) onSpeaking();
+        await play(blob);
+      });
+    }
+  };
+
+  return {
+    push(delta) {
+      const taken = takeSpokenSentences(pending + delta);
+      taken.sentences.forEach(say);
+      pending = taken.rest;
+    },
+    finish() {
+      if (pending.trim()) say(pending);
+      pending = '';
+      return queue;
+    },
+    stop() {
+      stopped = true;
+      if (playing) playing.pause();
+    },
+  };
+}
+
+function stopServerSpeech() {
+  if (activeSpeaker) activeSpeaker.stop();
+  activeSpeaker = null;
 }
 
 function globMatch(value, pattern) {
@@ -1316,6 +1379,11 @@ async function send(text, overrideModel, extra = {}) {
   let renderer = null;
   let gotToken = false;
   const aiIdx = messages.length;
+  stopServerSpeech();
+  const speaker = (callModeActive() || prefs.autoSpeak) && modelHasServerVoice(model)
+    ? createServerSpeaker(model, () => { if (callModeActive()) setCallState('speaking'); })
+    : null;
+  activeSpeaker = speaker;
 
   setStatus('loading', 'waiting...');
 
@@ -1371,6 +1439,7 @@ async function send(text, overrideModel, extra = {}) {
               renderer = createStreamRenderer(aiLine, { render: markdownRender });
             }
             renderer.push(obj.delta);
+            if (speaker) speaker.push(obj.delta);
             els.output.scrollTop = els.output.scrollHeight;
           } else if (obj.tool_start) {
             printLine('» calling ' + obj.tool_start.replace(/^mcp__[^_]+__/, '') + '…', 'info');
@@ -1409,7 +1478,8 @@ async function send(text, overrideModel, extra = {}) {
     if (fullText) {
       messages.push({ role: 'assistant', content: fullText, model: model.id, created: new Date().toISOString() });
       if (aiActions) addActionButtons('ai', aiRow, aiActions, aiIdx);
-      if (callModeActive()) speakThenListen(fullText);
+      if (speaker) speaker.finish().then(() => { if (callModeActive() && activeSpeaker === speaker) setTimeout(listenForCallTurn, 250); });
+      else if (callModeActive()) speakThenListen(fullText);
       else if (prefs.autoSpeak) speakText(fullText);
       if (prefs.followUps && aiRow && !callModeActive()) showFollowUps(aiRow, model);
     }
@@ -1417,6 +1487,7 @@ async function send(text, overrideModel, extra = {}) {
     if (aiLine && fullText) verifyCodeBlocks(aiLine, aiIdx, model);
   } catch (e) {
     const aborted = e.name === 'AbortError';
+    if (speaker && aborted) speaker.stop();
     if (gotToken && aiLine) {
       renderer.finish();
       aiLine.classList.remove('streaming');
