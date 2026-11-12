@@ -194,3 +194,59 @@ test('spoken text drops markdown marks and long sentences are cut at spaces', ()
   assert.equal(pieces.join(' '), long);
   assert.deepEqual(logic.spokenPieces('Short.'), ['Short.']);
 });
+
+function keyPress(key, extra = {}) {
+  const event = { key, prevented: false, preventDefault() { event.prevented = true; }, ...extra };
+  return event;
+}
+
+test('Enter in a field submits once and is used up, so it cannot press whatever gets focus next', () => {
+  let submitted = 0;
+  const onKey = logic.submitOnEnter(() => { submitted += 1; });
+  const enter = keyPress('Enter');
+  onKey(enter);
+  assert.equal(submitted, 1);
+  assert.equal(enter.prevented, true);
+});
+
+test('other keys, and Enter that only confirms an input method choice, do not submit', () => {
+  let submitted = 0;
+  const onKey = logic.submitOnEnter(() => { submitted += 1; });
+  const letter = keyPress('a');
+  const composing = keyPress('Enter', { isComposing: true });
+  onKey(letter);
+  onKey(composing);
+  assert.equal(submitted, 0);
+  assert.equal(letter.prevented, false);
+  assert.equal(composing.prevented, false);
+});
+
+test('the dialog field and the one-line add fields hand Enter to that helper', () => {
+  const fs = require('node:fs');
+  const workspace = fs.readFileSync(path.join(__dirname, '..', '..', 'static', 'workspace.js'), 'utf8');
+  assert.match(workspace, /dialogEls\.input\.onkeydown = submitOnEnter\(/);
+  for (const field of ['newMemoryText', 'noteNewItem', 'presetName']) {
+    assert.match(workspace, new RegExp(`\\['${field}', '\\w+'\\]`), `${field} has no Enter key`);
+  }
+});
+
+test('Escape on a menu or dialog closes it and is used up, so it cannot also close what is behind or stop a reply', () => {
+  let closed = 0;
+  const onKey = logic.closeOnEscape(() => { closed += 1; });
+  const escape = keyPress('Escape');
+  const other = keyPress('Enter');
+  onKey(escape);
+  onKey(other);
+  assert.equal(closed, 1);
+  assert.equal(escape.prevented, true);
+  assert.equal(other.prevented, false);
+});
+
+test('the dialog, the chat row menu and the model menu close through that helper, and the page-wide Escape respects it', () => {
+  const fs = require('node:fs');
+  const workspace = fs.readFileSync(path.join(__dirname, '..', '..', 'static', 'workspace.js'), 'utf8');
+  assert.match(workspace, /dialogEls\.modal\.onkeydown = closeOnEscape\(/);
+  assert.match(workspace, /\$\('chatMenu'\)\.addEventListener\('keydown', closeOnEscape\(closeContextMenu\)\)/);
+  assert.match(workspace, /\$\('modelSearch'\)\.addEventListener\('keydown', closeOnEscape\(/);
+  assert.match(workspace, /key === 'escape' && !e\.defaultPrevented/);
+});

@@ -79,6 +79,22 @@ function resolveChatControls(session, defaults) {
   };
 }
 
+function submitOnEnter(submit) {
+  return event => {
+    if (event.key !== 'Enter' || event.isComposing) return;
+    event.preventDefault();
+    submit();
+  };
+}
+
+function closeOnEscape(close) {
+  return event => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    close();
+  };
+}
+
 function isLastAssistantMessage(messages, index) {
   if (!messages[index] || messages[index].role !== 'assistant') return false;
   return !messages.slice(index + 1).some(message => message.role === 'assistant');
@@ -119,6 +135,7 @@ if (typeof module !== 'undefined' && module.exports) {
     DAY_MS, TOAST_MS, TOAST_ERROR_MS, TOAST_FADE_MS,
     sentenceCase, dateGroupLabel, themeChoiceFrom, themeIsLight, showToast, removalQuestion, confirmRemove,
     pendingApprovalCards, resolveChatControls, isLastAssistantMessage,
+    submitOnEnter, closeOnEscape,
     MAX_SPOKEN_CHARS, takeSpokenSentences, speakableText, spokenPieces,
   };
 }

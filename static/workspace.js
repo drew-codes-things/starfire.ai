@@ -105,8 +105,8 @@ function showDialog({ title, text = '', input, okLabel = 'ok', danger = false, a
       finish(typed || (allowEmpty ? '' : null));
     };
     dialogEls.cancel.onclick = () => finish(null);
-    dialogEls.input.onkeydown = e => { if (e.key === 'Enter') dialogEls.ok.click(); };
-    dialogEls.modal.onkeydown = e => { if (e.key === 'Escape') finish(null); };
+    dialogEls.input.onkeydown = submitOnEnter(() => dialogEls.ok.click());
+    dialogEls.modal.onkeydown = closeOnEscape(() => finish(null));
   });
 }
 
@@ -402,6 +402,13 @@ async function downloadChat(session, format) {
   }
 }
 
+let contextMenuAnchor = null;
+
+function closeContextMenu() {
+  $('chatMenu').hidden = true;
+  if (contextMenuAnchor && contextMenuAnchor.isConnected) contextMenuAnchor.focus();
+}
+
 function showContextMenu(anchor, items) {
   const menu = $('chatMenu');
   menu.innerHTML = '';
@@ -429,6 +436,7 @@ function showContextMenu(anchor, items) {
   }
   closeAllMenus(menu);
   menu.hidden = false;
+  contextMenuAnchor = anchor;
   const rect = anchor.getBoundingClientRect();
   const top = Math.min(rect.bottom + 4, window.innerHeight - menu.offsetHeight - 8);
   const left = Math.min(rect.left, window.innerWidth - menu.offsetWidth - 8);
@@ -441,13 +449,13 @@ function showContextMenu(anchor, items) {
 $('chatMenu').addEventListener('keydown', e => {
   const buttons = [...$('chatMenu').querySelectorAll('button')];
   const at = buttons.indexOf(document.activeElement);
-  if (e.key === 'Escape') { $('chatMenu').hidden = true; return; }
   if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     e.preventDefault();
     const next = (at + (e.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
     buttons[next].focus();
   }
 });
+$('chatMenu').addEventListener('keydown', closeOnEscape(closeContextMenu));
 
 function openChatMenu(session, anchor) {
   const folderItems = sidebarState.folders
@@ -845,11 +853,12 @@ $('modelSearch').addEventListener('keydown', e => {
   } else if (e.key === 'Enter') {
     e.preventDefault();
     if (options[at]) options[at].click();
-  } else if (e.key === 'Escape') {
-    closeAllMenus();
-    $('modelPickerBtn').focus();
   }
 });
+$('modelSearch').addEventListener('keydown', closeOnEscape(() => {
+  closeAllMenus();
+  $('modelPickerBtn').focus();
+}));
 
 $('setDefaultModelBtn').onclick = () => {
   const model = currentModel();
@@ -1468,7 +1477,7 @@ document.addEventListener('keydown', e => {
   } else if (e.shiftKey && key === 'escape') {
     e.preventDefault();
     els.input.focus();
-  } else if (key === 'escape') {
+  } else if (key === 'escape' && !e.defaultPrevented) {
     closeAllMenus();
     if (!archivedEls.modal.hidden) archivedEls.modal.hidden = true;
   }
@@ -1513,6 +1522,11 @@ $('shortcutsBtn').onclick = openShortcuts;
 $('openShortcutsBtn').onclick = openShortcuts;
 $('shortcutsCloseBtn').onclick = closeShortcuts;
 $('shortcutsModal').addEventListener('click', e => { if (e.target === $('shortcutsModal')) closeShortcuts(); });
+
+const ENTER_PRESSES = [['newMemoryText', 'addMemoryEntryBtn'], ['noteNewItem', 'noteAddItemBtn'], ['presetName', 'savePresetBtn']];
+ENTER_PRESSES.forEach(([field, button]) => {
+  $(field).addEventListener('keydown', submitOnEnter(() => $(button).click()));
+});
 
 refreshActiveTools();
 refreshSidebar();
