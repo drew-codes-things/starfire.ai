@@ -120,3 +120,32 @@ def test_a_long_edit_result_reaches_the_page_whole_so_its_diff_and_approval_show
 def test_long_plain_tool_output_is_still_shortened_for_the_page(monkeypatch):
     sent = stream_one_tool_result(monkeypatch, "run_shell", "x" * 50000)
     assert sent == "x" * agent_loop.TOOL_RESULT_DISPLAY_CHARS
+
+
+def test_a_model_that_keeps_calling_tools_is_stopped_with_a_clear_answer(monkeypatch):
+    import json
+
+    executed = []
+
+    async def always_a_tool_call(base_url, api_key, model, messages, system, options, tools=None, **kwargs):
+        yield ("tool_calls", [{"id": f"c{len(executed)}", "name": "run_shell", "arguments": {"command": "ls"}}])
+
+    async def fake_tool(name, arguments, ctx):
+        executed.append(name)
+        return "listed"
+
+    monkeypatch.setattr(agent_loop, "stream_chat_once", always_a_tool_call)
+    monkeypatch.setattr(builtin_tools, "call_builtin_tool", fake_tool)
+
+    async def collect():
+        return [chunk async for chunk in agent_loop.run_chat_with_tools(
+            "http://model", None, "m", [{"role": "user", "content": "go"}], None, None,
+            set(), {"run_shell"}, SimpleNamespace(may_use_host_tools=True, events=None))]
+
+    events = [json.loads(chunk.decode()[len("data:"):]) for chunk in asyncio.run(collect())]
+    assert len(executed) == agent_loop.MAX_TOOL_ROUNDS
+    assert not any("error" in event for event in events)
+    assert events[-1] == {"done": True}
+    note = events[-2]["delta"]
+    assert f"Stopped after {agent_loop.MAX_TOOL_ROUNDS} rounds of tool calls" in note
+    assert "run_shell" in note

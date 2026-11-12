@@ -18,7 +18,7 @@ async def run_chat_with_tools(base_url: str, api_key: str | None, model: str, me
         tools = tools[:max_tools]
     working_messages = list(messages)
 
-    for _round in range(MAX_TOOL_ROUNDS):
+    for round_number in range(MAX_TOOL_ROUNDS + 1):
         text = ""
         tool_calls: list[dict] = []
         had_error = False
@@ -38,6 +38,11 @@ async def run_chat_with_tools(base_url: str, api_key: str | None, model: str, me
             return
 
         if not tool_calls:
+            yield _sse_line({"done": True})
+            return
+
+        if round_number == MAX_TOOL_ROUNDS:
+            yield _sse_line({"delta": _round_limit_note(tool_calls)})
             yield _sse_line({"done": True})
             return
 
@@ -64,7 +69,10 @@ async def run_chat_with_tools(base_url: str, api_key: str | None, model: str, me
                 "role": "tool", "tool_call_id": call["id"], "content": result,
             })
 
-    yield _sse_line({"error": "tool-call round limit reached"})
+def _round_limit_note(unrun_calls: list[dict]) -> str:
+    names = ", ".join(sorted({call.get("name") or "a tool" for call in unrun_calls}))
+    return (f"\n\n(Stopped after {MAX_TOOL_ROUNDS} rounds of tool calls without a final answer. "
+            f"It then asked for {names}, which did not run. Say \"continue\" to let it carry on.)")
 
 def _is_json_object(text: str) -> bool:
     try:
