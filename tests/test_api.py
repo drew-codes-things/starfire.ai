@@ -333,3 +333,32 @@ def test_pending_approvals_are_listed_for_their_owner_only(client):
     finally:
         file_edit_tool.remove_pending(edit_id, user_data.current_user_id.get())
         file_edit_tool.remove_pending(other_id, "someone-else")
+
+
+def test_a_task_the_model_creates_in_a_chat_runs_on_that_chat_endpoint(client, monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    import agent_loop
+
+    endpoint = SimpleNamespace(id="ep1", base_url="http://model", provider="openai", label="Model", kind="api")
+    monkeypatch.setattr(routes, "endpoints", SimpleNamespace(get=lambda endpoint_id: endpoint if endpoint_id == "ep1" else None))
+    monkeypatch.setattr(routes, "api_keys", SimpleNamespace(load=lambda: {}))
+    monkeypatch.setattr(routes, "usage", SimpleNamespace(record=lambda *args: None))
+    create_call = {"id": "c1", "name": "manage_tasks", "arguments": {
+        "action": "create", "prompt": "Summarise my notes", "schedule": "daily", "scheduled_time": "09:00"}}
+    replies = iter([("tool_calls", [create_call]), ("delta", "Task created."), ("delta", "Here is the summary.")])
+
+    async def fake_stream(*args, **kwargs):
+        yield next(replies)
+
+    monkeypatch.setattr(agent_loop, "stream_chat_once", fake_stream)
+    response = client.post("/api/chat_stream", json={
+        "endpoint_id": "ep1", "model": "m", "enabled_builtin_tools": ["manage_tasks"],
+        "messages": [{"role": "user", "content": "every morning at 9, summarise my notes"}]})
+    assert response.status_code == 200
+    [task] = routes.tasks.list()
+    assert task.endpoint_id == "ep1"
+    run = routes._task_chat_fn(task.endpoint_id, task.model, task.prompt, task.enabled_mcp_servers,
+                               task.enabled_builtin_tools)
+    assert asyncio.run(run) == "Here is the summary."

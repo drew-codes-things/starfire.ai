@@ -77,7 +77,7 @@ def _current_user_is_active_admin() -> bool:
     user = auth_routes.users.find_by_id(user_id) if user_id else None
     return bool(user) and user.role == "admin" and not user.disabled
 
-def _tool_context(base_url: str = "", api_key: str | None = None, model: str = "",
+def _tool_context(base_url: str = "", api_key: str | None = None, model: str = "", endpoint_id: str = "",
                    require_edit_approval: bool = False, require_shell_approval: bool = False,
                    interactive: bool = False) -> builtin_tools.ToolContext:
     return builtin_tools.ToolContext(
@@ -85,7 +85,7 @@ def _tool_context(base_url: str = "", api_key: str | None = None, model: str = "
         email_accounts=email_accounts, api_keys=api_keys, notes=notes,
         endpoints=endpoints, generated_files=generated_files,
         comfyui_config=comfyui_config, piper_config=piper_config, custom_workflows=custom_workflows,
-        base_url=base_url, api_key=api_key, model=model,
+        base_url=base_url, api_key=api_key, model=model, endpoint_id=endpoint_id,
         require_edit_approval=require_edit_approval,
         require_shell_approval=require_shell_approval,
         may_use_host_tools=_current_user_is_active_admin(),
@@ -480,7 +480,7 @@ def _task_chat_fn(endpoint_id, model, prompt, enabled_mcp_servers, enabled_built
     if not endpoint:
         raise RuntimeError("task has no valid endpoint configured")
     api_key = _api_key_for(endpoint.id, endpoint.provider)
-    ctx = _tool_context(base_url=endpoint.base_url, api_key=api_key, model=model)
+    ctx = _tool_context(base_url=endpoint.base_url, api_key=api_key, model=model, endpoint_id=endpoint.id)
     tier = model_capabilities.tool_tier(endpoint.provider, model)
     return run_chat_collected(
         endpoint.base_url, api_key, model, [{"role": "user", "content": prompt}],
@@ -726,7 +726,7 @@ async def email_ai_action(account_id: str, uid: str, action: str, body: AiAction
     if not endpoint:
         raise HTTPException(404, "endpoint not found")
     api_key = _api_key_for(endpoint.id, endpoint.provider)
-    ctx = _tool_context(base_url=endpoint.base_url, api_key=api_key, model=body.model)
+    ctx = _tool_context(base_url=endpoint.base_url, api_key=api_key, model=body.model, endpoint_id=endpoint.id)
     try:
         message = email_client.read_message(account, password, folder, uid, mark_seen=False)
         result = await builtin_tools.email_ai_action(action, message, body.instruction, ctx)
@@ -984,7 +984,7 @@ async def chat_stream_endpoint(body: ChatBody):
                 await mcp_manager.connect_server(server)
             except McpConnectionError as e:
                 logger.warning("could not reconnect MCP server %s: %s", server_id, e)
-        ctx = _tool_context(base_url=endpoint.base_url, api_key=api_key, model=body.model,
+        ctx = _tool_context(base_url=endpoint.base_url, api_key=api_key, model=body.model, endpoint_id=endpoint.id,
                             require_edit_approval=body.require_edit_approval,
                             require_shell_approval=body.require_shell_approval, interactive=True)
         tier = model_capabilities.tool_tier(endpoint.provider, body.model)

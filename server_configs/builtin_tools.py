@@ -323,6 +323,7 @@ class ToolContext:
     base_url: str = ""
     api_key: str | None = None
     model: str = ""
+    endpoint_id: str = ""
     require_edit_approval: bool = False
     require_shell_approval: bool = False
     may_use_host_tools: bool = False
@@ -620,7 +621,7 @@ async def _manage_tasks(args: dict, ctx: ToolContext) -> str:
         task = ctx.tasks.add(ScheduledTask(
             id="", name=args.get("name", "")[:80] or prompt[:40], prompt=prompt, schedule=schedule,
             scheduled_time=args.get("scheduled_time", ""), scheduled_day=args.get("scheduled_day", ""),
-            cron_expression=args.get("cron_expression", ""), endpoint_id="", model=ctx.model,
+            cron_expression=args.get("cron_expression", ""), endpoint_id=ctx.endpoint_id, model=ctx.model,
             next_run=next_run,
         ))
         return json.dumps({"id": task.id, "name": task.name, "next_run": task.next_run})
