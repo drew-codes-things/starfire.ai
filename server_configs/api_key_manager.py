@@ -30,7 +30,7 @@ class APIKeyManager:
                 return f.read()
         else:
             key = Fernet.generate_key()
-            with open(self.key_file, 'wb') as f:
+            with os.fdopen(os.open(self.key_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'wb') as f:
                 f.write(key)
             safe_chmod(self.key_file, 0o600)
             return key
