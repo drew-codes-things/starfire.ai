@@ -336,7 +336,7 @@ def client_address(request: Request) -> str:
     peer = request.client.host if request.client else ""
     forwarded = request.headers.get("x-forwarded-for", "")
     if forwarded and is_loopback(peer):
-        return forwarded.split(",")[0].strip()
+        return forwarded.split(",")[-1].strip()
     return peer
 
 

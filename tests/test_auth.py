@@ -141,8 +141,17 @@ def test_forwarded_address_is_only_trusted_from_the_local_proxy():
         scope = {"type": "http", "client": (peer, 1234), "headers": [(b"x-forwarded-for", forwarded.encode())]}
         return Request(scope)
 
-    assert auth.client_address(request_from("127.0.0.1", "203.0.113.5, 10.0.0.1")) == "203.0.113.5"
+    assert auth.client_address(request_from("127.0.0.1", "203.0.113.5")) == "203.0.113.5"
     assert auth.client_address(request_from("192.168.1.50", "203.0.113.5")) == "192.168.1.50"
+
+
+def test_the_address_is_the_one_the_local_proxy_added_not_one_the_client_sent():
+    def request_from(forwarded):
+        scope = {"type": "http", "client": ("127.0.0.1", 1234), "headers": [(b"x-forwarded-for", forwarded.encode())]}
+        return Request(scope)
+
+    assert auth.client_address(request_from("6.6.6.6, 203.0.113.5")) == "203.0.113.5"
+    assert auth.client_address(request_from("7.7.7.7,203.0.113.5 ")) == "203.0.113.5"
 
 
 @pytest.fixture
