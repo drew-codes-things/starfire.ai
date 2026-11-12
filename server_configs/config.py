@@ -12,7 +12,7 @@ class AppConfig(BaseSettings):
     cookie_secure: bool = True
     task_model: str = ""
     task_num_ctx: int = 0
-    own_tools_models: str = "Arty,assistant-core,arty/*"
+    own_tools_models: str = "Arty,assistant-core,arty/*,own/*"
     inline_media_prefixes: str = "/arty-files/"
     arty_base_url: str = ""
     arty_phone_url: str = ""

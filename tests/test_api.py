@@ -156,6 +156,7 @@ def test_config_reports_version_and_model_patterns(client):
     assert data["version"] == VERSION
     assert "Arty" in data["own_tools_models"]
     assert "assistant-core" in data["own_tools_models"]
+    assert "own/*" in data["own_tools_models"]
     assert data["inline_media_prefixes"] == ["/arty-files/"]
 
 

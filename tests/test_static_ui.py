@@ -164,4 +164,4 @@ def test_the_offline_fallback_treats_arty_and_its_old_name_as_bringing_their_own
     fallback = re.search(r"own_tools_models: \[([^\]]*)\]", read("app.js"))
     assert fallback, "app.js has no own_tools_models fallback"
     names = re.findall(r"'([^']+)'", fallback.group(1))
-    assert {"Arty", "assistant-core", "arty/*"} <= set(names)
+    assert {"Arty", "assistant-core", "arty/*", "own/*"} <= set(names)
