@@ -1,4 +1,5 @@
 import os
+import stat
 import sys
 
 import bcrypt
@@ -273,3 +274,12 @@ def test_the_arty_devices_api_is_admin_only_even_to_read():
 
 def test_the_login_page_can_read_where_to_go_next():
     assert auth.is_public("/loginNext.js")
+
+
+def test_logging_out_keeps_the_sessions_file_private(tmp_path):
+    sessions = SessionStore(str(tmp_path))
+    token = sessions.create("user-1")
+    sessions.create("user-2")
+    os.chmod(sessions.path, 0o644)
+    sessions.revoke(token)
+    assert stat.S_IMODE(os.stat(sessions.path).st_mode) == 0o600

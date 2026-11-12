@@ -285,6 +285,7 @@ class SessionStore:
             sessions = _read_json(self.path, dict)
             if sessions.pop(_token_digest(token), None) is not None:
                 atomic_write_json(self.path, sessions)
+                os.chmod(self.path, 0o600)
 
     def revoke_all_for(self, user_id: str) -> None:
         with self._lock:
