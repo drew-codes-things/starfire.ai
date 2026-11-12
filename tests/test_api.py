@@ -154,23 +154,21 @@ def test_prompts_and_memory(client):
 def test_config_reports_version_and_model_patterns(client):
     data = client.get("/api/config").json()
     assert data["version"] == VERSION
-    assert "Arty" in data["own_tools_models"]
-    assert "assistant-core" in data["own_tools_models"]
-    assert "own/*" in data["own_tools_models"]
+    assert data["own_tools_models"] == ["Arty", "assistant-core", "arty/*"]
     assert data["inline_media_prefixes"] == ["/arty-files/"]
 
 
 def test_config_lists_only_the_patterns_of_models_with_a_server_voice(client, monkeypatch):
-    monkeypatch.setattr(routes.config, "model_voices", "own/*=secret-voice.onnx@1.1")
+    monkeypatch.setattr(routes.config, "model_voices", "side/*=secret-voice.onnx@1.1")
     data = client.get("/api/config").json()
-    assert data["voice_models"] == ["own/*"]
+    assert data["voice_models"] == ["side/*"]
     assert "secret-voice" not in str(data)
 
 
 def test_a_broken_voice_setting_is_logged_and_leaves_voices_off(client, monkeypatch, caplog):
-    monkeypatch.setattr(routes.config, "model_voices", "own/*=../escape.onnx")
+    monkeypatch.setattr(routes.config, "model_voices", "side/*=../escape.onnx")
     assert client.get("/api/config").json()["voice_models"] == []
-    assert client.post("/api/speak", json={"model": "own/Nova", "text": "Hi."}).status_code == 404
+    assert client.post("/api/speak", json={"model": "side/one", "text": "Hi."}).status_code == 404
     assert "MODEL_VOICES is ignored" in caplog.text
 
 
@@ -180,10 +178,10 @@ def test_speak_gives_wav_audio_in_the_model_voice(client, monkeypatch):
     async def fake_speak(text, rule, voices_dir):
         spoken.append((text, rule.voice_file, rule.speed, voices_dir))
         return b"RIFF-audio"
-    monkeypatch.setattr(routes.config, "model_voices", "own/*=v.onnx@1.1")
+    monkeypatch.setattr(routes.config, "model_voices", "side/*=v.onnx@1.1")
     monkeypatch.setattr(routes.config, "model_voices_dir", "/voices")
     monkeypatch.setattr(routes.model_voices, "speak", fake_speak)
-    response = client.post("/api/speak", json={"model": "own/Nova", "text": "Hello there."})
+    response = client.post("/api/speak", json={"model": "side/one", "text": "Hello there."})
     assert response.status_code == 200
     assert response.headers["content-type"] == "audio/wav"
     assert response.content == b"RIFF-audio"
@@ -191,16 +189,16 @@ def test_speak_gives_wav_audio_in_the_model_voice(client, monkeypatch):
 
 
 def test_speak_refuses_models_without_a_voice_and_bad_text(client, monkeypatch):
-    monkeypatch.setattr(routes.config, "model_voices", "own/*=v.onnx")
+    monkeypatch.setattr(routes.config, "model_voices", "side/*=v.onnx")
     assert client.post("/api/speak", json={"model": "qwen3:14b", "text": "Hi."}).status_code == 404
-    assert client.post("/api/speak", json={"model": "own/Nova", "text": "   "}).status_code == 400
-    assert client.post("/api/speak", json={"model": "own/Nova", "text": "a" * 601}).status_code == 400
+    assert client.post("/api/speak", json={"model": "side/one", "text": "   "}).status_code == 400
+    assert client.post("/api/speak", json={"model": "side/one", "text": "a" * 601}).status_code == 400
 
 
 def test_speak_reports_a_missing_voice_file(client, monkeypatch, tmp_path):
-    monkeypatch.setattr(routes.config, "model_voices", "own/*=gone.onnx")
+    monkeypatch.setattr(routes.config, "model_voices", "side/*=gone.onnx")
     monkeypatch.setattr(routes.config, "model_voices_dir", str(tmp_path))
-    response = client.post("/api/speak", json={"model": "own/Nova", "text": "Hi."})
+    response = client.post("/api/speak", json={"model": "side/one", "text": "Hi."})
     assert response.status_code == 503
     assert "gone.onnx" in response.json()["detail"]
 
@@ -231,9 +229,10 @@ def test_warming_a_brain_model_asks_the_brain_to_load_it(client, monkeypatch):
     monkeypatch.setattr(routes.endpoints, "get", lambda endpoint_id: Endpoint() if endpoint_id == "brain" else None)
     monkeypatch.setattr(routes, "_api_key_for", lambda endpoint_id, provider: "key-1")
     monkeypatch.setattr(routes.httpx, "AsyncClient", FakeClient)
-    assert client.post("/api/warm", json={"endpoint_id": "brain", "model": "own/Nova"}).json() == {"ok": True}
+    monkeypatch.setattr(routes.config, "own_tools_models", "Arty,side/*")
+    assert client.post("/api/warm", json={"endpoint_id": "brain", "model": "side/one"}).json() == {"ok": True}
     assert client.post("/api/warm", json={"endpoint_id": "brain", "model": "gpt-4o"}).json() == {"ok": True}
-    assert calls == [("http://brain:8081/v1/warm", {"model": "own/Nova"}, {"Authorization": "Bearer key-1"})]
+    assert calls == [("http://brain:8081/v1/warm", {"model": "side/one"}, {"Authorization": "Bearer key-1"})]
 
 
 def test_code_check_route(client):

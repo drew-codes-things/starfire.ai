@@ -12,24 +12,24 @@ import model_voices
 
 
 def test_rules_read_a_pattern_a_voice_file_and_an_optional_speed():
-    rules = model_voices.parse_rules("own/*=en_GB-jenny_dioco-medium.onnx@1.1, Arty=en_GB-alan-medium.onnx")
-    assert rules == [model_voices.VoiceRule("own/*", "en_GB-jenny_dioco-medium.onnx", 1.1),
+    rules = model_voices.parse_rules("side/*=en_GB-jenny_dioco-medium.onnx@1.1, Arty=en_GB-alan-medium.onnx")
+    assert rules == [model_voices.VoiceRule("side/*", "en_GB-jenny_dioco-medium.onnx", 1.1),
                      model_voices.VoiceRule("Arty", "en_GB-alan-medium.onnx", 1.0)]
     assert model_voices.parse_rules("") == []
 
 
-@pytest.mark.parametrize("setting", ["own/*", "=voice.onnx", "own/*=../voice.onnx", "own/*=/etc/voice.onnx",
-                                     "own/*=voice.wav", "own/*=voice.onnx@fast", "own/*=voice.onnx@9"])
+@pytest.mark.parametrize("setting", ["side/*", "=voice.onnx", "side/*=../voice.onnx", "side/*=/etc/voice.onnx",
+                                     "side/*=voice.wav", "side/*=voice.onnx@fast", "side/*=voice.onnx@9"])
 def test_bad_rules_are_refused_with_the_reason(setting):
     with pytest.raises(model_voices.VoiceError, match="model voice"):
         model_voices.parse_rules(setting)
 
 
 def test_the_first_matching_rule_gives_the_model_its_voice():
-    rules = model_voices.parse_rules("own/*=a.onnx,*=b.onnx")
-    assert model_voices.rule_for("own/Nova", rules).voice_file == "a.onnx"
+    rules = model_voices.parse_rules("side/*=a.onnx,*=b.onnx")
+    assert model_voices.rule_for("side/one", rules).voice_file == "a.onnx"
     assert model_voices.rule_for("qwen3:14b", rules).voice_file == "b.onnx"
-    assert model_voices.rule_for("own/Nova", model_voices.parse_rules("Arty=a.onnx")) is None
+    assert model_voices.rule_for("side/one", model_voices.parse_rules("Arty=a.onnx")) is None
 
 
 def test_spoken_text_is_one_tidy_line_of_limited_length():
@@ -65,7 +65,7 @@ def test_speaking_uses_the_cached_voice_at_the_rule_speed(tmp_path, monkeypatch)
     loads = []
     monkeypatch.setattr(model_voices, "voices", model_voices.VoiceCache())
     monkeypatch.setattr("piper.PiperVoice.load", lambda path: loads.append(path) or fake)
-    rule = model_voices.VoiceRule("own/*", "a.onnx", 1.25)
+    rule = model_voices.VoiceRule("side/*", "a.onnx", 1.25)
     import asyncio
     first = asyncio.run(model_voices.speak("Hi  there.", rule, str(tmp_path)))
     asyncio.run(model_voices.speak("Again.", rule, str(tmp_path)))
