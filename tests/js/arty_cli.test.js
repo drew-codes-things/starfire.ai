@@ -152,3 +152,57 @@ test('a request asked again under an answered id comes back, but a replay of the
   assert.deepEqual(logic.askedAgain([{ type: 'permission', request_id: 'r1', seq: 3 }], answered), []);
   assert.deepEqual(logic.askedAgain([{ type: 'permission', request_id: 'r1', seq: 5 }, { type: 'user', seq: 6 }], answered), ['r1']);
 });
+
+test('a terminal is listed by its own title, with the computer beside it and no repeated folder', () => {
+  const named = { title: 'greeter 2', name: 'VivaDrew', folder: 'greeter', model: 'arty/qwen3:14b', mode: 'plan' };
+  assert.equal(logic.sessionTitle(named), 'greeter 2');
+  assert.equal(logic.sessionLine(named), 'greeter 2 · VivaDrew · arty/qwen3:14b · plan mode');
+  assert.equal(logic.sessionLine({ title: 'docs work', name: 'VivaDrew', folder: 'greeter' }), 'docs work · VivaDrew · greeter · default mode');
+  assert.equal(logic.sessionTitle({ name: 'VivaDrew' }), 'VivaDrew');
+  assert.equal(logic.sessionTitle({}), 'A computer');
+});
+
+test('the conversation from before sharing shows in full, then one line marks where sharing began', () => {
+  const transcript = logic.newTranscript();
+  const events = [
+    { type: 'user', text: 'fix the greet test', history: true },
+    { type: 'tool_call', tool: 'read_file', text: '{"path":"greet.py"}', history: true },
+    { type: 'tool_result', tool: 'read_file', text: 'def greet', history: true },
+    { type: 'assistant', text: 'Fixed.', history: true },
+    { type: 'user', text: 'now the docs' },
+    { type: 'assistant', text: 'On it.' },
+  ];
+  for (const event of events) logic.addEvent(transcript, event);
+  assert.deepEqual(transcript.items.map((item) => item.kind), ['user', 'tools', 'assistant', 'note', 'user', 'assistant']);
+  assert.equal(transcript.items[3].text, logic.SHARED_FROM_HERE);
+  assert.equal(transcript.items[2].text, 'Fixed.');
+  assert.equal(transcript.items[5].text, 'On it.');
+});
+
+test('earlier conversation does not count as activity, so a quiet shared chat reads as waiting', () => {
+  const transcript = logic.newTranscript();
+  logic.addEvent(transcript, { type: 'user', text: 'fix the greet test', history: true });
+  logic.addEvent(transcript, { type: 'tool_call', tool: 'read_file', text: '{}', history: true });
+  assert.deepEqual(logic.activityOf(transcript), { phase: 'idle', text: 'Waiting for a message' });
+});
+
+test('a compacted conversation shows as a marker holding the summary, and the chat carries on after it', () => {
+  const transcript = logic.newTranscript();
+  logic.addEvent(transcript, { type: 'user', text: 'long job' });
+  logic.addEvent(transcript, { type: 'assistant', text: 'Working' });
+  const change = logic.addEvent(transcript, { type: 'compacted', text: 'We fixed greet().' });
+  logic.addEvent(transcript, { type: 'assistant', text: 'Carrying on.' });
+  assert.equal(change.isNew, true);
+  assert.deepEqual(transcript.items.map((item) => item.kind), ['user', 'assistant', 'compacted', 'assistant']);
+  assert.equal(transcript.items[2].text, 'We fixed greet().');
+  assert.equal(transcript.items[3].text, 'Carrying on.');
+  assert.equal(logic.activityOf(transcript).phase, 'working');
+});
+
+test('a compacted marker with no summary still shows, and the viewer keeps room for a long history', () => {
+  const transcript = logic.newTranscript();
+  logic.addEvent(transcript, { type: 'compacted', history: true });
+  assert.equal(transcript.items[0].kind, 'compacted');
+  assert.equal(transcript.items[0].text, '');
+  assert.ok(logic.MAX_KEPT_ITEMS >= 2000);
+});

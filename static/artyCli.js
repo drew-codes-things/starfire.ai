@@ -110,6 +110,11 @@ function toolsView() {
 
 function itemView(item) {
   if (item.kind === 'tools') return toolsView();
+  if (item.kind === 'compacted') {
+    const summary = el('div', { class: 'arty-cli-steps' });
+    const element = el('details', { class: 'arty-cli-tools arty-cli-compacted' }, el('summary', {}, COMPACTED_LINE), summary);
+    return { element, update: (current) => summary.replaceChildren(...(current.text ? markdownNodes(current.text) : [NO_SUMMARY_SHOWN])) };
+  }
   if (item.kind === 'note') {
     const element = el('p', { class: item.problem ? 'arty-cli-note problem' : 'arty-cli-note' }, item.text);
     return { element, update: (current) => element.replaceChildren(current.text) };
@@ -152,8 +157,10 @@ function transcriptView(element) {
     },
     add(events) {
       for (const event of events || []) {
+        const firstNewId = model.nextId;
         const change = addEvent(model, event);
-        if (change) show(change);
+        for (const item of addedSince(model, firstNewId)) show({ item, isNew: true });
+        if (change && !change.isNew) show(change);
       }
       dropOldest();
     },
@@ -220,7 +227,7 @@ function sessionHeader() {
     element,
     show(session, status, tone = '') {
       if (session) {
-        name.replaceChildren(computerName(session));
+        name.replaceChildren(sessionTitle(session));
         details.replaceChildren(sessionDetails(session));
       }
       state.replaceChildren(status);
@@ -242,7 +249,7 @@ function sidePanel(currentId) {
   const element = el('aside', { class: 'arty-cli-side', 'aria-label': 'Session details' },
     el('h3', {}, 'Session'), el('dl', {}, rows.flatMap((row) => row.nodes)),
     el('h3', {}, 'Waiting for you'), asking,
-    el('h3', {}, 'Computers'), others);
+    el('h3', {}, 'Terminals'), others);
   return {
     element,
     show(session, status) {
@@ -264,8 +271,8 @@ function sidePanel(currentId) {
     },
     sessions(list) {
       others.replaceChildren(...list.map((session) => el('li', {}, session.id === currentId
-        ? el('span', { class: 'arty-cli-current' }, computerName(session))
-        : el('button', { type: 'button', class: 'arty-cli-switch', onclick: () => openSession(session.id) }, computerName(session),
+        ? el('span', { class: 'arty-cli-current' }, sessionTitle(session))
+        : el('button', { type: 'button', class: 'arty-cli-switch', onclick: () => openSession(session.id) }, sessionTitle(session),
           session.waiting_for?.length ? el('span', { class: 'arty-cli-badge' }, ' needs an answer') : null))));
     },
   };

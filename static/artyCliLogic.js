@@ -6,7 +6,10 @@ const DEFAULT_MODE = 'default';
 const ON_THE_COMPUTER = 'On the computer';
 const THE_COMPUTER = 'the computer';
 const SESSION_ENDED = 'The session ended on the computer.';
-const MAX_KEPT_ITEMS = 500;
+const SHARED_FROM_HERE = 'Sharing started here. Everything above is the earlier conversation.';
+const COMPACTED_LINE = 'Conversation compacted: Arty carries on from this summary';
+const NO_SUMMARY_SHOWN = 'No summary was kept.';
+const MAX_KEPT_ITEMS = 2000;
 const FINISHED_AFTER_MS = 4000;
 const MAX_REMEMBERED_QUESTIONS = 100;
 const NEAR_BOTTOM_PX = 48;
@@ -28,16 +31,21 @@ function computerName(session) {
   return String(session?.name || UNNAMED_COMPUTER);
 }
 
+function sessionTitle(session) {
+  return String(session?.title || computerName(session));
+}
+
 function sessionDetails(session) {
   const parts = [];
-  if (session?.folder) parts.push(String(session.folder));
+  if (session?.title && session?.name) parts.push(String(session.name));
+  if (session?.folder && !sessionTitle(session).startsWith(String(session.folder))) parts.push(String(session.folder));
   if (session?.model) parts.push(String(session.model));
   parts.push(`${session?.mode || DEFAULT_MODE} mode`);
   return parts.join(' · ');
 }
 
 function sessionLine(session) {
-  return `${computerName(session)} · ${sessionDetails(session)}`;
+  return `${sessionTitle(session)} · ${sessionDetails(session)}`;
 }
 
 function fileAction(done, doing) {
@@ -170,7 +178,20 @@ function diffTone(line) {
 }
 
 function newTranscript() {
-  return { items: [], questions: new Map(), last: null, nextId: 1 };
+  return { items: [], questions: new Map(), last: null, nextId: 1, inHistory: false };
+}
+
+function addedSince(transcript, firstNewId) {
+  const start = transcript.items.findLastIndex((item) => item.id < firstNewId) + 1;
+  return transcript.items.slice(start);
+}
+
+function markSharingStart(transcript, event) {
+  if (event?.history) transcript.inHistory = true;
+  else if (transcript.inHistory) {
+    transcript.inHistory = false;
+    addNote(transcript, SHARED_FROM_HERE);
+  }
 }
 
 function pushed(transcript, fields) {
@@ -238,6 +259,7 @@ function eventChange(transcript, event) {
       return null;
     case 'permission_answered':
       return pushed(transcript, { kind: 'note', text: answeredLine(event, transcript.questions.get(String(event.request_id))), problem: false });
+    case 'compacted': return pushed(transcript, { kind: 'compacted', text });
     case 'status': return text ? pushed(transcript, { kind: 'note', text, problem: false }) : null;
     case 'error': return pushed(transcript, { kind: 'note', text: text || 'Something went wrong on the computer.', problem: true });
     case 'end': return pushed(transcript, { kind: 'note', text: SESSION_ENDED, problem: false });
@@ -246,8 +268,9 @@ function eventChange(transcript, event) {
 }
 
 function addEvent(transcript, event) {
+  markSharingStart(transcript, event);
   const change = eventChange(transcript, event);
-  if (MOVES_ACTIVITY.has(event?.type)) {
+  if (MOVES_ACTIVITY.has(event?.type) && !event.history) {
     transcript.last = { type: event.type, step: event.type === 'tool_call' ? change.item.steps.at(-1) : null };
   }
   return change;
@@ -397,7 +420,8 @@ function isSessionId(value) {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    MAX_KEPT_ITEMS, FINISHED_AFTER_MS, computerName, sessionDetails, sessionLine, toolSummary, stepLine, readableInput, diffTone,
+    MAX_KEPT_ITEMS, FINISHED_AFTER_MS, SHARED_FROM_HERE, COMPACTED_LINE, NO_SUMMARY_SHOWN, computerName, sessionTitle,
+    sessionDetails, sessionLine, addedSince, toolSummary, stepLine, readableInput, diffTone,
     newTranscript, addNote, addEvent, trimTranscript, activityOf, isNearBottom, markdownBlocks, permissionText, permissionPrompt,
     openRequests, askedAgain, FIRST_POLL, nextPoll, isSessionId,
   };

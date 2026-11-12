@@ -174,3 +174,29 @@ test('an answer is sent once and its card goes, and after the end the composer s
   assert.match(allText(root), /can't take messages/);
   assert.match(allText(root), /Session ended/);
 });
+
+test('a shared terminal shows its title, the earlier conversation and the compacted summary without markup', async (t) => {
+  const info = { ...SESSION_INFO, title: 'greeter 2' };
+  const events = [
+    { seq: 1, type: 'compacted', text: 'We fixed **greet()** <img src=x onerror=alert(1)>', history: true },
+    { seq: 2, type: 'user', text: 'now the docs', history: true },
+    { seq: 3, type: 'assistant', text: 'Docs done.', history: true },
+    { seq: 4, type: 'user', text: 'ship it' },
+  ];
+  const { root, close } = openPage([
+    ['/sessions/' + SESSION + '/events', 'GET', sequence(() => reply(200, { events, next: 4, ended: false, missed: false, session: info }))],
+    ['/api/arty-cli/sessions', 'GET', () => reply(200, { sessions: [info] })],
+  ]);
+  t.after(close);
+  for (let round = 0; round < 5; round += 1) await settle();
+  const text = allText(root);
+  assert.match(text, /greeter 2/);
+  assert.match(text, /Conversation compacted/);
+  assert.match(text, /We fixed/);
+  assert.match(text, /now the docs/);
+  assert.match(text, /Docs done\./);
+  assert.match(text, /Sharing started here/);
+  assert.equal(byClass(root, 'arty-cli-compacted').length, 1);
+  const pictures = allElements(root).filter((element) => element.tag === 'img').map((image) => image.attributes.src);
+  assert.deepEqual([...new Set(pictures)], ['assets/logo.svg']);
+});

@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Added
+- Arty CLI page: a shared terminal opens with its whole conversation so far (sent by Arty CLI
+  when sharing starts, marked where sharing began), a compacted conversation shows as a marker
+  that opens to the summary Arty carries on from, and each terminal is listed under its own
+  title (folder name, numbered when two share a folder) with the computer beside it. The page
+  keeps up to 2000 transcript items.
 - Arty devices page (`/arty-devices.html`, admins only, linked from Settings > Accounts):
   approve a computer waiting to join Arty (opened from the QR code or link Arty shows, with the
   code typed to match), list approved devices and turn one off, and make a named key with a

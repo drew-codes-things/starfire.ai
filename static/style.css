@@ -1711,6 +1711,8 @@ body.login-page {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.arty-cli-compacted { padding-block: var(--s-2); border-block: 1px dashed var(--line-strong); color: var(--muted); }
+.arty-cli-compacted .arty-cli-steps { color: var(--muted); }
 .arty-cli-diff-added { color: var(--ok); }
 .arty-cli-diff-removed { color: var(--accent-text); }
 .arty-cli-diff-marker { color: var(--faint); }
