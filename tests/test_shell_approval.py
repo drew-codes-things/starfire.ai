@@ -83,3 +83,40 @@ def test_execute_tool_streams_events_while_the_tool_waits():
         assert seen == [("event", {"shell_pending": {"pending_id": "p1", "command": "ls"}}), ("result", "done")]
 
     asyncio.run(run())
+
+
+def stream_one_tool_result(monkeypatch, tool_name, tool_result):
+    import json
+
+    replies = iter([("tool_calls", [{"id": "c1", "name": tool_name, "arguments": {}}]), ("delta", "finished")])
+
+    async def fake_stream(base_url, api_key, model, messages, system, options, tools=None, **kwargs):
+        yield next(replies)
+
+    async def fake_tool(name, arguments, ctx):
+        return tool_result
+
+    monkeypatch.setattr(agent_loop, "stream_chat_once", fake_stream)
+    monkeypatch.setattr(builtin_tools, "call_builtin_tool", fake_tool)
+
+    async def collect():
+        return [chunk async for chunk in agent_loop.run_chat_with_tools(
+            "http://model", None, "m", [{"role": "user", "content": "go"}], None, None,
+            set(), {tool_name}, SimpleNamespace(may_use_host_tools=True, events=None))]
+
+    events = [json.loads(chunk.decode()[len("data:"):]) for chunk in asyncio.run(collect())]
+    return next(event["tool_result"]["result"] for event in events if "tool_result" in event)
+
+
+def test_a_long_edit_result_reaches_the_page_whole_so_its_diff_and_approval_show(monkeypatch):
+    import json
+
+    long_diff = "\n".join(f"+line {number}" for number in range(1000))
+    staged = json.dumps({"staged": True, "pending_id": "p1", "path": "/srv/x.py", "diff": long_diff})
+    sent = stream_one_tool_result(monkeypatch, "edit_file", staged)
+    assert json.loads(sent) == {"staged": True, "pending_id": "p1", "path": "/srv/x.py", "diff": long_diff}
+
+
+def test_long_plain_tool_output_is_still_shortened_for_the_page(monkeypatch):
+    sent = stream_one_tool_result(monkeypatch, "run_shell", "x" * 50000)
+    assert sent == "x" * agent_loop.TOOL_RESULT_DISPLAY_CHARS

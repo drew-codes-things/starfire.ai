@@ -6,6 +6,7 @@ from chat_stream import _sse_line, stream_chat_once
 from mcp_manager import mcp_manager
 
 MAX_TOOL_ROUNDS = 5
+TOOL_RESULT_DISPLAY_CHARS = 2000
 
 async def run_chat_with_tools(base_url: str, api_key: str | None, model: str, messages: list[dict],
                                system: str | None, options: dict | None, enabled_server_ids: set[str],
@@ -58,12 +59,23 @@ async def run_chat_with_tools(base_url: str, api_key: str | None, model: str, me
                     yield _sse_line(payload)
                 else:
                     result = payload
-            yield _sse_line({"tool_result": {"name": call["name"], "result": result[:2000]}})
+            yield _sse_line({"tool_result": {"name": call["name"], "result": _result_for_page(call["name"], result)}})
             working_messages.append({
                 "role": "tool", "tool_call_id": call["id"], "content": result,
             })
 
     yield _sse_line({"error": "tool-call round limit reached"})
+
+def _is_json_object(text: str) -> bool:
+    try:
+        return isinstance(json.loads(text), dict)
+    except ValueError:
+        return False
+
+def _result_for_page(tool_name: str, result: str) -> str:
+    if builtin_tools.is_builtin_tool(tool_name) and _is_json_object(result):
+        return result
+    return result[:TOOL_RESULT_DISPLAY_CHARS]
 
 def _mcp_server_id(tool_name: str) -> str:
     return tool_name.split("__", 2)[1] if tool_name.count("__") >= 2 else ""
