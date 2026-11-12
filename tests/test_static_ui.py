@@ -13,6 +13,11 @@ IDS_BUILT_BY_SCRIPTS = {"emailAiResult", "emailReplyBox", "ollamaStartBtn", "oll
 UNLABELLED_TYPES = {"hidden"}
 HEX_COLOUR = re.compile(r"#[0-9a-fA-F]{3,8}\b")
 TOKEN_BLOCK = re.compile(r"^(?::root|html\.light) \{.*?^\}", re.S | re.M)
+MOTION_DECLARATION = re.compile(r"(?<![\w-])(?:transition|animation): ([^;]+);")
+RAW_TIMING = re.compile(r"(?<![\w.-])(?:\d*\.\d+|[1-9]\d*)m?s\b|(?<![\w-])(?:ease|ease-out|ease-in|linear)(?![\w-])")
+LOOPING = "infinite"
+RADIUS_DECLARATION = re.compile(r"border-radius: ([^;]+);")
+RADIUS_PART = re.compile(r"var\(--r-(?:xs|sm|md|lg|xl|pill)\)|0|50%")
 
 
 def read(name: str) -> str:
@@ -124,7 +129,20 @@ def test_colours_come_from_tokens():
     assert not stray, f"style.css has colours outside the token blocks: {stray}"
 
 
+def test_one_shot_motion_uses_the_shared_timing_tokens():
+    rules = TOKEN_BLOCK.sub("", read("style.css"))
+    raw = [value for value in MOTION_DECLARATION.findall(rules) if LOOPING not in value and RAW_TIMING.search(value)]
+    assert not raw, f"transitions and animations should use --dur, --dur-rise and --ease: {raw}"
+
+
+def test_corner_radii_come_from_tokens():
+    values = RADIUS_DECLARATION.findall(TOKEN_BLOCK.sub("", read("style.css")))
+    raw = [value for value in values if not all(RADIUS_PART.fullmatch(part) for part in value.split())]
+    assert not raw, f"border-radius should use the --r-* tokens: {raw}"
+
+
 def test_both_themes_define_the_same_colour_roles():
+
     css = read("style.css")
     dark = re.search(r"^:root \{(.*?)^\}", css, re.S | re.M).group(1)
     light = re.search(r"^html\.light \{(.*?)^\}", css, re.S | re.M).group(1)
