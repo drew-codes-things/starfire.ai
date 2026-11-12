@@ -32,7 +32,7 @@ def test_replies_in_a_side_chat_see_the_main_chat():
 def test_side_chats_are_never_saved():
     workspace = read("workspace.js")
     assert re.search(r"function isTemporaryChat\(\) \{ return tempChatToggle\.checked \|\| isSideChatOpen\(\); \}", workspace)
-    fork = re.search(r"async function forkSession\(uptoIdx\) \{(.*?)\n\}", read("app.js"), re.S)
+    fork = re.search(r"async function forkSession\(uptoIdx, textBeingSent\) \{(.*?)\n\}", read("app.js"), re.S)
     assert fork and "isTemporaryChat()" in fork.group(1), "forkSession saves temporary and side chats"
 
 

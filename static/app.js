@@ -621,7 +621,7 @@ function addRegenerateButton(actions, idx) {
     const text = messages[userIdx].content;
     const opt = select.selectedOptions[0];
     const overrideModel = opt ? { id: opt.value, endpoint_id: opt.dataset.endpointId } : null;
-    await forkSession(userIdx);
+    await forkSession(userIdx, messages[userIdx].display ?? text);
     rerenderAll();
     send(text, overrideModel);
   };
@@ -868,13 +868,13 @@ function startEdit(idx) {
   saveBtn.onclick = async () => {
     const newText = ta.value.trim();
     if (!newText) return;
-    await forkSession(idx);
+    await forkSession(idx, newText);
     rerenderAll();
     send(newText);
   };
 }
 
-async function forkSession(uptoIdx) {
+async function forkSession(uptoIdx, textBeingSent) {
   const forkedMessages = messages.slice(0, uptoIdx);
   if (isTemporaryChat()) {
     messages = forkedMessages;
@@ -885,7 +885,7 @@ async function forkSession(uptoIdx) {
     const r = await fetch('/api/chat/sessions', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        title: (forkedMessages[0]?.content || 'New chat').slice(0, 60),
+        title: chatTitleFrom(forkedMessages, textBeingSent),
         messages: forkedMessages,
         parent_session_id: parentId || '',
         branch_point: uptoIdx,

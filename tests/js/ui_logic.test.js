@@ -230,6 +230,19 @@ test('the dialog field and the one-line add fields hand Enter to that helper', (
   }
 });
 
+test('a chat is named after its first user message', () => {
+  const messages = [{ role: 'user', content: 'Plan a calm weekend' }, { role: 'assistant', content: 'Sure' }];
+  assert.equal(logic.chatTitleFrom(messages), 'Plan a calm weekend');
+  assert.equal(logic.chatTitleFrom([{ role: 'user', content: 'x\n\nAttached files:\n\n<file>', display: 'Read this' }]), 'Read this');
+  assert.equal(logic.chatTitleFrom([{ role: 'user', content: 'a'.repeat(200) }]).length, logic.CHAT_TITLE_CHARS);
+});
+
+test('a branch cut before the first message is named after the text being sent, not "New chat"', () => {
+  assert.equal(logic.chatTitleFrom([], '  Plan a calm Sunday  '), 'Plan a calm Sunday');
+  assert.equal(logic.chatTitleFrom([], ''), 'New chat');
+  assert.equal(logic.chatTitleFrom([{ role: 'user', content: '' }], 'Second try'), 'Second try');
+});
+
 test('Escape on a menu or dialog closes it and is used up, so it cannot also close what is behind or stop a reply', () => {
   let closed = 0;
   const onKey = logic.closeOnEscape(() => { closed += 1; });

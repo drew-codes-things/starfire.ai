@@ -5,6 +5,8 @@ const TOAST_MS = 2800;
 const TOAST_ERROR_MS = 5000;
 const TOAST_FADE_MS = 220;
 const THEME_CHOICES = ['system', 'light', 'dark'];
+const CHAT_TITLE_CHARS = 60;
+const UNTITLED_CHAT = 'New chat';
 
 function sentenceCase(text) {
   return text ? text.charAt(0).toUpperCase() + text.slice(1) : text;
@@ -95,6 +97,12 @@ function closeOnEscape(close) {
   };
 }
 
+function chatTitleFrom(messages, textBeingSent = '') {
+  const first = messages.find(message => message.role === 'user');
+  const shown = first ? (first.display ?? first.content) : '';
+  return (shown || textBeingSent || '').trim().slice(0, CHAT_TITLE_CHARS) || UNTITLED_CHAT;
+}
+
 function isLastAssistantMessage(messages, index) {
   if (!messages[index] || messages[index].role !== 'assistant') return false;
   return !messages.slice(index + 1).some(message => message.role === 'assistant');
@@ -135,7 +143,7 @@ if (typeof module !== 'undefined' && module.exports) {
     DAY_MS, TOAST_MS, TOAST_ERROR_MS, TOAST_FADE_MS,
     sentenceCase, dateGroupLabel, themeChoiceFrom, themeIsLight, showToast, removalQuestion, confirmRemove,
     pendingApprovalCards, resolveChatControls, isLastAssistantMessage,
-    submitOnEnter, closeOnEscape,
+    CHAT_TITLE_CHARS, submitOnEnter, closeOnEscape, chatTitleFrom,
     MAX_SPOKEN_CHARS, takeSpokenSentences, speakableText, spokenPieces,
   };
 }
