@@ -31,6 +31,7 @@ HOME_PATHS = frozenset({"/", "/index.html"})
 SETUP_PATHS = frozenset({SETUP_PAGE, "/setup.js", "/api/auth/setup"})
 MIN_PASSWORD_CHARS = 10
 MAX_FIELD_CHARS = 256
+MAX_PASSWORD_BYTES = 72
 PUBLIC_PREFIXES = ("/assets/", "/vendor/fonts/")
 ROLES = ("admin", "user")
 UNUSED_HASH = bcrypt.hashpw(b"starfire-timing-equaliser", bcrypt.gensalt()).decode()
@@ -43,14 +44,19 @@ class AccountError(ValueError):
 def check_new_password(password: str, confirm: str) -> None:
     if len(password) < MIN_PASSWORD_CHARS:
         raise AccountError(f"use at least {MIN_PASSWORD_CHARS} characters")
-    if len(password) > MAX_FIELD_CHARS:
-        raise AccountError("that password is too long")
+    if len(password.encode()) > MAX_PASSWORD_BYTES:
+        raise AccountError(f"that password is too long: use at most {MAX_PASSWORD_BYTES} bytes "
+                           "(fewer characters if it has accents or emoji)")
     if password != confirm:
         raise AccountError("the two passwords don't match")
 
 
+def bcrypt_input(password: str) -> bytes:
+    return password.encode()[:MAX_PASSWORD_BYTES]
+
+
 def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+    return bcrypt.hashpw(bcrypt_input(password), bcrypt.gensalt()).decode()
 
 
 def _now_iso() -> str:
@@ -121,7 +127,7 @@ class UserStore:
     def verify(self, email: str, password: str) -> User | None:
         user = self.find_by_email(email)
         stored_hash = user.password_hash if user else UNUSED_HASH
-        matches = bcrypt.checkpw(password.encode(), stored_hash.encode())
+        matches = bcrypt.checkpw(bcrypt_input(password), stored_hash.encode())
         return user if user and matches and not user.disabled else None
 
     def first_admin(self) -> User | None:

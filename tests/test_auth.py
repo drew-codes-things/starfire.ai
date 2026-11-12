@@ -296,3 +296,25 @@ def test_logging_out_keeps_the_sessions_file_private(tmp_path):
     os.chmod(sessions.path, 0o644)
     sessions.revoke(token)
     assert stat.S_IMODE(os.stat(sessions.path).st_mode) == 0o600
+
+
+LONG_PASSWORD = "a long passphrase that keeps going " * 3
+
+
+def test_a_login_with_a_password_longer_than_bcrypt_reads_is_refused_not_a_crash(login_client):
+    response = login_client.post("/api/auth/login", json={"email": "drew@example.com", "password": LONG_PASSWORD})
+    assert response.status_code == 401
+
+
+def test_a_long_password_set_before_bcrypt_5_still_logs_in(users):
+    first_bytes_only = bcrypt.hashpw(LONG_PASSWORD.encode()[:auth.MAX_PASSWORD_BYTES], bcrypt.gensalt(rounds=4)).decode()
+    users.upsert("drew@example.com", "Drew", "admin", first_bytes_only)
+    assert users.verify("drew@example.com", LONG_PASSWORD).name == "Drew"
+
+
+def test_new_passwords_must_fit_in_what_bcrypt_reads():
+    with pytest.raises(auth.AccountError, match="too long"):
+        auth.check_new_password(LONG_PASSWORD, LONG_PASSWORD)
+    with pytest.raises(auth.AccountError, match="too long"):
+        auth.check_new_password("é" * 40, "é" * 40)
+    auth.check_new_password("x" * 72, "x" * 72)
