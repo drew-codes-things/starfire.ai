@@ -9,7 +9,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import arty_cli_remote
 import auth
-from test_arty_devices import ARTY_KEY, BRAIN, brain, client_for, setup  # noqa: F401
+import test_arty_devices
+from test_arty_devices import ARTY_KEY, BRAIN, client_for
+
+setup = test_arty_devices.setup
+brain = test_arty_devices.brain
 
 SESSION = "0123456789abcdef"
 
