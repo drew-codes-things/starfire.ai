@@ -278,6 +278,10 @@ path, etc.) - or add any other stdio MCP server yourself by command + args. Enab
 checkbox to include its tools in the next chat message - supported for Ollama (models with
 tool-calling support), OpenAI, and Anthropic.
 
+MCP servers run on the server with the settings and tokens the admin gave them, so only admin
+accounts can use them, the same rule as the shell, file edit and GitHub tools. Other accounts'
+chats run without them.
+
 The same Tools tab also has several built-in (non-MCP) tools - see Memory, Documents, Notes,
 Automations, and Email below for most of them, plus:
 
