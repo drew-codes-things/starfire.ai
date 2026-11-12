@@ -72,6 +72,9 @@ async def _iter_ollama(client: httpx.AsyncClient, url: str, headers: dict, paylo
                 obj = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            if obj.get("error"):
+                yield ("error", f"Ollama: {obj['error']}")
+                return
             message = obj.get("message") or {}
             content = message.get("content")
             if content:
@@ -149,6 +152,11 @@ async def _iter_anthropic(client: httpx.AsyncClient, url: str, headers: dict, pa
             elif event_type == "message_stop":
                 return
 
+def _error_message(error) -> str:
+    if isinstance(error, dict):
+        return str(error.get("message") or error)
+    return str(error)
+
 async def _iter_openai(client: httpx.AsyncClient, url: str, headers: dict, payload: dict):
     async with client.stream("POST", url, headers=headers, json=payload) as r:
         if r.is_error:
@@ -170,6 +178,9 @@ async def _iter_openai(client: httpx.AsyncClient, url: str, headers: dict, paylo
                 obj = json.loads(data)
             except json.JSONDecodeError:
                 continue
+            if obj.get("error"):
+                yield ("error", _error_message(obj["error"]))
+                return
             choices = obj.get("choices") or []
             if not choices:
                 continue
