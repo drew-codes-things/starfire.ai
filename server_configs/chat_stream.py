@@ -4,6 +4,9 @@ import httpx
 
 from providers import _detect_provider, build_chat_url, build_headers, build_tools_param
 
+MAX_ERROR_CHARS = 500
+NO_ERROR_DETAILS = "the model server gave no details"
+
 def _sse_line(payload: dict) -> bytes:
     return f"data: {json.dumps(payload)}\n\n".encode()
 
@@ -62,7 +65,7 @@ async def _iter_ollama(client: httpx.AsyncClient, url: str, headers: dict, paylo
     async with client.stream("POST", url, headers=headers, json=payload) as r:
         if r.is_error:
             body = await r.aread()
-            yield ("error", f"Ollama {r.status_code}: {body.decode(errors='replace')[:500]}")
+            yield ("error", f"Ollama {r.status_code}: {_refusal_text(body)}")
             return
         async for line in r.aiter_lines():
             line = line.strip()
@@ -100,7 +103,7 @@ async def _iter_anthropic(client: httpx.AsyncClient, url: str, headers: dict, pa
     async with client.stream("POST", url, headers=headers, json=payload) as r:
         if r.is_error:
             body = await r.aread()
-            yield ("error", f"Anthropic {r.status_code}: {body.decode(errors='replace')[:500]}")
+            yield ("error", f"Anthropic {r.status_code}: {_refusal_text(body)}")
             return
 
         event_type = None
@@ -157,11 +160,21 @@ def _error_message(error) -> str:
         return str(error.get("message") or error)
     return str(error)
 
+def _refusal_text(body: bytes) -> str:
+    text = body.decode(errors="replace").strip()
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        parsed = None
+    if isinstance(parsed, dict) and parsed.get("error"):
+        text = _error_message(parsed["error"])
+    return text[:MAX_ERROR_CHARS] or NO_ERROR_DETAILS
+
 async def _iter_openai(client: httpx.AsyncClient, url: str, headers: dict, payload: dict):
     async with client.stream("POST", url, headers=headers, json=payload) as r:
         if r.is_error:
             body = await r.aread()
-            yield ("error", f"{r.status_code}: {body.decode(errors='replace')[:500]}")
+            yield ("error", f"{r.status_code}: {_refusal_text(body)}")
             return
 
         call_acc: dict[int, dict] = {}
