@@ -37,6 +37,12 @@
   WCAG AA contrast for every text colour on every surface in both themes.
 
 ### Changed
+- Toasts show at the top centre, so they no longer cover the message box.
+- On phones the chat controls dim the chat behind them and close with a tap outside, and the
+  Arty CLI live view uses the whole screen with a one-line header.
+- Compare starts each column on a different model and shows where the reply will land.
+- Enter adds a memory, a checklist item or a preset from its one-line field.
+- In the sidebar a chat's title gets the room first and its tags take what is left.
 - New visual design from one set of tokens in `static/style.css` (colours, radii, spacing,
   shadows, type sizes), with a softer dark background, neutral greys, and red kept for the
   send button, active states and danger. One outline icon set replaces the text glyphs.
@@ -59,6 +65,13 @@
 - Testable browser logic moved into `static/uiLogic.js`.
 
 ### Fixed
+- Enter in a dialog field no longer reopens the New folder dialog or leaves a new line in the
+  message box, and Escape on a dialog, a chat row menu or the model menu no longer also closes
+  Settings behind it or stops a reply that is streaming.
+- A branch made by editing the first message or regenerating the first reply is named after
+  that message instead of "New chat".
+- A request the model server refuses shows the server's message instead of raw JSON.
+- Port, time and weekday fields in Settings are narrow again.
 - The login and setup pages now load the IBM Plex fonts: `/vendor/fonts.css` and
   `/vendor/fonts/` are reachable without a login.
 - Non-admins no longer open Settings on the hidden Connections tab.
