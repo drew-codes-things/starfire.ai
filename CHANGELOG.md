@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Added
+- Approval cards (Arty CLI Allow/Deny, a shell command's run it/reject, a proposed edit's
+  approve/reject) show a short "New question" flash and ignore clicks, taps, Enter and Space on
+  their buttons until they have been on screen for one second, so a tap aimed at something that
+  just moved, or keys meant for something else, cannot answer them.
 - Arty CLI page: a shared terminal opens with its whole conversation so far (sent by Arty CLI
   when sharing starts, marked where sharing began), a compacted conversation shows as a marker
   that opens to the summary Arty carries on from, and each terminal is listed under its own
