@@ -158,3 +158,38 @@ def test_users_cannot_scan_the_network_or_read_the_hardware(app, admin):
     assert sam.get("/api/discover").status_code == 403
     assert sam.get("/api/hardware").status_code == 403
     assert sam.get("/api/hardware/ollama").status_code == 403
+
+
+@pytest.mark.parametrize("user_id", ["", "../" + "a" * 29, "A" * 32, "a" * 31, "a" * 32 + "/..", None])
+def test_only_real_account_ids_map_to_an_account_folder(tmp_path, user_id):
+    registry = user_data.configure(str(tmp_path))
+    with pytest.raises(user_data.NoUserContext):
+        registry.dir_for(user_id)
+    with user_data.run_as(user_id):
+        with pytest.raises(user_data.NoUserContext):
+            user_data.PerUser("notes").list()
+    assert not os.path.exists(os.path.join(str(tmp_path), "users"))
+
+
+def test_only_account_folders_are_treated_as_accounts(tmp_path):
+    registry = user_data.configure(str(tmp_path))
+    real = "c" * 32
+    os.makedirs(os.path.join(registry.users_dir, real))
+    os.makedirs(os.path.join(registry.users_dir, "not-an-account"))
+    open(os.path.join(registry.users_dir, "d" * 32), "w").close()
+    assert registry.user_ids() == [real]
+    assert not registry.delete_user_data("e" * 32)
+
+
+def test_moving_legacy_data_never_overwrites_an_accounts_own_copy(tmp_path):
+    registry = user_data.configure(str(tmp_path))
+    user_id = "a" * 32
+    with user_data.run_as(user_id):
+        user_data.PerUser("chat_sessions").add(title="Account chat")
+    registry.forget(user_id)
+    ChatSessionStore(str(tmp_path)).add(title="Old chat")
+    os.makedirs(os.path.join(str(tmp_path), "attachments"))
+    assert registry.migrate_legacy(user_id) == []
+    with user_data.run_as(user_id):
+        assert [s.title for s in user_data.PerUser("chat_sessions").list()] == ["Account chat"]
+    assert not os.path.exists(os.path.join(str(tmp_path), "attachments"))

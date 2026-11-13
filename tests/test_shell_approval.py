@@ -149,3 +149,34 @@ def test_a_model_that_keeps_calling_tools_is_stopped_with_a_clear_answer(monkeyp
     note = events[-2]["delta"]
     assert f"Stopped after {agent_loop.MAX_TOOL_ROUNDS} rounds of tool calls" in note
     assert "run_shell" in note
+
+
+def test_a_command_reports_its_exit_code_and_runs_in_the_folder_asked_for(tmp_path):
+    result = asyncio.run(shell_tool.run_shell("pwd; exit 3", str(tmp_path)))
+    assert result.splitlines() == ["(exit code 3)", str(tmp_path)]
+
+
+def test_a_command_in_a_missing_folder_is_an_error_not_a_crash(tmp_path):
+    result = asyncio.run(shell_tool.run_shell("echo hi", str(tmp_path / "missing")))
+    assert result.startswith("error: failed to start command")
+
+
+def test_a_blank_command_is_refused():
+    assert asyncio.run(shell_tool.run_shell("   ")) == "error: command is required"
+    assert asyncio.run(builtin_tools._run_shell({"command": ""}, context(True))) == "error: command is required"
+
+
+def test_a_command_that_runs_too_long_is_stopped(monkeypatch):
+    monkeypatch.setattr(shell_tool, "TIMEOUT_SECONDS", 0.2)
+    result = asyncio.run(shell_tool.run_shell("sleep 5; echo finished"))
+    assert result == "error: command timed out after 0.2s"
+
+
+def test_long_output_is_cut_and_says_so(monkeypatch):
+    monkeypatch.setattr(shell_tool, "MAX_OUTPUT_CHARS", 10)
+    result = asyncio.run(shell_tool.run_shell("printf 'abcdefghijklmnopqrstuvwxyz'"))
+    assert result == "(exit code 0)\nabcdefghij\n... (truncated, output exceeded 10 characters)"
+
+
+def test_waiting_on_a_command_that_was_never_staged_gives_no_decision():
+    assert asyncio.run(shell_tool.wait_for_decision("never-staged")) is None

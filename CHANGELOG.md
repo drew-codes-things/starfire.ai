@@ -79,6 +79,10 @@
   `settingsNotes.js`, `settingsSystem.js`, `compare.js` and `palette.js`. `app.js` keeps the
   keyboard and focus handling, the microphone, the theme and startup. Nothing a user sees
   changes.
+- More server tests (394 to 628): one account reaching another's items by id, admin-only
+  routes, backup restore with unsafe paths, API key storage and which endpoint gets which key,
+  edit and shell approvals, scheduled tasks, email rules, the model's built-in tools and chat
+  provider routing. Server line coverage goes from 64% to 78%. Nothing a user sees changes.
 
 ### Fixed
 - Errors the server used to swallow in silence are now logged with what failed: a store file
