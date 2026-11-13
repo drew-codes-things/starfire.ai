@@ -305,7 +305,8 @@ def test_code_check_route(client):
     assert bad["status"] == "error"
 
 
-def test_pending_shell_commands_can_be_approved_or_rejected(client):
+def test_pending_shell_commands_can_be_approved_or_rejected(client, monkeypatch):
+    monkeypatch.setattr(routes, "_current_user_is_active_admin", lambda: True)
     assert client.get("/api/pending-shell").json()["commands"] == []
     assert client.post("/api/pending-shell/nope/approve").status_code == 404
 

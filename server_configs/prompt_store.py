@@ -6,7 +6,7 @@ import re
 import uuid
 from dataclasses import asdict, dataclass
 
-from atomic_io import atomic_write_json, report_unreadable_store
+from atomic_io import atomic_write_json, holds_file_lock, report_unreadable_store
 
 COMMAND_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 
@@ -53,6 +53,7 @@ class PromptStore:
     def list(self) -> list[Prompt]:
         return sorted(self._load(), key=lambda p: p.command)
 
+    @holds_file_lock()
     def add(self, command: str, title: str, content: str) -> Prompt:
         prompts = self._load()
         command = self._validate(prompts, command, content)
@@ -61,6 +62,7 @@ class PromptStore:
         self._save(prompts)
         return prompt
 
+    @holds_file_lock()
     def update(self, prompt_id: str, command: str, title: str, content: str) -> bool:
         prompts = self._load()
         prompt = next((p for p in prompts if p.id == prompt_id), None)
@@ -72,6 +74,7 @@ class PromptStore:
         self._save(prompts)
         return True
 
+    @holds_file_lock()
     def delete(self, prompt_id: str) -> bool:
         prompts = self._load()
         remaining = [p for p in prompts if p.id != prompt_id]

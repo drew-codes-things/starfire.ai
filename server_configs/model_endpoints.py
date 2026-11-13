@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass
 
 import httpx
 
-from atomic_io import atomic_write_json, report_unreadable_store
+from atomic_io import atomic_write_json, holds_file_lock, report_unreadable_store
 from providers import _detect_provider
 
 logger = logging.getLogger(__name__)
@@ -118,6 +118,7 @@ class ModelEndpointStore:
                 return e
         return None
 
+    @holds_file_lock()
     def add(self, base_url: str, kind: str, label: str = "", model_type: str = "chat") -> ModelEndpoint:
         endpoints = self._load()
         endpoint = ModelEndpoint(
@@ -132,6 +133,7 @@ class ModelEndpointStore:
         self._save(endpoints)
         return endpoint
 
+    @holds_file_lock()
     def delete(self, endpoint_id: str) -> bool:
         endpoints = self._load()
         remaining = [e for e in endpoints if e.id != endpoint_id]

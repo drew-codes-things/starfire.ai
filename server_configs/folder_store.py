@@ -6,7 +6,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 
-from atomic_io import atomic_write_json, report_unreadable_store
+from atomic_io import atomic_write_json, holds_file_lock, report_unreadable_store
 
 MAX_FOLDER_NAME_LENGTH = 60
 
@@ -51,6 +51,7 @@ class FolderStore:
     def get(self, folder_id: str) -> Folder | None:
         return next((f for f in self._load() if f.id == folder_id), None)
 
+    @holds_file_lock()
     def add(self, name: str) -> Folder:
         folders = self._load()
         folder = Folder(id=uuid.uuid4().hex[:12], name=self.clean_name(name))
@@ -58,6 +59,7 @@ class FolderStore:
         self._save(folders)
         return folder
 
+    @holds_file_lock()
     def rename(self, folder_id: str, name: str) -> bool:
         folders = self._load()
         folder = next((f for f in folders if f.id == folder_id), None)
@@ -67,6 +69,7 @@ class FolderStore:
         self._save(folders)
         return True
 
+    @holds_file_lock()
     def delete(self, folder_id: str) -> bool:
         folders = self._load()
         remaining = [f for f in folders if f.id != folder_id]

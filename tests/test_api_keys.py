@@ -50,6 +50,45 @@ def test_a_key_file_left_readable_by_others_is_tightened_when_used(tmp_path):
     assert mode_of(tmp_path / ".key") == 0o600
 
 
+@pytest.fixture
+def open_umask():
+    previous = os.umask(0o022)
+    yield
+    os.umask(previous)
+
+
+def test_the_keys_file_is_written_private(tmp_path, open_umask):
+    keys = APIKeyManager(str(tmp_path))
+    keys.save("endpoint-1", SECRET)
+    assert mode_of(tmp_path / "api_keys.json") == 0o600
+    keys.save("endpoint-2", SECRET)
+    keys.delete("endpoint-1")
+    assert mode_of(tmp_path / "api_keys.json") == 0o600
+    assert sorted(os.listdir(tmp_path)) == [".key", "api_keys.json"]
+
+
+def test_a_keys_file_left_readable_by_others_is_tightened_on_load(tmp_path, caplog):
+    keys = APIKeyManager(str(tmp_path))
+    keys.save("endpoint-1", SECRET)
+    os.chmod(tmp_path / "api_keys.json", 0o644)
+    with caplog.at_level(logging.INFO, logger="api_key_manager"):
+        assert keys.load() == {"endpoint-1": SECRET}
+    assert mode_of(tmp_path / "api_keys.json") == 0o600
+    [record] = [r for r in caplog.records if "api_keys.json" in r.getMessage()]
+    assert record.levelno == logging.INFO and "644" in record.getMessage()
+    assert SECRET not in caplog.text
+
+
+def test_a_private_keys_file_is_left_alone_on_load(tmp_path, caplog):
+    keys = APIKeyManager(str(tmp_path))
+    keys.save("endpoint-1", SECRET)
+    os.chmod(tmp_path / "api_keys.json", 0o400)
+    with caplog.at_level(logging.INFO, logger="api_key_manager"):
+        assert keys.load() == {"endpoint-1": SECRET}
+    assert mode_of(tmp_path / "api_keys.json") == 0o400
+    assert "api_keys.json" not in caplog.text
+
+
 def test_keys_from_another_install_are_skipped_not_a_crash(tmp_path, caplog):
     (tmp_path / "old").mkdir()
     (tmp_path / "new").mkdir()

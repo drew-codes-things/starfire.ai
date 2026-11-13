@@ -5,7 +5,7 @@ import os
 import uuid
 from dataclasses import asdict, dataclass, field
 
-from atomic_io import atomic_write_json, report_unreadable_store
+from atomic_io import atomic_write_json, holds_file_lock, report_unreadable_store
 
 @dataclass
 class Preset:
@@ -56,6 +56,7 @@ class PresetStore:
                 return p
         return None
 
+    @holds_file_lock()
     def add(self, **fields) -> Preset:
         presets = self._load()
         preset = Preset(id=uuid.uuid4().hex[:12], **fields)
@@ -63,6 +64,7 @@ class PresetStore:
         self._save(presets)
         return preset
 
+    @holds_file_lock()
     def delete(self, preset_id: str) -> bool:
         presets = self._load()
         remaining = [p for p in presets if p.id != preset_id]

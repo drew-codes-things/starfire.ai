@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 import embeddings as embeddings_module
 import lexical_search
-from atomic_io import atomic_write_json, report_unreadable_store
+from atomic_io import atomic_write_json, holds_file_lock, report_unreadable_store
 from config import config
 from model_endpoints import detect_ollama
 
@@ -81,6 +81,7 @@ class MemoryStore:
                 return e
         return None
 
+    @holds_file_lock()
     def add(self, text: str, category: str = "fact", source: str = "user") -> MemoryEntry:
         text = text.strip()
         existing = self.find_duplicate(text)
@@ -94,6 +95,7 @@ class MemoryStore:
         self._save(entries)
         return entry
 
+    @holds_file_lock()
     def update(self, memory_id: str, text: str | None = None, category: str | None = None) -> bool:
         entries = self._load()
         found = False
@@ -108,6 +110,7 @@ class MemoryStore:
             self._save(entries)
         return found
 
+    @holds_file_lock()
     def delete(self, memory_id: str) -> bool:
         entries = self._load()
         remaining = [e for e in entries if e.id != memory_id]
@@ -116,6 +119,7 @@ class MemoryStore:
         self._save(remaining)
         return True
 
+    @holds_file_lock()
     def set_pinned(self, memory_id: str, pinned: bool) -> bool:
         entries = self._load()
         found = False
@@ -175,21 +179,31 @@ class MemoryStore:
         return list(dict.fromkeys(ranked + [i for i in boosted_ids if i not in ranked]))
 
     async def _ensure_embeddings(self, entries: list[MemoryEntry], ollama_url: str) -> None:
-        missing = [e for e in entries if not e.embedding]
-        if not missing:
-            return
-        all_entries = self._load()
-        by_id = {e.id: e for e in all_entries}
-        changed = False
-        for entry in missing:
+        new_vectors = {}
+        for entry in entries:
+            if entry.embedding:
+                continue
             vector = await embeddings_module.embed(entry.text, ollama_url)
-            if vector and entry.id in by_id:
-                by_id[entry.id].embedding = vector
-                entry.embedding = vector
-                changed = True
-        if changed:
-            self._save(all_entries)
+            if vector:
+                new_vectors[entry.id] = vector
+        stored = self._store_embeddings(new_vectors) if new_vectors else set()
+        for entry in entries:
+            if entry.id in stored:
+                entry.embedding = new_vectors[entry.id]
 
+    @holds_file_lock()
+    def _store_embeddings(self, vectors: dict[str, list[float]]) -> set[str]:
+        entries = self._load()
+        stored = set()
+        for entry in entries:
+            if entry.id in vectors:
+                entry.embedding = vectors[entry.id]
+                stored.add(entry.id)
+        if stored:
+            self._save(entries)
+        return stored
+
+    @holds_file_lock()
     def _touch(self, memory_ids: set[str]) -> None:
         entries = self._load()
         changed = False

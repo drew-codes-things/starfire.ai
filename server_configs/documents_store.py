@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass
 
 import embeddings as embeddings_module
 import lexical_search
-from atomic_io import atomic_write_json, set_aside_unreadable
+from atomic_io import atomic_write_json, holds_file_lock, set_aside_unreadable
 from config import config
 from model_endpoints import detect_ollama
 
@@ -95,6 +95,7 @@ class DocumentStore:
         raw = self._load_raw()
         return [Document(**d) for d in raw["documents"]]
 
+    @holds_file_lock()
     def add(self, filename: str, raw_bytes: bytes) -> Document:
         text = extract_text(filename, raw_bytes)
         pieces = split_into_chunks(text)
@@ -112,6 +113,7 @@ class DocumentStore:
         self._save_raw(data)
         return doc
 
+    @holds_file_lock()
     def delete(self, document_id: str) -> bool:
         data = self._load_raw()
         remaining_docs = [d for d in data["documents"] if d["id"] != document_id]
@@ -147,7 +149,7 @@ class DocumentStore:
             c["id"]: lexical_search.score(lexical_search.tokenize(query), lexical_search.tokenize(c["text"]))
             for c in chunks
         }
-        ranked_ids = await self._rank_chunks(query, chunks, lexical_scores, data)
+        ranked_ids = await self._rank_chunks(query, chunks, lexical_scores)
 
         by_id = {c["id"]: c for c in chunks}
         doc_names = {d["id"]: d["filename"] for d in data["documents"]}
@@ -157,8 +159,7 @@ class DocumentStore:
             for i in ranked_ids[:k] if i in by_id
         ]
 
-    async def _rank_chunks(self, query: str, chunks: list[dict], lexical_scores: dict[str, float],
-                            data: dict) -> list[str]:
+    async def _rank_chunks(self, query: str, chunks: list[dict], lexical_scores: dict[str, float]) -> list[str]:
         lexical_ranked = [i for i, s in sorted(lexical_scores.items(), key=lambda p: p[1], reverse=True)
                             if s >= 0.03]
 
@@ -166,9 +167,9 @@ class DocumentStore:
         if not ollama_url or not chunks:
             return lexical_ranked
 
-        changed = await self._ensure_embeddings(chunks, ollama_url)
-        if changed:
-            self._save_raw(data)
+        new_vectors = await self._ensure_embeddings(chunks, ollama_url)
+        if new_vectors:
+            self._store_embeddings(new_vectors)
 
         query_vec = await embeddings_module.embed(query, ollama_url)
         semantic_scores = {}
@@ -181,13 +182,24 @@ class DocumentStore:
         return [i for i, _ in sorted(blended.items(), key=lambda p: p[1], reverse=True)]
 
     @staticmethod
-    async def _ensure_embeddings(chunks: list[dict], ollama_url: str) -> bool:
-        changed = False
+    async def _ensure_embeddings(chunks: list[dict], ollama_url: str) -> dict[str, list[float]]:
+        new_vectors = {}
         for chunk in chunks:
             if chunk.get("embedding"):
                 continue
             vector = await embeddings_module.embed(chunk["text"], ollama_url)
             if vector:
                 chunk["embedding"] = vector
+                new_vectors[chunk["id"]] = vector
+        return new_vectors
+
+    @holds_file_lock()
+    def _store_embeddings(self, vectors: dict[str, list[float]]) -> None:
+        data = self._load_raw()
+        changed = False
+        for chunk in data["chunks"]:
+            if chunk["id"] in vectors:
+                chunk["embedding"] = vectors[chunk["id"]]
                 changed = True
-        return changed
+        if changed:
+            self._save_raw(data)

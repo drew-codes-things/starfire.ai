@@ -6,7 +6,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 
-from atomic_io import atomic_write_json, report_unreadable_store
+from atomic_io import atomic_write_json, holds_file_lock, report_unreadable_store
 from context_budget import estimate_tokens
 
 _PRICING_PER_MILLION = {
@@ -67,6 +67,7 @@ class UsageStore:
     def _save(self, entries: list[UsageEntry]) -> None:
         atomic_write_json(self.path, [asdict(e) for e in entries])
 
+    @holds_file_lock()
     def record(self, provider: str, model: str, input_text: str, output_text: str) -> UsageEntry:
         input_tokens = estimate_tokens(input_text)
         output_tokens = estimate_tokens(output_text)

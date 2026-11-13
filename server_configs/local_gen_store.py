@@ -7,7 +7,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 
-from atomic_io import atomic_write_json, report_unreadable_store
+from atomic_io import atomic_write_json, holds_file_lock, report_unreadable_store
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,7 @@ class ComfyUIConfigStore:
             default_negative_prompt=raw.get("default_negative_prompt", ""),
         )
 
+    @holds_file_lock()
     def update(self, **fields) -> ComfyUIConfig:
         current = self.get()
         for k, v in fields.items():
@@ -72,6 +73,7 @@ class PiperConfigStore:
             return PiperConfig()
         return PiperConfig(voice_model_path=raw.get("voice_model_path", ""), voices_dir=raw.get("voices_dir", ""))
 
+    @holds_file_lock()
     def update(self, **fields) -> PiperConfig:
         current = self.get()
         for k, v in fields.items():
@@ -126,6 +128,7 @@ class CustomWorkflowStore:
                 return w
         return None
 
+    @holds_file_lock()
     def add(self, name: str, workflow: dict, prompt_node_id: str, prompt_input_key: str = "text") -> CustomWorkflow:
         workflows = self._load()
         entry = CustomWorkflow(id=uuid.uuid4().hex[:12], name=name, workflow=workflow,
@@ -134,6 +137,7 @@ class CustomWorkflowStore:
         self._save(workflows)
         return entry
 
+    @holds_file_lock()
     def delete(self, workflow_id: str) -> bool:
         workflows = self._load()
         remaining = [w for w in workflows if w.id != workflow_id]
@@ -194,6 +198,7 @@ class GeneratedFileStore:
     def path_for(self, entry: GeneratedFile) -> str:
         return os.path.join(self.files_dir, entry.id + os.path.splitext(entry.filename)[1])
 
+    @holds_file_lock("index_path")
     def add(self, kind: str, filename: str, content_type: str, data: bytes, source: str = "") -> GeneratedFile:
         entries = self._load()
         entry = GeneratedFile(id=uuid.uuid4().hex[:12], kind=kind, filename=filename,
@@ -204,6 +209,7 @@ class GeneratedFileStore:
         self._save(entries)
         return entry
 
+    @holds_file_lock("index_path")
     def delete(self, file_id: str) -> bool:
         entries = self._load()
         target = next((e for e in entries if e.id == file_id), None)

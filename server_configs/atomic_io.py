@@ -1,10 +1,29 @@
+import functools
 import json
 import logging
 import os
 import tempfile
+import threading
 import time
 
 logger = logging.getLogger(__name__)
+
+_locks_by_path: dict[str, threading.RLock] = {}
+_locks_by_path_guard = threading.Lock()
+
+def lock_for(path: str) -> threading.RLock:
+    resolved = os.path.realpath(path)
+    with _locks_by_path_guard:
+        return _locks_by_path.setdefault(resolved, threading.RLock())
+
+def holds_file_lock(path_attribute: str = "path"):
+    def decorate(method):
+        @functools.wraps(method)
+        def locked(self, *args, **kwargs):
+            with lock_for(getattr(self, path_attribute)):
+                return method(self, *args, **kwargs)
+        return locked
+    return decorate
 
 def discard_temp_file(path: str) -> None:
     try:

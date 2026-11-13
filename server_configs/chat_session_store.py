@@ -7,7 +7,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 
-from atomic_io import atomic_write_json, report_unreadable_store
+from atomic_io import atomic_write_json, holds_file_lock, report_unreadable_store
 
 TAG_QUERY_PREFIX = "tag:"
 MAX_TAG_LENGTH = 32
@@ -107,6 +107,7 @@ class ChatSessionStore:
         return self.add_many([dict(title=title, messages=messages, parent_session_id=parent_session_id,
                                    branch_point=branch_point, **extra)])[0]
 
+    @holds_file_lock()
     def add_many(self, items: list[dict]) -> list[ChatSession]:
         sessions = self._load()
         created = []
@@ -131,6 +132,7 @@ class ChatSessionStore:
                         tags=list(source.tags), system_prompt=source.system_prompt,
                         params=copy.deepcopy(source.params))
 
+    @holds_file_lock()
     def update(self, session_id: str, **fields) -> bool:
         sessions = self._load()
         found = False
@@ -147,6 +149,7 @@ class ChatSessionStore:
             self._save(sessions)
         return found
 
+    @holds_file_lock()
     def delete(self, session_id: str) -> bool:
         sessions = self._load()
         remaining = [s for s in sessions if s.id != session_id]
@@ -155,6 +158,7 @@ class ChatSessionStore:
         self._save(remaining)
         return True
 
+    @holds_file_lock()
     def set_archived_all(self, archived: bool) -> int:
         sessions = self._load()
         changed = [s for s in sessions if s.archived != archived]
@@ -164,11 +168,13 @@ class ChatSessionStore:
             self._save(sessions)
         return len(changed)
 
+    @holds_file_lock()
     def delete_all(self) -> int:
         count = len(self._load())
         self._save([])
         return count
 
+    @holds_file_lock()
     def clear_folder(self, folder_id: str) -> None:
         sessions = self._load()
         moved = [s for s in sessions if s.folder_id == folder_id]

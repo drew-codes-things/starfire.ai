@@ -143,6 +143,24 @@
   overwritten with an empty one.
 - Normal accounts no longer see MCP server commands, arguments or full URLs, and cannot start
   a network scan or read the hardware page.
+- Approving a waiting shell command or file edit checks that the account is still an active
+  admin, so an admin demoted after the command or edit was proposed gets a 403 and it stays
+  waiting.
+- `api_keys.json` is written readable by its owner only (600), like `.key`, and an existing
+  file left readable by others is tightened when it is next read, with an info log line.
+- MCP server environment values (tokens) and header values are stored encrypted in
+  `mcp_servers.json` with the same key as `api_keys.json`. A file saved in plain text is
+  encrypted the first time it is read; values saved by another install are left out with a
+  warning naming the server and key, and kept on disk. The API still never returns them.
+- Two requests changing the same saved file at once no longer lose one of the changes: every
+  store holds a lock on its file while it reads, changes and rewrites it. Searching documents
+  or memories no longer writes back an older copy over something added meanwhile, and two
+  first uses of the encryption key no longer race to create `.key`.
+- Backups carry no credentials: the zip leaves out `.key`, `api_keys.json` (provider keys and
+  email passwords), `sessions.json` and any `.env`, and blanks MCP server env and header values.
+  Account records keep their bcrypt hashes so people can still log in. Restoring keeps this
+  install's own keys and sessions, also from an older zip that still holds them, and Settings
+  marks email accounts and MCP servers whose password or token must be entered again.
 
 ## 1.1.0 - 2026-11-03
 
