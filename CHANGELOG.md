@@ -70,6 +70,18 @@
 - Testable browser logic moved into `static/uiLogic.js`.
 
 ### Fixed
+- On a phone the actions under the last reply stay on one row: the buttons narrow a little to
+  fit, and the regenerate button opens the model list itself (picking a model regenerates with
+  it). Wider screens keep the model select beside the button, now headed "Regenerate with…".
+- The default-model star is a plain filled star instead of a red disc.
+- The Arty CLI message box grows with its text, up to 200 px, and shrinks back after sending.
+- Settings lists show "loading…" while they load the first time instead of an empty space.
+- Adding a memory that fails says why under the field and keeps the text.
+- The account select in Email rules says there are no email accounts yet, with Add rule
+  switched off, instead of being blank; it also follows an account being removed.
+- The plus menu works from the keyboard: it focuses its first item when opened, Up and Down
+  move (and wrap), Home and End jump to the ends, and Escape closes it and returns to the
+  button.
 - Requests sent straight to Ollama (chats, titles, tags, follow-ups and the model warm-up) ask
   for `TASK_NUM_CTX` as the context size (now 24576 by default, was the model default) and turn
   context shift off, as Arty's brain does, so they no longer make Ollama reload a model the
