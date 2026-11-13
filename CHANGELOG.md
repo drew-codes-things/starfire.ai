@@ -96,6 +96,29 @@
   89%. Four bugs they found are listed under Fixed.
 
 ### Fixed
+- MCP server arguments and URLs are encrypted in `mcp_servers.json` like env and header values,
+  so a connection string with a password or a URL with `?api_key=` is no longer in plain text
+  on disk; a plain file is encrypted the first time it is read. Backups keep the arguments and
+  URL with their credentials replaced by `__secret_removed__` (URL passwords, key, token,
+  secret, password and auth query values, the value after flags such as `--api-key`, and
+  `NAME=value` or `Name: value` pairs with such names), and Settings marks those servers.
+  Servers added with the URL as their name keep it without the credentials.
+- Restoring a backup on the install that made it keeps the MCP tokens, header values,
+  arguments and URLs of the servers that still exist there, instead of blanking them.
+- Restore refuses an archive member with a `.` or `..` part or an absolute path, and checks
+  credential files by the name zipfile will write, ignoring case, so `.key/.` or
+  `sessions.json/..` can no longer replace this install's key or sessions.
+- Backups leave out temp and backup copies of `.key`, `.env`, `sessions.json`, `api_keys.json`
+  and `mcp_servers.json` (`.sessions.json.*.tmp`, `mcp_servers.json.bak`, `.key.bak` and so
+  on), and restores skip them.
+- A rollback followed by an upgrade no longer encrypts MCP secrets a second time: each value is
+  checked on its own, and a token this install's key cannot open marks the server as needing
+  its secret again instead of being passed on.
+- Info lines from the app (the MCP encryption notice, what a restore left out, tightened file
+  permissions, an SMTP hang-up at quit) now reach stderr and the journal; libraries stay at
+  warnings. MCP connection errors and log lines show server URLs without their credentials.
+- A memory or document search with Ollama running but no embedding model makes one embedding
+  request instead of one per entry or chunk before falling back to keywords.
 - Errors the server used to swallow in silence are now logged with what failed: a store file
   that is not JSON (read as empty, and replaced by the next save), a temp file that could not
   be removed, a scheduled time that is not HH:MM, a failed web search or embedding, a key file

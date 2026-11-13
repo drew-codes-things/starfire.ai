@@ -168,14 +168,14 @@ class MemoryStore:
         if not ollama_url or not unpinned:
             return keyword_ranked
 
-        await self._ensure_embeddings(unpinned, ollama_url)
         query_vec = await embeddings_module.embed(query, ollama_url)
-        semantic_scores = {}
-        if query_vec:
-            semantic_scores = {
-                e.id: embeddings_module.cosine_similarity(query_vec, e.embedding)
-                for e in unpinned if e.embedding
-            }
+        if not query_vec:
+            return keyword_ranked
+        await self._ensure_embeddings(unpinned, ollama_url)
+        semantic_scores = {
+            e.id: embeddings_module.cosine_similarity(query_vec, e.embedding)
+            for e in unpinned if e.embedding
+        }
         if not semantic_scores:
             return keyword_ranked
         blended = embeddings_module.blend_scores(lexical_scores, semantic_scores)

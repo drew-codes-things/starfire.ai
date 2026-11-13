@@ -89,7 +89,7 @@ def test_a_plain_text_file_is_encrypted_on_first_load(tmp_path):
     assert stored_text(tmp_path) == migrated
 
 
-def test_secrets_from_another_install_are_skipped_quietly_and_kept_on_disk(tmp_path, caplog, capsys):
+def test_secrets_from_another_install_are_flagged_quietly_and_kept_on_disk(tmp_path, caplog, capsys):
     old_dir, new_dir = tmp_path / "old", tmp_path / "new"
     old_dir.mkdir()
     new_dir.mkdir()
@@ -100,7 +100,7 @@ def test_secrets_from_another_install_are_skipped_quietly_and_kept_on_disk(tmp_p
 
     with caplog.at_level(logging.WARNING, logger="mcp_servers_store"):
         [seen] = McpServerStore(str(new_dir)).list()
-    assert seen.id == server.id and seen.name == "GitHub" and seen.env == {}
+    assert seen.id == server.id and seen.name == "GitHub" and seen.env == {"GITHUB_PERSONAL_ACCESS_TOKEN": ""}
     assert "GITHUB_PERSONAL_ACCESS_TOKEN" in caplog.text and "GitHub" in caplog.text
     assert TOKEN not in caplog.text and ciphertext not in caplog.text
     printed = capsys.readouterr()
@@ -139,3 +139,96 @@ def test_the_api_never_returns_env_or_header_values(tmp_path, monkeypatch):
     assert TOKEN not in listed.text
     assert "env" not in listed.json()["servers"][0] and "headers" not in listed.json()["servers"][0]
     assert TOKEN not in stored_text(tmp_path)
+
+
+def drop_the_marker(data_dir) -> None:
+    items = stored_items(data_dir)
+    for item in items:
+        item.pop("secrets_encrypted", None)
+    write_plain_file(data_dir, items)
+
+
+def test_ciphertext_left_by_a_rollback_is_not_encrypted_a_second_time(tmp_path):
+    store = McpServerStore(str(tmp_path))
+    server = store.add(name="Remote", command="", args=[], transport="http",
+                       url="https://mcp.example.test/mcp", env={"GITHUB_PERSONAL_ACCESS_TOKEN": TOKEN},
+                       headers={"Authorization": BEARER})
+    before = stored_items(tmp_path)[0]
+    drop_the_marker(tmp_path)
+
+    reloaded = McpServerStore(str(tmp_path)).get(server.id)
+    assert reloaded.env == {"GITHUB_PERSONAL_ACCESS_TOKEN": TOKEN}
+    assert reloaded.headers == {"Authorization": BEARER}
+    after = stored_items(tmp_path)[0]
+    assert after["env"] == before["env"] and after["headers"] == before["headers"]
+
+
+def test_a_token_from_another_key_without_the_marker_is_flagged_not_passed_through(tmp_path):
+    from mcp_servers_store import has_missing_secrets
+
+    old_dir, new_dir = tmp_path / "old", tmp_path / "new"
+    old_dir.mkdir()
+    new_dir.mkdir()
+    server = McpServerStore(str(old_dir)).add(name="GitHub", command="npx", args=[],
+                                              env={"GITHUB_PERSONAL_ACCESS_TOKEN": TOKEN})
+    shutil.copy(old_dir / "mcp_servers.json", new_dir / "mcp_servers.json")
+    drop_the_marker(new_dir)
+    foreign = stored_items(new_dir)[0]["env"]["GITHUB_PERSONAL_ACCESS_TOKEN"]
+
+    seen = McpServerStore(str(new_dir)).get(server.id)
+    assert seen.env == {"GITHUB_PERSONAL_ACCESS_TOKEN": ""}
+    assert has_missing_secrets(seen)
+    assert stored_items(new_dir)[0]["env"]["GITHUB_PERSONAL_ACCESS_TOKEN"] == foreign
+
+
+DB_PASSWORD = "PLACEHOLDER-db-password"
+FLAG_KEY = "PLACEHOLDER-flag-key"
+INLINE_TOKEN = "PLACEHOLDER-inline-token"
+QUERY_KEY = "PLACEHOLDER-query-key"
+SECRET_ARGS = ["-y", "server-postgres", f"postgresql://reader:{DB_PASSWORD}@db.example.test/x",
+               "--api-key", FLAG_KEY, f"--token={INLINE_TOKEN}"]
+SECRET_URL = f"https://mcp.example.test/sse?api_key={QUERY_KEY}&mode=fast"
+ARG_AND_URL_SECRETS = (DB_PASSWORD, FLAG_KEY, INLINE_TOKEN, QUERY_KEY)
+
+
+def test_arguments_and_urls_are_encrypted_on_disk_and_plain_in_use(tmp_path):
+    store = McpServerStore(str(tmp_path))
+    local = store.add(name="Postgres", command="npx", args=list(SECRET_ARGS))
+    remote = store.add(name=SECRET_URL, command="", args=[], transport="sse", url=SECRET_URL)
+    text = stored_text(tmp_path)
+    for secret in ARG_AND_URL_SECRETS:
+        assert secret not in text
+    reopened = McpServerStore(str(tmp_path))
+    assert reopened.get(local.id).args == SECRET_ARGS
+    assert reopened.get(remote.id).url == SECRET_URL
+    assert QUERY_KEY not in reopened.get(remote.id).name
+
+
+def test_plain_arguments_and_urls_saved_by_older_code_are_encrypted_on_first_load(tmp_path):
+    write_plain_file(tmp_path, [
+        {"id": "pg1", "name": "Postgres", "command": "npx", "args": list(SECRET_ARGS), "env": {},
+         "enabled": True, "transport": "stdio", "url": "", "headers": {}, "secrets_encrypted": True},
+        {"id": "sse1", "name": SECRET_URL, "command": "", "args": [], "env": {}, "enabled": True,
+         "transport": "sse", "url": SECRET_URL, "headers": {}, "secrets_encrypted": True},
+    ])
+    servers = {s.id: s for s in McpServerStore(str(tmp_path)).list()}
+    assert servers["pg1"].args == SECRET_ARGS and servers["sse1"].url == SECRET_URL
+    text = stored_text(tmp_path)
+    for secret in ARG_AND_URL_SECRETS:
+        assert secret not in text
+
+
+def test_backup_copies_keep_the_shape_of_arguments_and_urls_without_their_credentials(tmp_path):
+    from mcp_servers_store import SECRET_REMOVED, has_missing_secrets
+
+    store = McpServerStore(str(tmp_path))
+    store.add(name="Postgres", command="npx", args=list(SECRET_ARGS))
+    store.add(name="Remote", command="", args=[], transport="sse", url=SECRET_URL)
+    copies = {item["name"]: item for item in store.without_secret_values(stored_items(tmp_path))}
+    assert copies["Postgres"]["args"] == [
+        "-y", "server-postgres", f"postgresql://reader:{SECRET_REMOVED}@db.example.test/x",
+        "--api-key", SECRET_REMOVED, f"--token={SECRET_REMOVED}"]
+    assert copies["Remote"]["url"] == f"https://mcp.example.test/sse?api_key={SECRET_REMOVED}&mode=fast"
+    write_plain_file(tmp_path, list(copies.values()))
+    restored = {s.name: s for s in McpServerStore(str(tmp_path)).list()}
+    assert has_missing_secrets(restored["Postgres"]) and has_missing_secrets(restored["Remote"])

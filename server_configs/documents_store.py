@@ -167,17 +167,17 @@ class DocumentStore:
         if not ollama_url or not chunks:
             return lexical_ranked
 
+        query_vec = await embeddings_module.embed(query, ollama_url)
+        if not query_vec:
+            return lexical_ranked
         new_vectors = await self._ensure_embeddings(chunks, ollama_url)
         if new_vectors:
             self._store_embeddings(new_vectors)
 
-        query_vec = await embeddings_module.embed(query, ollama_url)
-        semantic_scores = {}
-        if query_vec:
-            semantic_scores = {
-                c["id"]: embeddings_module.cosine_similarity(query_vec, c["embedding"])
-                for c in chunks if c.get("embedding")
-            }
+        semantic_scores = {
+            c["id"]: embeddings_module.cosine_similarity(query_vec, c["embedding"])
+            for c in chunks if c.get("embedding")
+        }
         if not semantic_scores:
             return lexical_ranked
         blended = embeddings_module.blend_scores(lexical_scores, semantic_scores)

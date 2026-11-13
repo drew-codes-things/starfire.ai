@@ -37,8 +37,7 @@ import piper_tts
 from local_gen_store import ComfyUIConfigStore, CustomWorkflowStore, PiperConfigStore
 from email_rule_checker import EmailRuleChecker
 from mcp_manager import McpConnectionError, mcp_manager
-from mcp_servers_store import (MCP_SERVER_REPOSITORY, REFERENCE_SERVERS, McpServerStore, has_missing_secrets,
-                               without_secret_values)
+from mcp_servers_store import MCP_SERVER_REPOSITORY, REFERENCE_SERVERS, McpServerStore, has_missing_secrets
 from model_endpoints import ModelEndpointStore, detect_ollama, discover_servers
 from ollama_runner import for_runner
 from providers import build_models_url, is_embedding_model
@@ -1615,13 +1614,29 @@ def _chunks_then_close(handle):
     finally:
         handle.close()
 
-CREDENTIAL_FILE_NAMES = frozenset({".key", "sessions.json", ".env"})
-CREDENTIAL_FILE_PREFIXES = ("api_keys.json", ".api_keys.json.", ".env.")
 MCP_SERVERS_FILE = "mcp_servers.json"
+CREDENTIAL_FILE_OR_COPY = re.compile(
+    r"\.?(?:\.key|\.env|sessions\.json|api_keys\.json|mcp_servers\.json)(?:[.~_-].*)?", re.S)
+
+DOT_SEGMENTS = frozenset({os.curdir, os.pardir})
+ARCHIVE_SEPARATORS = re.compile(r"[\\/]")
+
+def _extracted_name(member: str) -> str:
+    arcname = member.replace("/", os.sep)
+    if os.altsep:
+        arcname = arcname.replace(os.altsep, os.sep)
+    arcname = os.path.splitdrive(arcname)[1]
+    return os.sep.join(part for part in arcname.split(os.sep) if part and part not in DOT_SEGMENTS)
+
+def _is_unsafe_member(member: str) -> bool:
+    is_absolute = member.startswith(("/", "\\")) or bool(os.path.splitdrive(member)[0])
+    return is_absolute or any(part in DOT_SEGMENTS for part in ARCHIVE_SEPARATORS.split(member))
 
 def _holds_credentials(relative_path: str) -> bool:
-    name = os.path.basename(relative_path)
-    return name in CREDENTIAL_FILE_NAMES or name.startswith(CREDENTIAL_FILE_PREFIXES)
+    extracted = _extracted_name(relative_path)
+    if extracted == MCP_SERVERS_FILE:
+        return False
+    return bool(CREDENTIAL_FILE_OR_COPY.fullmatch(os.path.basename(extracted).lower()))
 
 def _mcp_servers_without_secrets(path: str) -> str | None:
     try:
@@ -1633,7 +1648,21 @@ def _mcp_servers_without_secrets(path: str) -> str | None:
     if not isinstance(items, list):
         logger.warning("left %s out of the backup because it holds a %s, not a list", path, type(items).__name__)
         return None
-    return json.dumps(without_secret_values(items), indent=2)
+    return json.dumps(McpServerStore(os.path.dirname(path)).without_secret_values(items), indent=2)
+
+def _restored_mcp_servers(zf: zipfile.ZipFile, members: list) -> list | None:
+    servers_members = [info for info in members if _extracted_name(info.filename) == MCP_SERVERS_FILE]
+    if not servers_members:
+        return None
+    try:
+        items = json.loads(zf.read(servers_members[-1]))
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        logger.warning("restoring %s as it is because it could not be read as JSON: %s", MCP_SERVERS_FILE, error)
+        return None
+    if not isinstance(items, list):
+        logger.warning("restoring %s as it is because it holds a %s, not a list", MCP_SERVERS_FILE, type(items).__name__)
+        return None
+    return items
 
 def _add_to_backup(zf: zipfile.ZipFile, full_path: str, relative_path: str) -> None:
     if _holds_credentials(relative_path):
@@ -1684,13 +1713,19 @@ async def restore_data(file: UploadFile):
         with zf:
             for member in zf.namelist():
                 target = os.path.abspath(os.path.join(data_dir, member))
-                if not target.startswith(data_dir + os.sep) and target != data_dir:
+                escapes = not target.startswith(data_dir + os.sep) and target != data_dir
+                if escapes or _is_unsafe_member(member):
                     raise HTTPException(400, f"refusing to restore: unsafe path in archive ({member})")
             kept = [info for info in zf.infolist() if not _holds_credentials(info.filename)]
             skipped = sorted(info.filename for info in zf.infolist() if _holds_credentials(info.filename))
             unpacked = sum(info.file_size for info in kept)
             require_room(data_dir, unpacked, config.min_free_disk_mb, "that backup")
+            restored_servers = _restored_mcp_servers(zf, kept)
+            if restored_servers is not None:
+                kept = [info for info in kept if _extracted_name(info.filename) != MCP_SERVERS_FILE]
             zf.extractall(data_dir, members=kept)
+    if restored_servers is not None:
+        McpServerStore(data_dir).restore(restored_servers)
     if skipped:
         logger.info("restore kept this install's keys and sessions and left out these files from the backup: %s",
                     ", ".join(skipped))

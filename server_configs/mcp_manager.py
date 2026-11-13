@@ -8,6 +8,8 @@ from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
 from mcp.client.streamable_http import streamable_http_client
 
+from mcp_servers_store import with_url_credentials_hidden, without_url_credentials
+
 logger = logging.getLogger(__name__)
 
 CONNECT_TIMEOUT_S = 45
@@ -90,10 +92,11 @@ class McpManager:
         except asyncio.TimeoutError as e:
             stop.set()
             task.cancel()
-            raise McpConnectionError(f"failed to connect to '{url}': timed out") from e
+            raise McpConnectionError(f"failed to connect to '{without_url_credentials(url)}': timed out") from e
         except Exception as e:
             stop.set()
-            raise McpConnectionError(f"failed to connect to '{url}': {_root_cause(e)}") from e
+            raise McpConnectionError(f"failed to connect to '{without_url_credentials(url)}': "
+                                     f"{with_url_credentials_hidden(_root_cause(e))}") from e
         self._remote_tasks[server_id] = (task, stop)
         return session, tools
 
@@ -118,7 +121,8 @@ class McpManager:
             if not ready.done():
                 ready.set_exception(e if isinstance(e, Exception) else McpConnectionError(_root_cause(e)))
             elif not isinstance(e, asyncio.CancelledError):
-                logger.warning("remote MCP server at %s closed: %s", url, _root_cause(e))
+                logger.warning("remote MCP server at %s closed: %s", without_url_credentials(url),
+                               with_url_credentials_hidden(_root_cause(e)))
 
     async def disconnect(self, server_id: str) -> None:
         async with self._lock:

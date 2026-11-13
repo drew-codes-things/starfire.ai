@@ -197,3 +197,123 @@ def test_an_old_backup_with_key_files_restores_its_data_but_not_its_credentials(
     assert routes.api_keys.load() == {"current-endpoint": PROVIDER_KEY}
     assert admin.get("/api/auth/me").status_code == 200
     assert ".key" in caplog.text and "api_keys.json" in caplog.text
+
+
+DB_PASSWORD = "PLACEHOLDER-db-password"
+FLAG_KEY = "PLACEHOLDER-flag-key"
+QUERY_KEY = "PLACEHOLDER-query-key"
+
+
+def test_credentials_in_mcp_arguments_and_urls_stay_out_of_backups(tmp_path, monkeypatch):
+    data_dir = str(tmp_path / "data")
+    admin = login(install(data_dir, monkeypatch, "admin@example.com"), "admin@example.com")
+    secret_url = f"https://mcp.example.test/sse?api_key={QUERY_KEY}"
+    routes.mcp_servers.add(name="Postgres", command="npx", args=[
+        "server-postgres", f"postgresql://reader:{DB_PASSWORD}@db.example.test/x", "--api-key", FLAG_KEY])
+    routes.mcp_servers.add(name=secret_url, command="", args=[], transport="sse", url=secret_url)
+
+    archive = admin.get("/api/backup").content
+    for name, content in members_of(archive).items():
+        for secret in (DB_PASSWORD, FLAG_KEY, QUERY_KEY):
+            assert secret.encode() not in content, name
+    servers = {item["command"] or "remote": item for item in json.loads(members_of(archive)["mcp_servers.json"])}
+    assert servers["npx"]["args"][0] == "server-postgres"
+    assert servers["remote"]["url"].startswith("https://mcp.example.test/sse?api_key=")
+
+    new_dir = str(tmp_path / "new")
+    fresh = login(install(new_dir, monkeypatch, "first@example.com"), "first@example.com")
+    assert fresh.post("/api/restore", files={"file": ("backup.zip", archive, "application/zip")}).json() == {"ok": True}
+    monkeypatch.setattr(routes, "mcp_servers", McpServerStore(new_dir))
+    monkeypatch.setattr(auth_routes, "users", UserStore(new_dir))
+    restored = login(app_for(new_dir, monkeypatch), "admin@example.com")
+    listed = restored.get("/api/mcp/servers").json()["servers"]
+    assert len(listed) == 2 and all(server["secrets_missing"] for server in listed)
+
+
+def credential_files(data_dir: str) -> dict[str, bytes]:
+    names = (".key", "api_keys.json", "sessions.json")
+    return {name: open(os.path.join(data_dir, name), "rb").read() for name in names}
+
+
+def test_restore_refuses_dot_segment_and_absolute_member_names(tmp_path, monkeypatch):
+    data_dir = str(tmp_path / "data")
+    admin = login(install(data_dir, monkeypatch, "admin@example.com"), "admin@example.com")
+    routes.api_keys.save("current-endpoint", PROVIDER_KEY)
+    before = credential_files(data_dir)
+    for member in (".key/.", "api_keys.json/.", "sessions.json/..", "./.key", "notes/../.key", "/restored-note.txt",
+                   "users\\..\\.key"):
+        archive = zip_of({member: b"planted by the backup", "restored-note.txt": b"data"})
+        response = admin.post("/api/restore", files={"file": ("backup.zip", archive, "application/zip")})
+        assert response.status_code == 400, member
+        assert "unsafe path" in response.json()["detail"]
+        assert credential_files(data_dir) == before, member
+        assert not os.path.exists(os.path.join(data_dir, "restored-note.txt")), member
+    assert routes.api_keys.load() == {"current-endpoint": PROVIDER_KEY}
+
+
+def test_restore_skips_credential_files_whatever_their_case_or_spelling(tmp_path, monkeypatch):
+    data_dir = str(tmp_path / "data")
+    admin = login(install(data_dir, monkeypatch, "admin@example.com"), "admin@example.com")
+    routes.api_keys.save("current-endpoint", PROVIDER_KEY)
+    archive = zip_of({".KEY": b"planted", "API_KEYS.JSON": b"{}", "Sessions.Json": b"{}", "users//.env": b"X=1",
+                      "restored-note.txt": b"data"})
+    assert admin.post("/api/restore", files={"file": ("backup.zip", archive, "application/zip")}).json() == {"ok": True}
+    assert sorted(name for name in os.listdir(data_dir) if name.lower() in {".key", "api_keys.json", "sessions.json"}) \
+        == [".key", "api_keys.json", "sessions.json"]
+    assert not os.path.exists(os.path.join(data_dir, "users", ".env"))
+    assert open(os.path.join(data_dir, "restored-note.txt"), "rb").read() == b"data"
+
+
+STRAY_COPIES = (".mcp_servers.json.k2j4h1.tmp", ".sessions.json.9xq0ab.tmp", "mcp_servers.json.bak", ".key.bak",
+                ".api_keys.json.p0o9i8.tmp", "api_keys.json.unreadable-20261113-120000", "SESSIONS.JSON.BAK",
+                "sessions.json~", ".env.local", "users/abc/mcp_servers.json", "users/abc/.key", "MCP_Servers.json")
+KEPT_LOOKALIKES = ("keyboard.json", "chat_sessions.json.bak", "mcp_servers_notes.txt", "users/abc/monkey.env")
+
+
+def test_temp_and_backup_copies_of_credential_files_stay_out_of_backups_and_restores(tmp_path, monkeypatch):
+    data_dir = str(tmp_path / "data")
+    admin = login(install(data_dir, monkeypatch, "admin@example.com"), "admin@example.com")
+    routes.mcp_servers.add(name="GitHub", command="npx", args=[], env={"GITHUB_PERSONAL_ACCESS_TOKEN": MCP_TOKEN})
+    for name in (*STRAY_COPIES, *KEPT_LOOKALIKES):
+        os.makedirs(os.path.dirname(os.path.join(data_dir, name)), exist_ok=True)
+        with open(os.path.join(data_dir, name), "w", encoding="utf-8") as handle:
+            handle.write(name)
+
+    members = members_of(admin.get("/api/backup").content)
+    assert not [name for name in STRAY_COPIES if name in members]
+    assert all(name in members for name in KEPT_LOOKALIKES)
+    assert "mcp_servers.json" in members
+
+    new_dir = str(tmp_path / "new")
+    fresh = login(install(new_dir, monkeypatch, "first@example.com"), "first@example.com")
+    planted = zip_of({**{name: b"planted" for name in STRAY_COPIES}, "restored-note.txt": b"data"})
+    assert fresh.post("/api/restore", files={"file": ("backup.zip", planted, "application/zip")}).json() == {"ok": True}
+    assert not [name for name in STRAY_COPIES if os.path.exists(os.path.join(new_dir, name))]
+    assert open(os.path.join(new_dir, "restored-note.txt"), "rb").read() == b"data"
+
+
+def test_restoring_on_the_same_install_keeps_the_working_mcp_secrets(tmp_path, monkeypatch):
+    data_dir = str(tmp_path / "data")
+    admin = login(install(data_dir, monkeypatch, "admin@example.com"), "admin@example.com")
+    fill_with_credentials(admin, data_dir)
+    secret_args = ["server-postgres", f"postgresql://reader:{DB_PASSWORD}@db.example.test/x", "--api-key", FLAG_KEY]
+    secret_url = f"https://mcp.example.test/sse?api_key={QUERY_KEY}"
+    postgres = routes.mcp_servers.add(name="Postgres", command="npx", args=list(secret_args))
+    sse = routes.mcp_servers.add(name="SSE", command="", args=[], transport="sse", url=secret_url)
+    dropped = routes.mcp_servers.add(name="Dropped later", command="npx", args=[],
+                                     env={"GITHUB_PERSONAL_ACCESS_TOKEN": MCP_TOKEN})
+    archive = admin.get("/api/backup").content
+    assert routes.mcp_servers.delete(dropped.id)
+
+    assert admin.post("/api/restore", files={"file": ("backup.zip", archive, "application/zip")}).json() == {"ok": True}
+    servers = {server.name: server for server in McpServerStore(data_dir).list()}
+    assert servers["GitHub"].env == {"GITHUB_PERSONAL_ACCESS_TOKEN": MCP_TOKEN}
+    assert servers["Remote"].headers == {"Authorization": MCP_BEARER}
+    assert servers["Postgres"].args == secret_args and servers["Postgres"].id == postgres.id
+    assert servers["SSE"].url == secret_url and servers["SSE"].id == sse.id
+    assert servers["Dropped later"].env == {"GITHUB_PERSONAL_ACCESS_TOKEN": ""}
+    flags = {server["name"]: server["secrets_missing"] for server in admin.get("/api/mcp/servers").json()["servers"]}
+    assert flags == {"GitHub": False, "Remote": False, "Postgres": False, "SSE": False, "Dropped later": True}
+    on_disk = open(os.path.join(data_dir, "mcp_servers.json"), encoding="utf-8").read()
+    for secret in (MCP_TOKEN, MCP_BEARER, DB_PASSWORD, FLAG_KEY, QUERY_KEY, "server-postgres"):
+        assert secret not in on_disk
