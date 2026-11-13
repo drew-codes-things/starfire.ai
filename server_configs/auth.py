@@ -264,30 +264,50 @@ def _token_digest(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+DEFAULT_PORT_SUFFIXES = (":80", ":443")
+
+
+def normalise_host(host: str) -> str:
+    host = host.strip().lower()
+    for suffix in DEFAULT_PORT_SUFFIXES:
+        if host.endswith(suffix):
+            return host[: -len(suffix)]
+    return host
+
+
+def request_host(request: Request) -> str:
+    return normalise_host(request.headers.get("host", ""))
+
+
 class SessionStore:
 
-    def __init__(self, data_dir: str):
+    def __init__(self, data_dir: str, identity_check_hosts=()):
         self.path = os.path.join(data_dir, "sessions.json")
+        self.identity_check_hosts = frozenset(normalise_host(host) for host in identity_check_hosts)
         self._lock = threading.Lock()
 
     def _live(self, sessions: dict, now: float) -> dict:
         return {digest: s for digest, s in sessions.items() if s.get("expires", 0) > now}
 
-    def create(self, user_id: str) -> str:
+    def create(self, user_id: str, host: str = "") -> str:
         token = secrets.token_urlsafe(32)
         now = time.time()
+        hosts = [normalise_host(host)] if host.strip() else []
         with self._lock:
             sessions = self._live(_read_json(self.path, dict), now)
-            sessions[_token_digest(token)] = {"user_id": user_id, "expires": now + SESSION_LIFETIME_SECONDS}
+            sessions[_token_digest(token)] = {"user_id": user_id, "expires": now + SESSION_LIFETIME_SECONDS,
+                                              "hosts": hosts}
             atomic_write_json(self.path, sessions)
             os.chmod(self.path, 0o600)
         return token
 
-    def user_id_for(self, token: str) -> str | None:
+    def user_id_for(self, token: str, host: str | None = None) -> str | None:
         if not token:
             return None
         session = _read_json(self.path, dict).get(_token_digest(token))
         if not session or session.get("expires", 0) <= time.time():
+            return None
+        if host is not None and normalise_host(host) not in session.get("hosts", []):
             return None
         return session.get("user_id")
 
@@ -423,8 +443,18 @@ def is_public(path: str) -> bool:
     return path in PUBLIC_PATHS or path.startswith(PUBLIC_PREFIXES)
 
 
+IDENTITY_CHECK_PATH = "/api/auth/me"
+
+
+def _is_local_identity_check(request: Request, sessions: SessionStore) -> bool:
+    return (request.method in READ_METHODS and request.url.path == IDENTITY_CHECK_PATH
+            and request_host(request) in sessions.identity_check_hosts)
+
+
 def current_user(request: Request, users: UserStore, sessions: SessionStore) -> User | None:
-    user_id = sessions.user_id_for(request.cookies.get(SESSION_COOKIE, ""))
+    token = request.cookies.get(SESSION_COOKIE, "")
+    any_host = None if _is_local_identity_check(request, sessions) else request_host(request)
+    user_id = sessions.user_id_for(token, any_host)
     user = users.find_by_id(user_id) if user_id else None
     return user if user and not user.disabled else None
 

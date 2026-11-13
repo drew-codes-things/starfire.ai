@@ -22,12 +22,17 @@ class AppConfig(BaseSettings):
     model_voices_dir: str = ""
     trusted_proxies: str = "127.0.0.1,::1"
     client_ip_header: str = "CF-Connecting-IP"
+    session_check_hosts: str = ""
 
     def own_tools_patterns(self) -> list[str]:
         return [p.strip() for p in self.own_tools_models.split(",") if p.strip()]
 
     def media_prefixes(self) -> list[str]:
         return [p.strip() for p in self.inline_media_prefixes.split(",") if p.strip()]
+
+    def identity_check_hosts(self) -> list[str]:
+        local = [f"127.0.0.1:{self.port}", f"localhost:{self.port}", f"[::1]:{self.port}"]
+        return local + [host.strip() for host in self.session_check_hosts.split(",") if host.strip()]
 
     def voices_folder(self) -> str:
         return self.model_voices_dir or os.path.join(self.data_dir, "voices")

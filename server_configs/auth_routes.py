@@ -5,12 +5,12 @@ from pydantic import BaseModel
 
 from auth import (ACCOUNT_LOCKOUT_SECONDS, ACCOUNT_MAX_FAILED_LOGINS, MAX_FIELD_CHARS, SESSION_COOKIE,
                   SESSION_LIFETIME_SECONDS, AccountError, KnownAddresses, LoginLimiter, SessionStore, UserStore,
-                  client_address, current_user, normalise_email, parse_networks, require_admin)
+                  client_address, current_user, normalise_email, parse_networks, request_host, require_admin)
 from config import config
 
 router = APIRouter(prefix="/api/auth")
 users = UserStore(config.data_dir)
-sessions = SessionStore(config.data_dir)
+sessions = SessionStore(config.data_dir, identity_check_hosts=config.identity_check_hosts())
 limiter = LoginLimiter()
 account_limiter = LoginLimiter(max_failures=ACCOUNT_MAX_FAILED_LOGINS, lockout_seconds=ACCOUNT_LOCKOUT_SECONDS)
 known_addresses = KnownAddresses(config.data_dir)
@@ -68,8 +68,9 @@ def _registry():
     return user_data.registry
 
 
-def _start_session(response: Response, user_id: str) -> None:
-    response.set_cookie(SESSION_COOKIE, sessions.create(user_id), max_age=SESSION_LIFETIME_SECONDS,
+def _start_session(request: Request, response: Response, user_id: str) -> None:
+    token = sessions.create(user_id, request_host(request))
+    response.set_cookie(SESSION_COOKIE, token, max_age=SESSION_LIFETIME_SECONDS,
                         httponly=True, secure=config.cookie_secure, samesite="lax", path="/")
 
 
@@ -102,7 +103,7 @@ def login(body: LoginRequest, request: Request, response: Response):
         raise HTTPException(status_code=401, detail="wrong email or password")
     limiter.reset(limit_key)
     known_addresses.remember(email, address)
-    _start_session(response, user.id)
+    _start_session(request, response, user.id)
     return user.public()
 
 
@@ -112,7 +113,7 @@ def status():
 
 
 @router.post("/setup")
-def setup(body: SetupRequest, response: Response):
+def setup(body: SetupRequest, request: Request, response: Response):
     try:
         user = users.create_first(body.email, body.name, body.password, body.confirm)
     except AccountError as error:
@@ -120,7 +121,7 @@ def setup(body: SetupRequest, response: Response):
     registry = _registry()
     if registry is not None:
         registry.migrate_legacy(user.id)
-    _start_session(response, user.id)
+    _start_session(request, response, user.id)
     return user.public()
 
 
@@ -197,7 +198,7 @@ def change_password(body: PasswordRequest, request: Request, response: Response)
     except AccountError as error:
         raise HTTPException(status_code=400, detail=str(error))
     sessions.revoke_all_for(user.id)
-    _start_session(response, user.id)
+    _start_session(request, response, user.id)
     return {"ok": True}
 
 

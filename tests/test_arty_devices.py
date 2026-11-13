@@ -75,7 +75,7 @@ def setup(tmp_path, monkeypatch, brain):
 def client_for(setup, who):
     client = TestClient(setup["app"])
     if who:
-        client.cookies.set(SESSION_COOKIE, setup["sessions"].create(setup[who].id))
+        client.cookies.set(SESSION_COOKIE, setup["sessions"].create(setup[who].id, "testserver"))
     return client
 
 

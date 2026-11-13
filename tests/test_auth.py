@@ -133,7 +133,7 @@ def test_login_is_required_once_an_account_exists(users, sessions):
     assert page.status_code == 303 and page.headers["location"] == "/login.html"
     assert client.get("/login.html").status_code == 200
 
-    client.cookies.set(SESSION_COOKIE, sessions.create(user.id))
+    client.cookies.set(SESSION_COOKIE, sessions.create(user.id, "testserver"))
     assert client.get("/api/secret").json() == {"email": "drew@example.com"}
 
 
@@ -476,3 +476,66 @@ def test_the_limiter_keeps_the_newest_keys_when_it_is_full(monkeypatch):
     assert len(limiter._failures) == 3
     assert limiter.seconds_locked("key-4") > 0
     assert limiter.seconds_locked("key-0") == 0
+
+
+LOCAL_CHECK_HOST = "127.0.0.1:8090"
+
+
+@pytest.fixture
+def hosts_app(users, monkeypatch, tmp_path):
+    import auth_routes
+    bound = SessionStore(str(tmp_path), identity_check_hosts=(LOCAL_CHECK_HOST,))
+    monkeypatch.setattr(auth_routes, "users", users)
+    monkeypatch.setattr(auth_routes, "sessions", bound)
+    monkeypatch.setattr(auth_routes, "limiter", LoginLimiter())
+    monkeypatch.setattr(auth_routes, "account_limiter", LoginLimiter())
+    monkeypatch.setattr(auth_routes, "known_addresses", auth.KnownAddresses(str(tmp_path)))
+    users.upsert("drew@example.com", "Drew", "admin", fast_hash(PASSWORD))
+    app = build_app(users, bound)
+    app.include_router(auth_routes.router)
+    app.state.sessions = bound
+    return app
+
+
+def session_made_on(app, host):
+    client = TestClient(app, base_url=f"https://{host}")
+    response = client.post("/api/auth/login", json={"email": "drew@example.com", "password": PASSWORD})
+    assert response.status_code == 200
+    return response.cookies.get(SESSION_COOKIE)
+
+
+def ask_with(app, host, path, token):
+    client = TestClient(app, base_url=f"https://{host}")
+    return client.get(path, headers={"Cookie": f"{SESSION_COOKIE}={token}"})
+
+
+def test_a_session_only_opens_the_host_it_was_made_on(hosts_app):
+    token = session_made_on(hosts_app, "videodl.example")
+    assert ask_with(hosts_app, "videodl.example", "/api/auth/me", token).status_code == 200
+    assert ask_with(hosts_app, "videodl.example", "/api/auth/users", token).status_code == 200
+    assert ask_with(hosts_app, "claude.example", "/api/auth/users", token).status_code == 401
+    assert ask_with(hosts_app, "claude.example", "/api/auth/me", token).status_code == 401
+    assert ask_with(hosts_app, "claude.example", "/api/secret", token).status_code == 401
+
+
+def test_a_local_service_can_ask_who_a_session_belongs_to_and_nothing_more(hosts_app):
+    token = session_made_on(hosts_app, "spotmp3.example")
+    assert ask_with(hosts_app, LOCAL_CHECK_HOST, "/api/auth/me", token).json()["email"] == "drew@example.com"
+    assert ask_with(hosts_app, LOCAL_CHECK_HOST, "/api/auth/users", token).status_code == 401
+    assert ask_with(hosts_app, LOCAL_CHECK_HOST, "/api/secret", token).status_code == 401
+    client = TestClient(hosts_app, base_url=f"https://{LOCAL_CHECK_HOST}")
+    client.cookies.set(SESSION_COOKIE, token)
+    assert client.post("/api/auth/logout").status_code in (401, 405)
+
+
+def test_a_session_saved_before_hosts_were_recorded_must_sign_in_again(hosts_app, users):
+    old = hosts_app.state.sessions.create(users.find_by_email("drew@example.com").id)
+    assert ask_with(hosts_app, "claude.example", "/api/auth/users", old).status_code == 401
+    assert ask_with(hosts_app, LOCAL_CHECK_HOST, "/api/auth/me", old).status_code == 200
+
+
+def test_hosts_are_compared_without_case_or_default_ports():
+    assert auth.normalise_host("Claude.Example:443") == "claude.example"
+    assert auth.normalise_host("claude.example:80") == "claude.example"
+    assert auth.normalise_host(" 127.0.0.1:8090 ") == "127.0.0.1:8090"
+    assert auth.normalise_host("[::1]:443") == "[::1]"

@@ -57,6 +57,8 @@ HttpOnly cookie; 5 wrong passwords lock that email from that address for 15 minu
 20 wrong passwords for one email within an hour, from anywhere, lock it for an hour except
 from an address that has signed in to it before or a browser already signed in to it). The
 login and setup pages can load only the stylesheet, the logo and the fonts without a login.
+A login only works on the host name it was made on, so a cookie handed to another site behind
+the same proxy cannot open this one.
 Change your password under **Settings → Account**; that logs out every other browser. Forgot
 it? Reset it from the terminal on the machine starfire runs on (this also logs out every
 browser that was signed in):
@@ -530,6 +532,7 @@ rather use that instead)
 | `MODEL_VOICES_DIR` | `<DATA_DIR>/voices` | Folder holding the `.onnx` voices (and their `.onnx.json`) named in `MODEL_VOICES` |
 | `TRUSTED_PROXIES` | `127.0.0.1,::1` | Comma-separated addresses or networks of proxies in front of starfire. The login lockout follows `X-Forwarded-For` back through these hops to the visitor; when every hop is trusted (a Cloudflare tunnel's `cloudflared` included), the visitor's address is read from `CLIENT_IP_HEADER`. List only machines that set those headers themselves |
 | `CLIENT_IP_HEADER` | `CF-Connecting-IP` | Header holding the visitor's address, read only when the request came through trusted proxies alone |
+| `SESSION_CHECK_HOSTS` | _(none)_ | Extra `host:port` names, comma-separated, on which `GET /api/auth/me` answers for a session made on any host. `127.0.0.1:<PORT>`, `localhost:<PORT>` and `[::1]:<PORT>` are always included, so a service on the same machine can ask who a browser's cookie belongs to. Every other request only accepts a session on the host it was signed in on |
 
 Hosted-provider API keys are **not** set via environment variables - add them through the
 Settings UI so they're encrypted at rest rather than sitting in plaintext in `.env`.
