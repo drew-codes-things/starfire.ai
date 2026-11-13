@@ -2,6 +2,7 @@ import json
 
 import httpx
 
+from ollama_runner import for_runner
 from providers import _detect_provider, build_chat_url, build_headers, build_tools_param
 
 MAX_ERROR_CHARS = 500
@@ -245,13 +246,13 @@ async def stream_chat_once(base_url: str, api_key: str | None, model: str, messa
     async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=10.0)) as client:
         try:
             if provider == "ollama":
-                payload = {
+                payload = for_runner({
                     "model": model, "stream": True, "keep_alive": -1,
                     "messages": _to_ollama_messages(_build_messages(messages, system)),
                     **({"options": options} if options else {}),
                     **({"tools": tools_param} if tools_param else {}),
                     **({"think": think} if think is not None else {}),
-                }
+                })
                 async for item in _iter_ollama(client, url, headers, payload):
                     yield item
             elif provider == "anthropic":

@@ -39,6 +39,7 @@ from email_rule_checker import EmailRuleChecker
 from mcp_manager import McpConnectionError, mcp_manager
 from mcp_servers_store import MCP_SERVER_REPOSITORY, REFERENCE_SERVERS, McpServerStore
 from model_endpoints import ModelEndpointStore, detect_ollama, discover_servers
+from ollama_runner import for_runner
 from providers import build_models_url, is_embedding_model
 from task_scheduler import TaskScheduler, compute_next_run
 from upload_limits import MIB, require_room, room_on_disk, too_large
@@ -219,7 +220,7 @@ async def warm(body: dict):
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             r = await client.post(_ollama_api_root(endpoint.base_url) + "/generate",
-                                    json={"model": model, "keep_alive": -1})
+                                    json=for_runner({"model": model, "keep_alive": -1}))
             await r.aclose()
     except httpx.HTTPError:
         pass
@@ -1296,7 +1297,7 @@ class QuickCompleteBody(BaseModel):
 def _quick_target(body: QuickCompleteBody):
     helper_endpoint = helper_tasks.ollama_endpoint(endpoints.list()) if body.helper and config.task_model else None
     if helper_endpoint:
-        return (helper_endpoint, config.task_model, helper_tasks.helper_options(config.task_num_ctx),
+        return (helper_endpoint, config.task_model, helper_tasks.helper_options(),
                 helper_tasks.helper_think(config.task_model))
     endpoint = endpoints.get(body.endpoint_id)
     if not endpoint:

@@ -14,11 +14,8 @@ def helper_think(model: str) -> bool | None:
     return False if model.lower().startswith(NO_THINK_MODELS) else None
 
 
-def helper_options(num_ctx: int) -> dict:
-    options = {"temperature": HELPER_TEMPERATURE, "num_predict": HELPER_MAX_TOKENS}
-    if num_ctx:
-        options["num_ctx"] = num_ctx
-    return options
+def helper_options() -> dict:
+    return {"temperature": HELPER_TEMPERATURE, "num_predict": HELPER_MAX_TOKENS}
 
 
 def clean_reply(text: str) -> str:

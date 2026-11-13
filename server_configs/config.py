@@ -11,7 +11,7 @@ class AppConfig(BaseSettings):
     ollama_base_url: str | None = None
     cookie_secure: bool = True
     task_model: str = ""
-    task_num_ctx: int = 0
+    task_num_ctx: int = 24576
     own_tools_models: str = "Arty,assistant-core,arty/*"
     inline_media_prefixes: str = "/arty-files/"
     arty_base_url: str = ""

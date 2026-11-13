@@ -235,6 +235,69 @@ def test_warming_a_brain_model_asks_the_brain_to_load_it(client, monkeypatch):
     assert calls == [("http://brain:8081/v1/warm", {"model": "side/one"}, {"Authorization": "Bearer key-1"})]
 
 
+class FakeOllamaClient:
+    calls = []
+
+    def __init__(self, timeout):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def post(self, url, json=None, headers=None):
+        FakeOllamaClient.calls.append((url, json))
+        return FakeOllamaResponse()
+
+
+class FakeOllamaResponse:
+    async def aclose(self):
+        pass
+
+
+def test_warming_an_ollama_model_asks_for_the_brains_window_without_context_shift(client, monkeypatch):
+    class Endpoint:
+        id, provider, base_url = "local", "ollama", "http://ollama:11435"
+    FakeOllamaClient.calls = []
+    monkeypatch.setattr(routes.endpoints, "get", lambda endpoint_id: Endpoint() if endpoint_id == "local" else None)
+    monkeypatch.setattr(routes.httpx, "AsyncClient", FakeOllamaClient)
+    monkeypatch.setattr(routes.config, "task_num_ctx", 24576)
+    assert client.post("/api/warm", json={"endpoint_id": "local", "model": "qwen3:14b"}).json() == {"ok": True}
+    assert FakeOllamaClient.calls == [("http://ollama:11435/api/generate",
+                                       {"model": "qwen3:14b", "keep_alive": -1,
+                                        "options": {"num_ctx": 24576}, "shift": False})]
+
+
+def test_a_helper_task_asks_for_the_brains_window_without_context_shift(client, monkeypatch):
+    from types import SimpleNamespace
+
+    import chat_stream
+
+    sent = {}
+
+    async def fake_iter(http_client, url, headers, payload):
+        sent.update(url=url, payload=payload)
+        yield ("delta", "Plex setup")
+
+    class Endpoint:
+        id, provider, base_url = "local", "ollama", "http://127.0.0.1:11434"
+    monkeypatch.setattr(routes.endpoints, "list", lambda: [Endpoint()])
+    monkeypatch.setattr(routes, "_api_key_for", lambda endpoint_id, provider: None)
+    monkeypatch.setattr(routes, "usage", SimpleNamespace(record=lambda *args: None))
+    monkeypatch.setattr(routes.config, "task_model", "qwen3:14b")
+    monkeypatch.setattr(routes.config, "task_num_ctx", 24576)
+    monkeypatch.setattr(chat_stream, "_iter_ollama", fake_iter)
+    reply = client.post("/api/quick-complete", json={"endpoint_id": "brain", "model": "Arty",
+                                                      "prompt": "title this", "helper": True})
+    assert reply.json() == {"text": "Plex setup"}
+    assert sent["url"] == "http://127.0.0.1:11434/api/chat"
+    assert sent["payload"]["model"] == "qwen3:14b"
+    assert sent["payload"]["options"]["num_ctx"] == 24576
+    assert sent["payload"]["shift"] is False
+
+
 def test_code_check_route(client):
     ok = client.post("/api/code-check", json={"language": "python", "code": "x = 1\n"}).json()
     assert ok["status"] == "ok"

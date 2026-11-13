@@ -23,9 +23,9 @@ def test_qwen3_is_asked_not_to_think():
     assert helper_tasks.helper_think("llama3.1:8b") is None
 
 
-def test_options_match_the_loaded_context():
-    assert helper_tasks.helper_options(12288)["num_ctx"] == 12288
-    assert "num_ctx" not in helper_tasks.helper_options(0)
+def test_options_leave_the_window_to_the_runner_settings():
+    assert helper_tasks.helper_options() == {"temperature": helper_tasks.HELPER_TEMPERATURE,
+                                             "num_predict": helper_tasks.HELPER_MAX_TOKENS}
 
 
 def test_thinking_is_removed_from_replies():

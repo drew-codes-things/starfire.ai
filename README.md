@@ -247,7 +247,10 @@ These small jobs go to the chat's own model unless `TASK_MODEL` is set, in which
 straight to that Ollama model instead. That keeps them out of an assistant's history and tool
 loop (Arty's brain, for example): point it at the model the assistant already has loaded, with
 `TASK_NUM_CTX` matching its context size, so Ollama doesn't load a second copy. Qwen3 models
-are asked not to think for these (Ollama's `think: false`).
+are asked not to think for these (Ollama's `think: false`). Every request starfire sends
+straight to Ollama (chats, these small jobs and the model warm-up) asks for `TASK_NUM_CTX` as
+its context size, unless the chat sets its own context length, and turns context shift off
+(`shift: false`), as Arty's brain does, so Ollama keeps the model it already has loaded.
 
 ## Chats
 
@@ -525,7 +528,7 @@ rather use that instead)
 | `OLLAMA_BASE_URL` | _(auto-detect)_ | Override auto-detection with a specific Ollama URL |
 | `DATA_DIR` | `./data` | Where endpoint config and encrypted API keys are stored |
 | `TASK_MODEL` | _(chat's model)_ | Ollama model for titles, tags and follow-up suggestions |
-| `TASK_NUM_CTX` | _(model default)_ | Context size for `TASK_MODEL`; match the loaded model's to avoid a reload |
+| `TASK_NUM_CTX` | `24576` | Context size for every request sent straight to Ollama (chats, `TASK_MODEL` jobs, warm-up); match the loaded model's to avoid a reload, `0` leaves it to Ollama |
 | `ARTY_BASE_URL` | _(unset)_ | Arty's API address (for example `http://<arty-host>:8081/v1`). Must match an Arty connection under Settings > Connections that has Arty's API key; turns on the Arty devices page |
 | `ARTY_PHONE_URL` | _(Arty's address)_ | The address a phone should use in the setup QR code made on the Arty devices page (for example Arty's public address) |
 | `ARTY_ACCESS_CLIENT_ID` / `ARTY_ACCESS_CLIENT_SECRET` | _(unset)_ | Cloudflare Access service token put in the phone setup QR code, only when both are set |

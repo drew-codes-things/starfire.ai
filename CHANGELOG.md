@@ -70,6 +70,10 @@
 - Testable browser logic moved into `static/uiLogic.js`.
 
 ### Fixed
+- Requests sent straight to Ollama (chats, titles, tags, follow-ups and the model warm-up) ask
+  for `TASK_NUM_CTX` as the context size (now 24576 by default, was the model default) and turn
+  context shift off, as Arty's brain does, so they no longer make Ollama reload a model the
+  brain already has loaded. A context length set on a chat is still used as set.
 - Enter in a dialog field no longer reopens the New folder dialog or leaves a new line in the
   message box, and Escape on a dialog, a chat row menu or the model menu no longer also closes
   Settings behind it or stops a reply that is streaming.
