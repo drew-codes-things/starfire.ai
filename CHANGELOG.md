@@ -82,6 +82,31 @@
 - Non-admins no longer open Settings on the hidden Connections tab.
 - Text that was below WCAG AA contrast (hints, placeholders, group labels, and success and
   warning text in the light theme).
+- Sign-in lockouts behind a proxy count the visitor's real address (`TRUSTED_PROXIES`,
+  `CLIENT_IP_HEADER`), so a stranger can no longer lock the owner out of the sign-in pages
+  reached through a Cloudflare tunnel. 20 wrong passwords for one email in an hour lock it for
+  an hour, except from addresses that signed in before or a browser already signed in. Failed
+  sign-ins are logged, and the lockout table no longer grows without limit.
+- A login only works on the host it was made on (`/api/auth/me` still answers local services
+  on `127.0.0.1:<PORT>` and `SESSION_CHECK_HOSTS`). Logins from before this change must sign in
+  once more.
+- Only `remember: ...` (with the colon) in the main chat saves a memory. Messages starting with
+  save, note, store or remember go to the model, and temporary and side chats never save.
+- Uploads have limits: documents (`MAX_DOCUMENT_MB`), attachments per account
+  (`MAX_ATTACHMENTS_MB`), restores (`MAX_RESTORE_MB`) and a free disk reserve
+  (`MIN_FREE_DISK_MB`). Backup and restore no longer hold the whole zip in memory, and text
+  without full stops is split into normal-sized pieces.
+- Generated files whose names hold non-Latin characters download instead of failing.
+- Attachments and generated files are sent with `nosniff` and a sandbox policy, and only PNG,
+  JPEG, GIF and WebP images can be attached.
+- Every response carries `nosniff`, no-framing and same-origin referrer headers.
+- `/assets/../app.js` no longer serves app code without a login.
+- A chat message whose content is not text gets a 422 instead of a server error.
+- Setup stays closed if `data/users.json` goes missing after setup.
+- An unreadable `api_keys.json` or `documents.json` is moved aside instead of being
+  overwritten with an empty one.
+- Normal accounts no longer see MCP server commands, arguments or full URLs, and cannot start
+  a network scan or read the hardware page.
 
 ## 1.1.0 - 2026-11-03
 
