@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 import embeddings as embeddings_module
 import lexical_search
-from atomic_io import atomic_write_json
+from atomic_io import atomic_write_json, report_unreadable_store
 from config import config
 from model_endpoints import detect_ollama
 
@@ -42,7 +42,8 @@ class MemoryStore:
         try:
             with open(self.path, "r", encoding="utf-8") as f:
                 raw = json.load(f)
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as error:
+            report_unreadable_store(self.path, error)
             return []
         if not isinstance(raw, list):
             return []

@@ -6,6 +6,8 @@ import tempfile
 
 import httpx
 
+from atomic_io import discard_temp_file
+
 VALID_QUALITIES = {"low", "medium", "high"}
 HF_VOICES_BASE = "https://huggingface.co/rhasspy/piper-voices/resolve/main"
 TIMEOUT = 60.0
@@ -36,10 +38,7 @@ async def generate(text: str, voice_model_path: str) -> bytes:
     except asyncio.TimeoutError as e:
         raise RuntimeError(f"piper timed out after {TIMEOUT:.0f}s") from e
     finally:
-        try:
-            os.remove(out_path)
-        except OSError:
-            pass
+        discard_temp_file(out_path)
 
 def voice_url(voice_name: str, quality: str) -> tuple[str, str]:
     if quality not in VALID_QUALITIES:
@@ -70,10 +69,7 @@ async def pull_voice(voice_name: str, quality: str, dest_dir: str):
                         downloaded += len(chunk)
                         yield downloaded, total
             except BaseException:
-                try:
-                    os.remove(tmp_path)
-                except OSError:
-                    pass
+                discard_temp_file(tmp_path)
                 raise
         os.replace(tmp_path, onnx_path)
 

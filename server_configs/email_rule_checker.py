@@ -32,7 +32,7 @@ class EmailRuleChecker:
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=TICK_SECONDS)
             except asyncio.TimeoutError:
-                pass
+                logger.debug("email rule checker woke after %ss", TICK_SECONDS)
 
     def stop(self):
         self._stop.set()

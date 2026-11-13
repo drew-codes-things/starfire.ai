@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 
-from atomic_io import atomic_write_json
+from atomic_io import atomic_write_json, report_unreadable_store
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_COMFYUI_BASE_URL = "http://127.0.0.1:8188"
 
@@ -27,7 +30,8 @@ class ComfyUIConfigStore:
         try:
             with open(self.path, "r", encoding="utf-8") as f:
                 raw = json.load(f)
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as error:
+            report_unreadable_store(self.path, error)
             return ComfyUIConfig()
         if not isinstance(raw, dict):
             return ComfyUIConfig()
@@ -61,7 +65,8 @@ class PiperConfigStore:
         try:
             with open(self.path, "r", encoding="utf-8") as f:
                 raw = json.load(f)
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as error:
+            report_unreadable_store(self.path, error)
             return PiperConfig()
         if not isinstance(raw, dict):
             return PiperConfig()
@@ -93,7 +98,8 @@ class CustomWorkflowStore:
         try:
             with open(self.path, "r", encoding="utf-8") as f:
                 raw = json.load(f)
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as error:
+            report_unreadable_store(self.path, error)
             return []
         if not isinstance(raw, list):
             return []
@@ -157,7 +163,8 @@ class GeneratedFileStore:
         try:
             with open(self.index_path, "r", encoding="utf-8") as f:
                 raw = json.load(f)
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as error:
+            report_unreadable_store(self.index_path, error)
             return []
         if not isinstance(raw, list):
             return []
@@ -202,9 +209,12 @@ class GeneratedFileStore:
         target = next((e for e in entries if e.id == file_id), None)
         if not target:
             return False
+        file_path = self.path_for(target)
         try:
-            os.remove(self.path_for(target))
-        except OSError:
-            pass
+            os.remove(file_path)
+        except FileNotFoundError:
+            logger.debug("generated file %s was already gone", file_path)
+        except OSError as error:
+            logger.warning("could not remove generated file %s, so it stays on disk: %s", file_path, error)
         self._save([e for e in entries if e.id != file_id])
         return True

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import logging
 import re
 import socket
 from html.parser import HTMLParser
@@ -9,6 +10,8 @@ from urllib.parse import urlparse
 import httpx
 
 import web_search
+
+logger = logging.getLogger(__name__)
 
 MAX_SOURCES = 4
 MAX_CHARS_PER_SOURCE = 3000
@@ -54,8 +57,8 @@ def _extract_text(html: str) -> str:
     extractor = _TextExtractor()
     try:
         extractor.feed(html)
-    except Exception:
-        pass
+    except AssertionError as error:
+        logger.debug("stopped reading a page at markup the HTML parser rejects: %s", error)
     text = " ".join(extractor.parts)
     return re.sub(r"\s+", " ", text).strip()
 
@@ -63,7 +66,8 @@ async def _fetch_page(client: httpx.AsyncClient, url: str) -> str:
     try:
         r = await client.get(url, headers={"User-Agent": "Mozilla/5.0 (compatible; starfire.ai)"})
         r.raise_for_status()
-    except httpx.HTTPError:
+    except httpx.HTTPError as error:
+        logger.info("could not fetch a research source: %s", error)
         return ""
     return _extract_text(r.text)[:MAX_CHARS_PER_SOURCE]
 

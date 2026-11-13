@@ -1,4 +1,5 @@
 import importlib.util
+import logging
 import os
 import shutil
 import subprocess
@@ -53,6 +54,8 @@ from mcp_servers_store import REFERENCE_SERVERS
 import ollama_manager
 from model_endpoints import detect_ollama
 from version import VERSION
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MCP_PRESETS = ["fetch", "memory"]
 
@@ -110,8 +113,10 @@ async def lifespan(app: FastAPI):
     for task in (scheduler_task, email_rule_task):
         try:
             await task
-        except (asyncio.CancelledError, Exception):
-            pass
+        except asyncio.CancelledError:
+            logger.debug("background task %s stopped", task.get_name())
+        except Exception:
+            logger.exception("background task %s failed while starfire was shutting down", task.get_name())
 
     for server in routes.mcp_servers.list():
         await mcp_manager.disconnect(server.id)

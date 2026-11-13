@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import time
 import uuid
 
 import httpx
+
+from atomic_io import discard_temp_file
+
+logger = logging.getLogger(__name__)
 
 PROBE_TIMEOUT = 5.0
 GENERATE_TIMEOUT = 300.0
@@ -37,10 +42,7 @@ async def pull_checkpoint(url: str, checkpoints_dir: str, filename: str):
                         downloaded += len(chunk)
                         yield downloaded, total
             except BaseException:
-                try:
-                    os.remove(tmp_path)
-                except OSError:
-                    pass
+                discard_temp_file(tmp_path)
                 raise
     os.replace(tmp_path, dest_path)
 
@@ -49,7 +51,8 @@ async def detect(base_url: str) -> bool:
         async with httpx.AsyncClient(timeout=PROBE_TIMEOUT) as client:
             r = await client.get(base_url.rstrip("/") + "/system_stats")
         return r.status_code == 200
-    except httpx.HTTPError:
+    except httpx.HTTPError as error:
+        logger.debug("no ComfyUI answered at %s: %s", base_url, error)
         return False
 
 async def list_checkpoints(base_url: str) -> list[str]:
@@ -59,7 +62,8 @@ async def list_checkpoints(base_url: str) -> list[str]:
         r.raise_for_status()
         data = r.json()
         return data["CheckpointLoaderSimple"]["input"]["required"]["ckpt_name"][0]
-    except (httpx.HTTPError, KeyError, IndexError, ValueError):
+    except (httpx.HTTPError, KeyError, IndexError, ValueError) as error:
+        logger.warning("could not list ComfyUI checkpoints from %s: %s", base_url, error)
         return []
 
 def _build_workflow(prompt: str, checkpoint: str, negative_prompt: str,
@@ -100,7 +104,8 @@ async def _queue_and_wait(base_url: str, workflow: dict) -> dict:
                 r = await client.get(f"{base_url}/history/{prompt_id}")
                 r.raise_for_status()
                 history = r.json()
-            except httpx.HTTPError:
+            except httpx.HTTPError as error:
+                logger.debug("could not read ComfyUI history for %s, trying again: %s", prompt_id, error)
                 await asyncio.sleep(POLL_INTERVAL)
                 continue
 

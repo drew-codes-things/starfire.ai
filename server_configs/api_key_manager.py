@@ -4,7 +4,7 @@ import logging
 from typing import Dict
 from cryptography.fernet import Fernet, InvalidToken
 
-from atomic_io import set_aside_unreadable
+from atomic_io import discard_temp_file, set_aside_unreadable
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,8 @@ def safe_chmod(path: str, mode: int) -> bool:
     try:
         os.chmod(path, mode)
         return True
-    except OSError:
+    except OSError as error:
+        logger.warning("could not set permissions %o on %s: %s", mode, path, error)
         return False
 
 class APIKeyManager:
@@ -83,10 +84,7 @@ class APIKeyManager:
                 os.fsync(f.fileno())
             os.replace(tmp_file, self.api_keys_file)
         except OSError:
-            try:
-                os.remove(tmp_file)
-            except OSError:
-                pass
+            discard_temp_file(tmp_file)
             raise
 
     def delete(self, provider: str):
@@ -102,10 +100,7 @@ class APIKeyManager:
                 os.fsync(f.fileno())
             os.replace(tmp_file, self.api_keys_file)
         except OSError:
-            try:
-                os.remove(tmp_file)
-            except OSError:
-                pass
+            discard_temp_file(tmp_file)
             raise
 
     def load(self) -> Dict[str, str]:

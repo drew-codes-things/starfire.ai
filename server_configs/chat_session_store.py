@@ -7,7 +7,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 
-from atomic_io import atomic_write_json
+from atomic_io import atomic_write_json, report_unreadable_store
 
 TAG_QUERY_PREFIX = "tag:"
 MAX_TAG_LENGTH = 32
@@ -43,7 +43,8 @@ class ChatSessionStore:
         try:
             with open(self.path, "r", encoding="utf-8") as f:
                 raw = json.load(f)
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as error:
+            report_unreadable_store(self.path, error)
             return []
         if not isinstance(raw, list):
             return []

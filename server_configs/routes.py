@@ -222,8 +222,8 @@ async def warm(body: dict):
             r = await client.post(_ollama_api_root(endpoint.base_url) + "/generate",
                                     json=for_runner({"model": model, "keep_alive": -1}))
             await r.aclose()
-    except httpx.HTTPError:
-        pass
+    except httpx.HTTPError as error:
+        logger.info("couldn't ask %s to warm %s: %s", endpoint.base_url, model, error)
     return {"ok": True}
 
 @router.get("/config")
@@ -275,8 +275,8 @@ def _list_dirs(path: str) -> dict:
             if name.startswith(".") or not os.path.isdir(full):
                 continue
             entries.append({"name": name, "path": full})
-    except PermissionError:
-        pass
+    except PermissionError as error:
+        logger.debug("cannot list folders in %s: %s", base, error)
     parent = os.path.dirname(base)
     return {"path": base, "parent": parent if parent != base else None, "entries": entries}
 
@@ -994,8 +994,8 @@ async def _track_usage(gen, provider: str, model: str, input_text: str):
                 obj = json.loads(line[len("data:"):].strip())
                 if "delta" in obj:
                     output_parts.append(obj["delta"])
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            pass
+        except json.JSONDecodeError:
+            logger.debug("a %s reply chunk was not JSON, so usage leaves it out", model)
     usage.record(provider, model, input_text, "".join(output_parts))
 
 async def _synthetic_reply(text: str):

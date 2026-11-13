@@ -1,7 +1,21 @@
 import json
+import logging
 import os
 import tempfile
 import time
+
+logger = logging.getLogger(__name__)
+
+def discard_temp_file(path: str) -> None:
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        logger.debug("temp file %s was already gone", path)
+    except OSError as error:
+        logger.warning("could not remove temp file %s: %s", path, error)
+
+def report_unreadable_store(path: str, error: Exception) -> None:
+    logger.error("could not read %s, so it is treated as empty and the next save replaces it: %s", path, error)
 
 def atomic_write_json(path: str, data) -> None:
     directory, name = os.path.split(os.path.abspath(path))
@@ -13,10 +27,7 @@ def atomic_write_json(path: str, data) -> None:
             os.fsync(f.fileno())
         os.replace(tmp_file, path)
     except BaseException:
-        try:
-            os.remove(tmp_file)
-        except OSError:
-            pass
+        discard_temp_file(tmp_file)
         raise
 
 def set_aside_unreadable(path: str) -> str:

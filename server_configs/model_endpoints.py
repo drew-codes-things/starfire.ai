@@ -1,12 +1,15 @@
 import json
+import logging
 import os
 import uuid
 from dataclasses import asdict, dataclass
 
 import httpx
 
-from atomic_io import atomic_write_json
+from atomic_io import atomic_write_json, report_unreadable_store
 from providers import _detect_provider
+
+logger = logging.getLogger(__name__)
 
 LOCAL_HOSTS = ["127.0.0.1", "localhost"]
 DISCOVERY_PORTS = [11434, 1234, 8080]
@@ -23,7 +26,8 @@ async def detect_ollama(env_override: str | None) -> str | None:
                 r = await client.get(f"{url}/api/tags")
                 if r.status_code == 200:
                     return url
-            except httpx.HTTPError:
+            except httpx.HTTPError as error:
+                logger.debug("no Ollama answered at %s: %r", url, error)
                 continue
     return None
 
@@ -39,13 +43,14 @@ async def discover_servers() -> list[dict]:
                     if r.status_code == 200:
                         found.append({"base_url": base, "kind": "ollama", "label": f"Ollama ({host}:{port})"})
                         continue
-                except httpx.HTTPError:
-                    pass
+                except httpx.HTTPError as error:
+                    logger.debug("no Ollama API at %s: %r", base, error)
                 try:
                     r = await client.get(f"{base}/v1/models")
                     if r.status_code == 200:
                         found.append({"base_url": base, "kind": "openai-compatible", "label": f"Local server ({host}:{port})"})
-                except httpx.HTTPError:
+                except httpx.HTTPError as error:
+                    logger.debug("no OpenAI-compatible API at %s: %r", base, error)
                     continue
     seen = set()
     deduped = []
@@ -76,7 +81,8 @@ class ModelEndpointStore:
         try:
             with open(self.path, "r", encoding="utf-8") as f:
                 raw = json.load(f)
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as error:
+            report_unreadable_store(self.path, error)
             return []
         if not isinstance(raw, list):
             return []

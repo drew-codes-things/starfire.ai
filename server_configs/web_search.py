@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
 import re
 from html import unescape
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 _RESULT_RE = re.compile(
     r'<a rel="nofollow" class="result__a" href="(?P<url>[^"]+)"[^>]*>(?P<title>.*?)</a>.*?'
@@ -26,7 +29,11 @@ async def search(query: str, max_results: int = 5) -> list[dict]:
                 headers={"User-Agent": "Mozilla/5.0 (compatible; starfire.ai)"},
             )
         r.raise_for_status()
-    except httpx.HTTPError:
+    except httpx.HTTPStatusError as error:
+        logger.warning("web search failed: the search site answered %s", error.response.status_code)
+        return []
+    except httpx.HTTPError as error:
+        logger.warning("web search failed: %r", error)
         return []
 
     results = []
