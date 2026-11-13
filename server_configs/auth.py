@@ -114,7 +114,17 @@ class UserStore:
 
     def __init__(self, data_dir: str):
         self.path = os.path.join(data_dir, "users.json")
+        self.setup_marker = os.path.join(data_dir, ".setup-done")
         self._lock = threading.Lock()
+
+    def mark_set_up(self) -> None:
+        if not os.path.exists(self.setup_marker):
+            with open(self.setup_marker, "w", encoding="utf-8") as marker:
+                marker.write(_now_iso())
+            os.chmod(self.setup_marker, 0o600)
+
+    def was_set_up(self) -> bool:
+        return os.path.exists(self.setup_marker)
 
     def list(self) -> list[User]:
         return [User(**item) for item in _read_json(self.path, list)]
@@ -214,6 +224,7 @@ class UserStore:
                         password_hash=hash_password(password), created=_now_iso())
             atomic_write_json(self.path, [asdict(user)])
             os.chmod(self.path, 0o600)
+            self.mark_set_up()
         return user
 
     def change_password(self, user_id: str, current: str, password: str, confirm: str) -> None:
@@ -485,12 +496,20 @@ def login_redirect(request: Request) -> str:
     return f"{LOGIN_PAGE}?next={quote(wanted, safe='')}"
 
 
+MISSING_ACCOUNTS_DETAIL = ("the accounts file data/users.json is missing although setup was done - restore it "
+                           "from a backup, or delete data/.setup-done to set up again")
+
+
 def install(app: FastAPI, users: UserStore, sessions: SessionStore) -> None:
+    if users.has_users():
+        users.mark_set_up()
 
     @app.middleware("http")
     async def require_login(request: Request, call_next):
         path = request.url.path
         if not users.has_users():
+            if users.was_set_up():
+                return JSONResponse({"detail": MISSING_ACCOUNTS_DETAIL}, status_code=503)
             if path in SETUP_PATHS or (is_public(path) and path != LOGIN_PAGE):
                 return await call_next(request)
             if path.startswith("/api/"):

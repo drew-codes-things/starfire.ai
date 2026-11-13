@@ -51,7 +51,9 @@ It listens on `127.0.0.1` only by default.
 
 The first time you open starfire it shows a setup page: choose your name, email and a
 password (at least 10 characters). That makes the admin account, and the setup page closes
-for good. Until then, every other page and API call is locked, so set it up straight away
+for good (a `data/.setup-done` marker keeps it closed: if `data/users.json` ever goes missing,
+starfire answers 503 until it is restored, instead of offering setup to whoever comes first).
+Until then, every other page and API call is locked, so set it up straight away
 on a new install. After that, every page and API call needs a login (kept for 30 days in an
 HttpOnly cookie; 5 wrong passwords lock that email from that address for 15 minutes, and
 20 wrong passwords for one email within an hour, from anywhere, lock it for an hour except

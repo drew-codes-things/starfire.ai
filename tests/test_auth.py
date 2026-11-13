@@ -557,3 +557,21 @@ def test_a_climbing_path_to_app_code_still_needs_a_login(users, sessions):
 
     response = TestClient(app).get("/assets/%2e%2e/app.js", follow_redirects=False)
     assert response.status_code == 303
+
+
+def test_setup_stays_closed_when_the_accounts_file_goes_missing(setup_client, users):
+    assert setup_client.post("/api/auth/setup", json=setup_body()).status_code == 200
+    os.remove(users.path)
+    stranger = TestClient(setup_client.app, base_url="https://testserver")
+    page = stranger.get("/setup.html", follow_redirects=False)
+    assert page.status_code == 503
+    response = stranger.post("/api/auth/setup", json=setup_body(email="evil@example.com"))
+    assert response.status_code == 503 and "users.json" in response.json()["detail"]
+    assert not users.has_users()
+
+
+def test_an_install_that_already_has_accounts_is_marked_as_set_up(users, sessions):
+    users.upsert("drew@example.com", "Drew", "admin", fast_hash(PASSWORD))
+    build_app(users, sessions)
+    os.remove(users.path)
+    assert users.was_set_up()
