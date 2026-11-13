@@ -32,11 +32,21 @@ async def _run(cmd: list[str], timeout: float = 5.0) -> tuple[int, str]:
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
         )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except (OSError, asyncio.TimeoutError) as error:
+    except OSError as error:
         logger.debug("could not run %s: %r", cmd[0], error)
         return -1, ""
+    try:
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        await _stop_process(proc)
+        logger.warning("%s did not finish within %.0fs and was stopped", cmd[0], timeout)
+        return -1, ""
     return proc.returncode, stdout.decode("utf-8", errors="replace")
+
+async def _stop_process(proc: asyncio.subprocess.Process) -> None:
+    if proc.returncode is None:
+        proc.kill()
+    await proc.wait()
 
 async def _read_total_ram_gb() -> float | None:
     if _SYSTEM == "Linux":

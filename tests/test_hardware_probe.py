@@ -3,6 +3,7 @@ import io
 import json
 import os
 import sys
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "server_configs"))
@@ -153,3 +154,21 @@ def test_a_command_that_is_not_installed_reads_as_unavailable():
 def test_a_command_that_answers_is_read():
     code, out = asyncio.run(hardware_probe._run([sys.executable, "-c", "print('12288')"]))
     assert (code, out.strip()) == (0, "12288")
+
+
+@pytest.mark.skipif(not os.path.isdir("/proc"), reason="reads process state from /proc")
+def test_a_command_that_hangs_is_stopped_at_the_time_limit(tmp_path):
+    pid_file = tmp_path / "pid"
+    hang = f"import os, time; open({str(pid_file)!r}, 'w').write(str(os.getpid())); time.sleep(30)"
+    assert asyncio.run(hardware_probe._run([sys.executable, "-c", hang], timeout=1.0)) == (-1, "")
+    pid = int(pid_file.read_text())
+    time.sleep(0.2)
+    try:
+        os.kill(pid, 0)
+        with open(f"/proc/{pid}/stat") as f:
+            running = f.read().split(") ", 1)[1][0] != "Z"
+    except ProcessLookupError:
+        running = False
+    if running:
+        os.kill(pid, 9)
+    assert not running, "the command kept running after the time limit"

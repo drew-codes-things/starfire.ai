@@ -2,6 +2,7 @@ import asyncio
 import os
 import stat
 import sys
+import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "server_configs"))
@@ -51,6 +52,15 @@ def fake_piper(tmp_path, monkeypatch):
     return voice, last_run
 
 
+def is_running(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    with open(f"/proc/{pid}/stat") as f:
+        return f.read().split(") ", 1)[1][0] != "Z"
+
+
 def test_piper_speaks_the_text_with_the_chosen_voice_and_cleans_up(fake_piper):
     voice, last_run = fake_piper
     assert piper_tts.is_installed()
@@ -66,6 +76,22 @@ def test_a_piper_failure_reports_what_piper_said(fake_piper, monkeypatch):
     with pytest.raises(RuntimeError, match="piper failed: Invalid voice model: unexpected end of file"):
         asyncio.run(piper_tts.generate("Good morning", str(voice)))
     assert not os.path.exists(last_run()[1])
+
+
+@pytest.mark.skipif(not os.path.isdir("/proc"), reason="reads process state from /proc")
+def test_a_piper_that_hangs_is_stopped_at_the_time_limit(fake_piper, monkeypatch):
+    voice, last_run = fake_piper
+    monkeypatch.setenv("FAKE_PIPER_MODE", "hang")
+    monkeypatch.setattr(piper_tts, "TIMEOUT", 1.0)
+    with pytest.raises(RuntimeError, match="piper timed out after 1s"):
+        asyncio.run(piper_tts.generate("Good morning", str(voice)))
+    pid, out_path, _ = last_run()
+    time.sleep(0.2)
+    running = is_running(pid)
+    if running:
+        os.kill(pid, 9)
+    assert not running, "piper kept running after the time limit"
+    assert not os.path.exists(out_path)
 
 
 def test_speech_without_piper_installed_says_how_to_get_it(monkeypatch, tmp_path):

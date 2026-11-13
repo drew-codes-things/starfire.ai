@@ -178,6 +178,9 @@
   message the server had accepted was shown as not sent (so it could be sent twice), and a
   wrong password could show up as "Connection unexpectedly closed" instead of the server's
   reason.
+- A command that hangs past its time limit is stopped instead of left running: a stuck
+  `nvidia-smi`, `lscpu`, `dmidecode` or PowerShell query behind the hardware page (one more each
+  time the page opened, now logged as a warning), and a stuck Piper voice.
 
 ## 1.1.0 - 2026-11-03
 
