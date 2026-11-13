@@ -30,6 +30,7 @@ SECRET_NAME_WORDS = frozenset({"key", "auth", "authorization", "pwd", "pass", "p
 SECRET_NAME_ENDINGS = ("token", "secret", "password", "passwd", "apikey")
 NAME_WORD = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+")
 URL_START = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
+URL_IN_TEXT = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://[^\s'\"<>]+")
 NAMED_VALUE = re.compile(r"(-{0,2}[A-Za-z_][\w.-]*)(=|:\s*)(.*)", re.S)
 
 @dataclass
@@ -377,6 +378,10 @@ def without_url_credentials(url: str) -> str:
                              query=_params_without_secrets(parts.query),
                              fragment=_params_without_secrets(parts.fragment))
     return url if cleaned == parts else urlunsplit(cleaned)
+
+
+def with_url_credentials_hidden(message: str) -> str:
+    return URL_IN_TEXT.sub(lambda found: without_url_credentials(found.group(0)), message)
 
 
 def without_text_credentials(text: str) -> str:
