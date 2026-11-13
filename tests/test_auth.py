@@ -262,7 +262,10 @@ def test_fonts_load_on_the_login_and_setup_pages(path):
     assert auth.is_public(path)
 
 
-@pytest.mark.parametrize("path", ["/vendor/marked.min.js", "/app.js", "/workspace.js", "/index.html", "/vendor/"])
+@pytest.mark.parametrize("path", ["/vendor/marked.min.js", "/app.js", "/workspace.js", "/index.html", "/vendor/",
+                                  "/appState.js", "/chatMessages.js", "/codeBlocks.js", "/chatCards.js", "/chatSend.js",
+                                  "/helperTasks.js", "/settings.js", "/settingsMemoryTasks.js", "/settingsEmail.js",
+                                  "/settingsNotes.js", "/settingsSystem.js", "/compare.js", "/palette.js"])
 def test_app_code_still_needs_a_login(path):
     assert not auth.is_public(path)
 

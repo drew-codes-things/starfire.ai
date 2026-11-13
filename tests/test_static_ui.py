@@ -8,7 +8,10 @@ import pytest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATIC = os.path.join(ROOT, "static")
 PAGES = ["index.html", "login.html", "setup.html"]
-APP_SCRIPTS = ["app.js", "workspace.js", "uiLogic.js", "login.js", "setup.js"]
+APP_JS_PARTS = ["appState.js", "chatMessages.js", "codeBlocks.js", "chatCards.js", "chatSend.js", "helperTasks.js",
+                "settings.js", "settingsMemoryTasks.js", "settingsEmail.js", "settingsNotes.js", "settingsSystem.js",
+                "compare.js", "palette.js", "app.js"]
+APP_SCRIPTS = [*APP_JS_PARTS, "workspace.js", "uiLogic.js", "login.js", "setup.js"]
 IDS_BUILT_BY_SCRIPTS = {"emailAiResult", "emailReplyBox", "ollamaStartBtn", "ollamaStartMsg", "welcomeConnectBtn"}
 UNLABELLED_TYPES = {"hidden"}
 HEX_COLOUR = re.compile(r"#[0-9a-fA-F]{3,8}\b")
@@ -23,6 +26,10 @@ RADIUS_PART = re.compile(r"var\(--r-(?:xs|sm|md|lg|xl|pill)\)|0|50%")
 def read(name: str) -> str:
     with open(os.path.join(STATIC, name), encoding="utf-8") as f:
         return f.read()
+
+
+def read_app() -> str:
+    return "".join(read(name) for name in APP_JS_PARTS)
 
 
 class Page(HTMLParser):
@@ -97,9 +104,16 @@ def test_theme_is_applied_before_the_page_paints(page):
     assert 'name="theme-color"' in head
 
 
+def test_the_chat_page_loads_the_app_parts_in_order_with_app_js_last():
+    scripts = re.findall(r'<script src="([^"]+)"', read("index.html"))
+    first = scripts.index(APP_JS_PARTS[0])
+    assert scripts[first:first + len(APP_JS_PARTS)] == APP_JS_PARTS
+    assert scripts.index("sideChat.js") < first < scripts.index("workspace.js")
+
+
 def test_scripts_only_look_up_elements_that_exist():
     ids = set(Page(read("index.html")).ids)
-    scripts = read("app.js") + read("workspace.js")
+    scripts = read_app() + read("workspace.js")
     wanted = set(re.findall(r"\$\('([A-Za-z0-9_]+)'\)", scripts))
     wanted |= set(re.findall(r"getElementById\('([A-Za-z0-9_]+)'\)", scripts))
     missing = sorted(wanted - ids - IDS_BUILT_BY_SCRIPTS)
@@ -110,7 +124,7 @@ def test_icons_used_by_pages_and_scripts_are_in_the_sprite():
     html = read("index.html")
     defined = set(re.findall(r'<symbol id="i-([a-z-]+)"', html))
     used = set(re.findall(r'href="#i-([a-z-]+)"', html))
-    scripts = read("app.js") + read("workspace.js")
+    scripts = read_app() + read("workspace.js")
     used |= set(re.findall(r"icon\('([a-z-]+)'", scripts))
     action_icons = re.search(r"const ACTION_ICONS = \{(.*?)\};", scripts, re.S).group(1)
     used |= set(re.findall(r"\['([a-z-]+)'", action_icons))
@@ -179,7 +193,7 @@ def test_text_colours_meet_wcag_aa_on_every_surface(selector):
 
 
 def test_the_offline_fallback_treats_arty_and_its_old_name_as_bringing_their_own_tools():
-    fallback = re.search(r"own_tools_models: \[([^\]]*)\]", read("app.js"))
+    fallback = re.search(r"own_tools_models: \[([^\]]*)\]", read_app())
     assert fallback, "app.js has no own_tools_models fallback"
     names = re.findall(r"'([^']+)'", fallback.group(1))
     assert {"Arty", "assistant-core", "arty/*"} == set(names)
@@ -234,14 +248,14 @@ def test_on_phones_the_reply_actions_stay_on_one_row_and_the_model_pick_sits_on_
     assert "flex: 0 1 var(--touch);" in css_rule("  .line-action-btn", phone)
     picker = css_rule("  .regen-group .regen-model-select", phone)
     assert "position: absolute;" in picker and "opacity: 0;" in picker
-    app = read("app.js")
+    app = read_app()
     assert "group.className = 'regen-group';" in app
     assert "select.onchange = () => { if (regeneratePicksAndRuns()) regenerate(); };" in app
     assert "REGENERATE_WITH" in app
 
 
 def test_opening_a_settings_tab_shows_loading_in_its_empty_lists():
-    app = read("app.js")
+    app = read_app()
     listed = re.search(r"const SETTINGS_TAB_LISTS = \{(.*?)\};", app, re.S)
     assert listed, "app.js has no SETTINGS_TAB_LISTS"
     ids = set(re.findall(r"'([A-Za-z]+List)'", listed.group(1)))
@@ -255,7 +269,7 @@ def test_opening_a_settings_tab_shows_loading_in_its_empty_lists():
 def test_adding_a_memory_reports_a_failure_under_the_field():
     html = read("index.html")
     assert re.search(r'<p class="settings-hint" id="memoryAddResult" role="status"></p>', html)
-    handler = re.search(r"settingsEls\.addMemoryEntryBtn\.onclick = async \(\) => \{(.*?)\n\};", read("app.js"), re.S)
+    handler = re.search(r"settingsEls\.addMemoryEntryBtn\.onclick = async \(\) => \{(.*?)\n\};", read_app(), re.S)
     assert handler, "no memory add handler"
     body = handler.group(1)
     assert "if (!r.ok) throw new Error(await failureMessage(r, " in body
@@ -264,7 +278,7 @@ def test_adding_a_memory_reports_a_failure_under_the_field():
 
 
 def test_the_rule_account_select_is_filled_from_the_accounts_or_says_there_are_none():
-    app = read("app.js")
+    app = read_app()
     assert "const choices = ruleAccountChoices(accounts);" in app
     assert "settingsEls.ruleAccountSelect.disabled = !choices.usable;" in app
     assert "settingsEls.createRuleBtn.disabled = !choices.usable;" in app

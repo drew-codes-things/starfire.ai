@@ -99,9 +99,9 @@ function functionBody(source, name) {
 }
 
 test('the chat approval cards for edits and shell commands hold their answers the same way', () => {
-  const app = fs.readFileSync(path.join(STATIC, 'app.js'), 'utf8');
+  const cards = fs.readFileSync(path.join(STATIC, 'chatCards.js'), 'utf8');
   for (const name of ['renderDiffCard', 'renderShellApprovalCard']) {
-    const body = functionBody(app, name);
+    const body = functionBody(cards, name);
     assert.match(body, /const guard = answerGuard\(\);/, name);
     assert.match(body, /flashNewQuestion\(card, \[approveBtn, rejectBtn\], guard\);/, name);
     const handlers = body.split(/(?:approveBtn\.onclick|rejectBtn\.onclick|const decide) = async/).slice(1);
@@ -109,7 +109,7 @@ test('the chat approval cards for edits and shell commands hold their answers th
     for (const handler of handlers) assert.match(handler.trimStart(), /^\([^)]*\) => \{\s*if \(!guard\.isReady\(\)\) return;/, name);
   }
   const page = fs.readFileSync(path.join(STATIC, 'index.html'), 'utf8');
-  assert.ok(page.indexOf('src="answerGuard.js"') >= 0 && page.indexOf('src="answerGuard.js"') < page.indexOf('src="app.js"'));
+  assert.ok(page.indexOf('src="answerGuard.js"') >= 0 && page.indexOf('src="answerGuard.js"') < page.indexOf('src="chatCards.js"'));
   const cliPage = fs.readFileSync(path.join(STATIC, 'arty-cli.html'), 'utf8');
   assert.ok(cliPage.indexOf('src="answerGuard.js"') >= 0 && cliPage.indexOf('src="answerGuard.js"') < cliPage.indexOf('src="artyCli.js"'));
 });
