@@ -206,3 +206,9 @@ test('a compacted marker with no summary still shows, and the viewer keeps room 
   assert.equal(transcript.items[0].text, '');
   assert.ok(logic.MAX_KEPT_ITEMS >= 2000);
 });
+
+test('the message box height follows its text and stops at the most it may take', () => {
+  assert.equal(logic.composerHeight(60), 60);
+  assert.equal(logic.composerHeight(900), logic.COMPOSER_MAX_PX);
+  assert.equal(logic.COMPOSER_MAX_PX, 200);
+});

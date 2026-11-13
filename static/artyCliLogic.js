@@ -13,6 +13,7 @@ const MAX_KEPT_ITEMS = 2000;
 const FINISHED_AFTER_MS = 4000;
 const MAX_REMEMBERED_QUESTIONS = 100;
 const NEAR_BOTTOM_PX = 48;
+const COMPOSER_MAX_PX = 200;
 const MAX_TARGET_CHARS = 80;
 const FAILED_RESULT = /^(Error|Not done)/;
 const STEP_TARGETS = ['path', 'pattern', 'command', 'url', 'query', 'task', 'job', 'name'];
@@ -418,11 +419,15 @@ function isSessionId(value) {
   return SESSION_ID.test(String(value ?? ''));
 }
 
+function composerHeight(scrollHeight, most = COMPOSER_MAX_PX) {
+  return Math.min(scrollHeight, most);
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     MAX_KEPT_ITEMS, FINISHED_AFTER_MS, SHARED_FROM_HERE, COMPACTED_LINE, NO_SUMMARY_SHOWN, computerName, sessionTitle,
     sessionDetails, sessionLine, addedSince, toolSummary, stepLine, readableInput, diffTone,
     newTranscript, addNote, addEvent, trimTranscript, activityOf, isNearBottom, markdownBlocks, permissionText, permissionPrompt,
-    openRequests, askedAgain, FIRST_POLL, nextPoll, isSessionId,
+    openRequests, askedAgain, FIRST_POLL, nextPoll, isSessionId, COMPOSER_MAX_PX, composerHeight,
   };
 }

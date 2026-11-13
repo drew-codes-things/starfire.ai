@@ -292,6 +292,11 @@ function composerDock(sessionId) {
   const stop = el('button', { type: 'button', class: 'btn ghost', title: 'Stop what Arty is doing, like Esc on the computer' }, 'Stop');
   const form = el('form', { class: 'arty-cli-composer', novalidate: true }, box, send, stop);
   const report = (error) => problems.replaceChildren(hint(error.message, 'error'));
+  const fitToText = () => {
+    box.style.height = 'auto';
+    box.style.height = `${composerHeight(box.scrollHeight)}px`;
+  };
+  box.addEventListener('input', fitToText);
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     const text = box.value.trim();
@@ -300,6 +305,7 @@ function composerDock(sessionId) {
     try {
       await call('POST', `/sessions/${sessionId}/messages`, { text });
       box.value = '';
+      box.style.height = '';
       problems.replaceChildren();
     } catch (error) {
       report(error);

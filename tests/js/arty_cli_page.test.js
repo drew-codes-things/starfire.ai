@@ -21,6 +21,8 @@ class FakeElement {
     this.disabled = false;
     this.value = '';
     this.parent = null;
+    this.style = {};
+    this.scrollHeight = 0;
     const element = this;
     this.classList = {
       add(name) { element.className = `${element.className} ${name}`.trim(); },
@@ -199,4 +201,28 @@ test('a shared terminal shows its title, the earlier conversation and the compac
   assert.equal(byClass(root, 'arty-cli-compacted').length, 1);
   const pictures = allElements(root).filter((element) => element.tag === 'img').map((image) => image.attributes.src);
   assert.deepEqual([...new Set(pictures)], ['assets/logo.svg']);
+});
+
+test('the message box grows with its text up to a limit and shrinks back after sending', async (t) => {
+  const { root, close } = openPage([
+    ['/sessions/' + SESSION + '/events', 'GET', sequence(() => reply(200, { events: [], next: 0, ended: false, missed: false, session: SESSION_INFO }))],
+    ['/messages', 'POST', () => reply(200, { ok: true })],
+    ['/api/arty-cli/sessions', 'GET', () => reply(200, { sessions: [SESSION_INFO] })],
+  ]);
+  t.after(close);
+  for (let round = 0; round < 5; round += 1) await settle();
+  const box = allElements(root).find((element) => element.tag === 'textarea');
+  assert.ok(box.listeners.input, 'the message box listens for typing');
+  box.value = 'one\ntwo\nthree';
+  box.scrollHeight = 96;
+  box.listeners.input();
+  assert.equal(box.style.height, '96px');
+  box.scrollHeight = 900;
+  box.listeners.input();
+  assert.equal(box.style.height, '200px');
+  const form = allElements(root).find((element) => element.tag === 'form');
+  form.listeners.submit({ preventDefault() {} });
+  for (let round = 0; round < 5; round += 1) await settle();
+  assert.equal(box.value, '');
+  assert.equal(box.style.height, '');
 });
