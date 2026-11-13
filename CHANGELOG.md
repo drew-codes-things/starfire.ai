@@ -88,6 +88,12 @@
   routes, backup restore with unsafe paths, API key storage and which endpoint gets which key,
   edit and shell approvals, scheduled tasks, email rules, the model's built-in tools and chat
   provider routing. Server line coverage goes from 64% to 78%. Nothing a user sees changes.
+- More server tests (689 to 803) on the parts that were still thin: the model's tool loop
+  (tool errors, model errors, stopped and cancelled replies), semantic search with and without
+  an embedding model, finding Ollama and local model servers, picture, speech, video and
+  document generation through ComfyUI, OpenAI and Piper, the hardware page on Linux, macOS and
+  Windows, and IMAP and SMTP email, all against fakes. Server line coverage goes from 79% to
+  89%. Four bugs they found are listed under Fixed.
 
 ### Fixed
 - Errors the server used to swallow in silence are now logged with what failed: a store file
