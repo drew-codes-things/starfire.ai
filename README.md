@@ -481,7 +481,12 @@ thing the manual "copy the data folder" step below does, through the UI. Restori
 your current data** and can't be undone; back up first if you're not sure.
 
 The zip carries no credentials: it leaves out `.key`, `api_keys.json`, `sessions.json` and any
-`.env`, and blanks MCP server tokens and header values. After restoring on a new install, enter
+`.env`, and blanks MCP server tokens and header values. Credentials inside MCP server arguments
+and URLs are replaced with `__secret_removed__`: a password in a URL, a query value whose name
+looks like a key, token, secret, password or auth, the value after a flag such as `--api-key`,
+`--token` or `--password`, and `NAME=value` or `Name: value` arguments with such names. A secret
+passed as a bare argument with none of these markers can't be told apart from a file name, so
+give tokens to MCP servers as env values. After restoring on a new install, enter
 provider API keys, email passwords and MCP tokens again (the settings page marks email accounts
 and MCP servers that need it; remove and add them again). Account records keep their bcrypt
 password hashes, so everyone can still log in. Restoring an older zip that still holds `.key` or
@@ -560,8 +565,8 @@ Settings UI so they're encrypted at rest rather than sitting in plaintext in `.e
 - `data/api_keys.json` - API keys, encrypted with [Fernet](https://cryptography.io/en/latest/fernet/),
   `chmod 600` (owner-only).
 - `data/.key` - the per-install encryption key, `chmod 600` (owner-only).
-- `data/mcp_servers.json` - configured MCP servers; env and header values (tokens) are
-  encrypted with the same key as `api_keys.json`.
+- `data/mcp_servers.json` - configured MCP servers; env and header values (tokens), arguments
+  and URLs are encrypted with the same key as `api_keys.json`.
 - `data/users.json` / `data/sessions.json` - accounts (bcrypt hashes) and login sessions.
 - `data/users/<id>/` - one folder per account holding that person's `memory.json`,
   `documents.json`, `tasks.json` / `task_runs.json`, `email_accounts.json` / `email_rules.json`

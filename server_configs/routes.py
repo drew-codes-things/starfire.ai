@@ -37,8 +37,7 @@ import piper_tts
 from local_gen_store import ComfyUIConfigStore, CustomWorkflowStore, PiperConfigStore
 from email_rule_checker import EmailRuleChecker
 from mcp_manager import McpConnectionError, mcp_manager
-from mcp_servers_store import (MCP_SERVER_REPOSITORY, REFERENCE_SERVERS, McpServerStore, has_missing_secrets,
-                               without_secret_values)
+from mcp_servers_store import MCP_SERVER_REPOSITORY, REFERENCE_SERVERS, McpServerStore, has_missing_secrets
 from model_endpoints import ModelEndpointStore, detect_ollama, discover_servers
 from ollama_runner import for_runner
 from providers import build_models_url, is_embedding_model
@@ -1633,7 +1632,7 @@ def _mcp_servers_without_secrets(path: str) -> str | None:
     if not isinstance(items, list):
         logger.warning("left %s out of the backup because it holds a %s, not a list", path, type(items).__name__)
         return None
-    return json.dumps(without_secret_values(items), indent=2)
+    return json.dumps(McpServerStore(os.path.dirname(path)).without_secret_values(items), indent=2)
 
 def _add_to_backup(zf: zipfile.ZipFile, full_path: str, relative_path: str) -> None:
     if _holds_credentials(relative_path):

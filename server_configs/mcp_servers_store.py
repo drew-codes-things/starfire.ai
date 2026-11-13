@@ -8,6 +8,7 @@ import os
 import re
 import uuid
 from dataclasses import asdict, dataclass, field
+from urllib.parse import unquote_plus, urlsplit, urlunsplit
 
 from cryptography.fernet import InvalidToken
 
@@ -23,6 +24,13 @@ FERNET_VERSION_BYTE = 0x80
 FERNET_FIXED_BYTES = 57
 FERNET_BLOCK_BYTES = 16
 FERNET_TOKEN_TEXT = re.compile(r"[A-Za-z0-9_-]+={0,2}")
+SECRET_REMOVED = "__secret_removed__"
+SECRET_NAME_WORDS = frozenset({"key", "auth", "authorization", "pwd", "pass", "passphrase", "sig", "signature",
+                               "credential", "credentials", "bearer"})
+SECRET_NAME_ENDINGS = ("token", "secret", "password", "passwd", "apikey")
+NAME_WORD = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+")
+URL_START = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://")
+NAMED_VALUE = re.compile(r"(-{0,2}[A-Za-z_][\w.-]*)(=|:\s*)(.*)", re.S)
 
 @dataclass
 class McpServerConfig:
@@ -141,7 +149,7 @@ class McpServerStore:
             logger.error("could not rewrite %s with its MCP secrets encrypted, they stay in plain text on disk "
                          "until the next save: %s", self.path, error)
         else:
-            logger.info("encrypted the MCP server env and header values stored in %s", self.path)
+            logger.info("encrypted the MCP server env, header, argument and URL values stored in %s", self.path)
         return migrated
 
     def _encrypted_if_plain(self, value):
@@ -153,6 +161,11 @@ class McpServerStore:
             values = item.get(secret_field)
             if isinstance(values, dict):
                 encrypted[secret_field] = {key: self._encrypted_if_plain(value) for key, value in values.items()}
+        if isinstance(item.get("args"), list):
+            encrypted["args"] = [self._encrypted_if_plain(arg) for arg in item["args"]]
+        encrypted["url"] = self._encrypted_if_plain(item.get("url", ""))
+        if isinstance(item.get("name"), str):
+            encrypted["name"] = without_text_credentials(item["name"])
         return encrypted
 
     def _decrypted_or_none(self, value) -> str | None:
@@ -178,19 +191,51 @@ class McpServerStore:
             plain[key] = decrypted
         return plain
 
+    def _plain_or_removed(self, server_name: str, what: str, value) -> str:
+        decrypted = self._decrypted_or_none(value)
+        if decrypted is None:
+            logger.warning("could not decrypt the %s of MCP server %s (saved by another install?), "
+                           "it needs entering again", what, server_name)
+            return SECRET_REMOVED
+        return decrypted
+
+    def _plain_args(self, server_name: str, args) -> list[str]:
+        if not isinstance(args, list):
+            return []
+        return [self._plain_or_removed(server_name, f"argument {position}", arg)
+                for position, arg in enumerate(args, start=1)]
+
     def _to_config(self, item: dict) -> McpServerConfig:
-        name = item.get("name") or item.get("command") or item.get("url", "")
+        label = item.get("name") or item.get("command") or item["id"]
+        url = self._plain_or_removed(label, "URL", item.get("url") or "")
+        name = item.get("name") or item.get("command") or without_url_credentials(url)
         return McpServerConfig(
             id=item["id"],
             name=name,
             command=item.get("command", ""),
-            args=item.get("args", []),
+            args=self._plain_args(name, item.get("args")),
             env=self._decrypted(name, "env", item.get("env", {})),
             enabled=item.get("enabled", True),
             transport=item.get("transport", "stdio") if item.get("transport") in TRANSPORTS else "stdio",
-            url=item.get("url", ""),
+            url=url,
             headers=self._decrypted(name, "header", item.get("headers", {})),
         )
+
+    def _backup_copy(self, item: dict) -> dict:
+        label = item.get("name") or item.get("command") or item.get("id", "")
+        copy = dict(item, **{SECRETS_ENCRYPTED: True})
+        for secret_field in SECRET_FIELDS:
+            if isinstance(copy.get(secret_field), dict):
+                copy[secret_field] = {key: "" for key in copy[secret_field]}
+        if isinstance(item.get("args"), list):
+            copy["args"] = without_arg_credentials(self._plain_args(label, item["args"]))
+        copy["url"] = without_url_credentials(self._plain_or_removed(label, "URL", item.get("url") or ""))
+        if isinstance(item.get("name"), str):
+            copy["name"] = without_text_credentials(item["name"])
+        return copy
+
+    def without_secret_values(self, items: list) -> list:
+        return [self._backup_copy(item) if isinstance(item, dict) else item for item in items]
 
     def _load(self) -> list[McpServerConfig]:
         return [self._to_config(item) for item in self._read_items() if _is_usable(item)]
@@ -259,10 +304,12 @@ def _is_plain_text(value) -> bool:
 
 
 def _secret_values(item: dict) -> list:
-    values = []
+    values = [item.get("url")]
     for secret_field in SECRET_FIELDS:
         if isinstance(item.get(secret_field), dict):
             values.extend(item[secret_field].values())
+    if isinstance(item.get("args"), list):
+        values.extend(item["args"])
     return values
 
 
@@ -270,17 +317,71 @@ def _holds_plain_secrets(item) -> bool:
     return isinstance(item, dict) and any(_is_plain_text(value) for value in _secret_values(item))
 
 
-def without_secret_values(items: list) -> list:
-    blanked = []
-    for item in items:
-        if isinstance(item, dict):
-            item = dict(item, **{SECRETS_ENCRYPTED: True})
-            for secret_field in SECRET_FIELDS:
-                if isinstance(item.get(secret_field), dict):
-                    item[secret_field] = {key: "" for key in item[secret_field]}
-        blanked.append(item)
-    return blanked
+def _names_a_secret(name: str) -> bool:
+    words = [word.lower() for word in NAME_WORD.findall(name)]
+    return any(word in SECRET_NAME_WORDS or word.endswith(SECRET_NAME_ENDINGS) for word in words)
+
+
+def _params_without_secrets(params: str) -> str:
+    if not params:
+        return params
+    kept = []
+    for pair in params.split("&"):
+        name, equals, value = pair.partition("=")
+        if equals and value and _names_a_secret(unquote_plus(name)):
+            pair = f"{name}={SECRET_REMOVED}"
+        kept.append(pair)
+    return "&".join(kept)
+
+
+def _netloc_without_password(netloc: str) -> str:
+    userinfo, at, host = netloc.rpartition("@")
+    user, _colon, password = userinfo.partition(":")
+    if not at or not password:
+        return netloc
+    return f"{user}:{SECRET_REMOVED}@{host}"
+
+
+def without_url_credentials(url: str) -> str:
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return SECRET_REMOVED
+    cleaned = parts._replace(netloc=_netloc_without_password(parts.netloc),
+                             query=_params_without_secrets(parts.query),
+                             fragment=_params_without_secrets(parts.fragment))
+    return url if cleaned == parts else urlunsplit(cleaned)
+
+
+def without_text_credentials(text: str) -> str:
+    if URL_START.match(text):
+        return without_url_credentials(text)
+    named = NAMED_VALUE.fullmatch(text)
+    if not named:
+        return text
+    name, separator, value = named.groups()
+    if value and _names_a_secret(name):
+        return f"{name}{separator}{SECRET_REMOVED}"
+    return f"{name}{separator}{without_text_credentials(value)}"
+
+
+def _is_secret_flag(arg) -> bool:
+    return isinstance(arg, str) and arg.startswith("-") and "=" not in arg and _names_a_secret(arg)
+
+
+def without_arg_credentials(args: list) -> list:
+    cleaned = []
+    for position, arg in enumerate(args):
+        follows_secret_flag = position > 0 and _is_secret_flag(args[position - 1])
+        if not isinstance(arg, str):
+            cleaned.append(arg)
+        elif follows_secret_flag and not arg.startswith("-"):
+            cleaned.append(SECRET_REMOVED)
+        else:
+            cleaned.append(without_text_credentials(arg))
+    return cleaned
 
 
 def has_missing_secrets(server: McpServerConfig) -> bool:
-    return any(value == "" for value in (*server.env.values(), *server.headers.values()))
+    blank_value = any(value == "" for value in (*server.env.values(), *server.headers.values()))
+    return blank_value or any(SECRET_REMOVED in text for text in (*server.args, server.url))

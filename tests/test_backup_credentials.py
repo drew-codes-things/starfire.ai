@@ -197,3 +197,34 @@ def test_an_old_backup_with_key_files_restores_its_data_but_not_its_credentials(
     assert routes.api_keys.load() == {"current-endpoint": PROVIDER_KEY}
     assert admin.get("/api/auth/me").status_code == 200
     assert ".key" in caplog.text and "api_keys.json" in caplog.text
+
+
+DB_PASSWORD = "PLACEHOLDER-db-password"
+FLAG_KEY = "PLACEHOLDER-flag-key"
+QUERY_KEY = "PLACEHOLDER-query-key"
+
+
+def test_credentials_in_mcp_arguments_and_urls_stay_out_of_backups(tmp_path, monkeypatch):
+    data_dir = str(tmp_path / "data")
+    admin = login(install(data_dir, monkeypatch, "admin@example.com"), "admin@example.com")
+    secret_url = f"https://mcp.example.test/sse?api_key={QUERY_KEY}"
+    routes.mcp_servers.add(name="Postgres", command="npx", args=[
+        "server-postgres", f"postgresql://reader:{DB_PASSWORD}@db.example.test/x", "--api-key", FLAG_KEY])
+    routes.mcp_servers.add(name=secret_url, command="", args=[], transport="sse", url=secret_url)
+
+    archive = admin.get("/api/backup").content
+    for name, content in members_of(archive).items():
+        for secret in (DB_PASSWORD, FLAG_KEY, QUERY_KEY):
+            assert secret.encode() not in content, name
+    servers = {item["command"] or "remote": item for item in json.loads(members_of(archive)["mcp_servers.json"])}
+    assert servers["npx"]["args"][0] == "server-postgres"
+    assert servers["remote"]["url"].startswith("https://mcp.example.test/sse?api_key=")
+
+    new_dir = str(tmp_path / "new")
+    fresh = login(install(new_dir, monkeypatch, "first@example.com"), "first@example.com")
+    assert fresh.post("/api/restore", files={"file": ("backup.zip", archive, "application/zip")}).json() == {"ok": True}
+    monkeypatch.setattr(routes, "mcp_servers", McpServerStore(new_dir))
+    monkeypatch.setattr(auth_routes, "users", UserStore(new_dir))
+    restored = login(app_for(new_dir, monkeypatch), "admin@example.com")
+    listed = restored.get("/api/mcp/servers").json()["servers"]
+    assert len(listed) == 2 and all(server["secrets_missing"] for server in listed)
