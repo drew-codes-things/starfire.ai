@@ -1614,9 +1614,9 @@ def _chunks_then_close(handle):
     finally:
         handle.close()
 
-CREDENTIAL_FILE_NAMES = frozenset({".key", "sessions.json", ".env"})
-CREDENTIAL_FILE_PREFIXES = ("api_keys.json", ".api_keys.json.", ".env.")
 MCP_SERVERS_FILE = "mcp_servers.json"
+CREDENTIAL_FILE_OR_COPY = re.compile(
+    r"\.?(?:\.key|\.env|sessions\.json|api_keys\.json|mcp_servers\.json)(?:[.~_-].*)?", re.S)
 
 DOT_SEGMENTS = frozenset({os.curdir, os.pardir})
 ARCHIVE_SEPARATORS = re.compile(r"[\\/]")
@@ -1633,8 +1633,10 @@ def _is_unsafe_member(member: str) -> bool:
     return is_absolute or any(part in DOT_SEGMENTS for part in ARCHIVE_SEPARATORS.split(member))
 
 def _holds_credentials(relative_path: str) -> bool:
-    name = os.path.basename(_extracted_name(relative_path)).lower()
-    return name in CREDENTIAL_FILE_NAMES or name.startswith(CREDENTIAL_FILE_PREFIXES)
+    extracted = _extracted_name(relative_path)
+    if extracted == MCP_SERVERS_FILE:
+        return False
+    return bool(CREDENTIAL_FILE_OR_COPY.fullmatch(os.path.basename(extracted).lower()))
 
 def _mcp_servers_without_secrets(path: str) -> str | None:
     try:

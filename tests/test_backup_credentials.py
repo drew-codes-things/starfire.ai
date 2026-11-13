@@ -262,3 +262,31 @@ def test_restore_skips_credential_files_whatever_their_case_or_spelling(tmp_path
         == [".key", "api_keys.json", "sessions.json"]
     assert not os.path.exists(os.path.join(data_dir, "users", ".env"))
     assert open(os.path.join(data_dir, "restored-note.txt"), "rb").read() == b"data"
+
+
+STRAY_COPIES = (".mcp_servers.json.k2j4h1.tmp", ".sessions.json.9xq0ab.tmp", "mcp_servers.json.bak", ".key.bak",
+                ".api_keys.json.p0o9i8.tmp", "api_keys.json.unreadable-20261113-120000", "SESSIONS.JSON.BAK",
+                "sessions.json~", ".env.local", "users/abc/mcp_servers.json", "users/abc/.key", "MCP_Servers.json")
+KEPT_LOOKALIKES = ("keyboard.json", "chat_sessions.json.bak", "mcp_servers_notes.txt", "users/abc/monkey.env")
+
+
+def test_temp_and_backup_copies_of_credential_files_stay_out_of_backups_and_restores(tmp_path, monkeypatch):
+    data_dir = str(tmp_path / "data")
+    admin = login(install(data_dir, monkeypatch, "admin@example.com"), "admin@example.com")
+    routes.mcp_servers.add(name="GitHub", command="npx", args=[], env={"GITHUB_PERSONAL_ACCESS_TOKEN": MCP_TOKEN})
+    for name in (*STRAY_COPIES, *KEPT_LOOKALIKES):
+        os.makedirs(os.path.dirname(os.path.join(data_dir, name)), exist_ok=True)
+        with open(os.path.join(data_dir, name), "w", encoding="utf-8") as handle:
+            handle.write(name)
+
+    members = members_of(admin.get("/api/backup").content)
+    assert not [name for name in STRAY_COPIES if name in members]
+    assert all(name in members for name in KEPT_LOOKALIKES)
+    assert "mcp_servers.json" in members
+
+    new_dir = str(tmp_path / "new")
+    fresh = login(install(new_dir, monkeypatch, "first@example.com"), "first@example.com")
+    planted = zip_of({**{name: b"planted" for name in STRAY_COPIES}, "restored-note.txt": b"data"})
+    assert fresh.post("/api/restore", files={"file": ("backup.zip", planted, "application/zip")}).json() == {"ok": True}
+    assert not [name for name in STRAY_COPIES if os.path.exists(os.path.join(new_dir, name))]
+    assert open(os.path.join(new_dir, "restored-note.txt"), "rb").read() == b"data"
