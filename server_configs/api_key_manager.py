@@ -1,14 +1,16 @@
 import os
 import json
 import logging
+import stat
 from typing import Dict
 from cryptography.fernet import Fernet, InvalidToken
 
-from atomic_io import discard_temp_file, set_aside_unreadable
+from atomic_io import atomic_write_json, set_aside_unreadable
 
 logger = logging.getLogger(__name__)
 
 IS_WINDOWS = os.name == "nt"
+PRIVATE_FILE_MODE = 0o600
 
 def safe_chmod(path: str, mode: int) -> bool:
     if IS_WINDOWS:
@@ -19,6 +21,15 @@ def safe_chmod(path: str, mode: int) -> bool:
     except OSError as error:
         logger.warning("could not set permissions %o on %s: %s", mode, path, error)
         return False
+
+def make_private(path: str) -> None:
+    if IS_WINDOWS:
+        return
+    current_mode = stat.S_IMODE(os.stat(path).st_mode)
+    if current_mode & ~PRIVATE_FILE_MODE == 0:
+        return
+    if safe_chmod(path, PRIVATE_FILE_MODE):
+        logger.info("tightened permissions on %s from %o to %o", path, current_mode, PRIVATE_FILE_MODE)
 
 class APIKeyManager:
     def __init__(self, data_dir: str):
@@ -59,6 +70,7 @@ class APIKeyManager:
     def _load_raw(self) -> Dict[str, str]:
         if not os.path.exists(self.api_keys_file):
             return {}
+        make_private(self.api_keys_file)
         try:
             with open(self.api_keys_file, 'r', encoding="utf-8") as f:
                 encrypted_keys = json.load(f)
@@ -73,35 +85,21 @@ class APIKeyManager:
             if isinstance(key, str)
         }
 
+    def _write(self, keys: Dict[str, str]) -> None:
+        atomic_write_json(self.api_keys_file, keys)
+        safe_chmod(self.api_keys_file, PRIVATE_FILE_MODE)
+
     def save(self, provider: str, api_key: str):
         keys = self._load_raw()
         keys[provider] = self.encrypt_api_key(api_key)
-        tmp_file = self.api_keys_file + ".tmp"
-        try:
-            with open(tmp_file, 'w', encoding="utf-8") as f:
-                json.dump(keys, f)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp_file, self.api_keys_file)
-        except OSError:
-            discard_temp_file(tmp_file)
-            raise
+        self._write(keys)
 
     def delete(self, provider: str):
         keys = self._load_raw()
         if provider not in keys:
             return
         del keys[provider]
-        tmp_file = self.api_keys_file + ".tmp"
-        try:
-            with open(tmp_file, 'w', encoding="utf-8") as f:
-                json.dump(keys, f)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp_file, self.api_keys_file)
-        except OSError:
-            discard_temp_file(tmp_file)
-            raise
+        self._write(keys)
 
     def load(self) -> Dict[str, str]:
         encrypted_keys = self._load_raw()

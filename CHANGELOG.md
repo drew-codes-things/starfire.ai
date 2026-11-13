@@ -146,6 +146,8 @@
 - Approving a waiting shell command or file edit checks that the account is still an active
   admin, so an admin demoted after the command or edit was proposed gets a 403 and it stays
   waiting.
+- `api_keys.json` is written readable by its owner only (600), like `.key`, and an existing
+  file left readable by others is tightened when it is next read, with an info log line.
 
 ## 1.1.0 - 2026-11-03
 
