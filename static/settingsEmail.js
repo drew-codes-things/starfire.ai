@@ -17,10 +17,10 @@ async function refreshEmailAccountList() {
       li.className = 'endpoint-row';
       li.innerHTML =
         `<span class="endpoint-label">${escapeHtml(a.label)}</span>` +
-        `<span class="endpoint-meta">${escapeHtml(a.email_address)}</span>` +
-        `<button class="btn ghost" data-act="open">open</button>` +
+        `<span class="endpoint-meta">${escapeHtml(a.email_address)}${a.password_missing ? ' · password missing, remove and add it again' : ''}</span>` +
+        (a.password_missing ? '' : `<button class="btn ghost" data-act="open">open</button>`) +
         `<button class="endpoint-remove" type="button" title="Remove" aria-label="Remove">×</button>`;
-      li.querySelector('[data-act="open"]').onclick = () => openEmailInbox(a.id);
+      if (!a.password_missing) li.querySelector('[data-act="open"]').onclick = () => openEmailInbox(a.id);
       li.querySelector('.endpoint-remove').onclick = async () => {
         if (!await confirmRemove('this email account')) return;
         await fetch('/api/email/accounts/' + a.id, { method: 'DELETE' });
@@ -30,7 +30,9 @@ async function refreshEmailAccountList() {
       };
       settingsEls.emailAccountList.appendChild(li);
     }
-    if (!currentEmailAccountId) openEmailInbox(accounts[0].id);
+    const openable = accounts.find(a => !a.password_missing);
+    if (!openable) settingsEls.emailInboxCard.hidden = true;
+    else if (!currentEmailAccountId) openEmailInbox(openable.id);
   } catch (_) {
     settingsEls.emailAccountList.innerHTML = '<li class="settings-hint error">failed to load accounts</li>';
   }

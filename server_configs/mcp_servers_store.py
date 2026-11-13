@@ -234,3 +234,19 @@ def _is_usable(item) -> bool:
 
 def _holds_plain_secrets(item) -> bool:
     return isinstance(item, dict) and not item.get(SECRETS_ENCRYPTED)
+
+
+def without_secret_values(items: list) -> list:
+    blanked = []
+    for item in items:
+        if isinstance(item, dict):
+            item = dict(item, **{SECRETS_ENCRYPTED: True})
+            for secret_field in SECRET_FIELDS:
+                if isinstance(item.get(secret_field), dict):
+                    item[secret_field] = {key: "" for key in item[secret_field]}
+        blanked.append(item)
+    return blanked
+
+
+def has_missing_secrets(server: McpServerConfig) -> bool:
+    return any(value == "" for value in (*server.env.values(), *server.headers.values()))

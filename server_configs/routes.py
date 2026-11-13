@@ -37,7 +37,8 @@ import piper_tts
 from local_gen_store import ComfyUIConfigStore, CustomWorkflowStore, PiperConfigStore
 from email_rule_checker import EmailRuleChecker
 from mcp_manager import McpConnectionError, mcp_manager
-from mcp_servers_store import MCP_SERVER_REPOSITORY, REFERENCE_SERVERS, McpServerStore
+from mcp_servers_store import (MCP_SERVER_REPOSITORY, REFERENCE_SERVERS, McpServerStore, has_missing_secrets,
+                               without_secret_values)
 from model_endpoints import ModelEndpointStore, detect_ollama, discover_servers
 from ollama_runner import for_runner
 from providers import build_models_url, is_embedding_model
@@ -310,7 +311,8 @@ def _mcp_server_view(server, full: bool) -> dict:
     return {"id": server.id, "name": server.name, "enabled": server.enabled, "transport": server.transport,
             "command": server.command if full else "", "args": server.args if full else [],
             "url": server.url if full else _site_of(server.url),
-            "connected": mcp_manager.is_connected(server.id), "tool_count": len(mcp_manager.list_tools(server.id))}
+            "connected": mcp_manager.is_connected(server.id), "tool_count": len(mcp_manager.list_tools(server.id)),
+            "secrets_missing": has_missing_secrets(server)}
 
 @router.get("/mcp/servers")
 async def list_mcp_servers():
@@ -634,9 +636,10 @@ def _email_password(account_id: str) -> str | None:
 
 @router.get("/email/accounts")
 async def list_email_accounts():
+    stored_keys = api_keys.load()
     return {"accounts": [
         {"id": a.id, "label": a.label, "email_address": a.email_address,
-         "imap_host": a.imap_host, "imap_port": a.imap_port}
+         "imap_host": a.imap_host, "imap_port": a.imap_port, "password_missing": not stored_keys.get(a.id)}
         for a in email_accounts.list()
     ]}
 
@@ -1612,6 +1615,36 @@ def _chunks_then_close(handle):
     finally:
         handle.close()
 
+CREDENTIAL_FILE_NAMES = frozenset({".key", "sessions.json", ".env"})
+CREDENTIAL_FILE_PREFIXES = ("api_keys.json", ".api_keys.json.", ".env.")
+MCP_SERVERS_FILE = "mcp_servers.json"
+
+def _holds_credentials(relative_path: str) -> bool:
+    name = os.path.basename(relative_path)
+    return name in CREDENTIAL_FILE_NAMES or name.startswith(CREDENTIAL_FILE_PREFIXES)
+
+def _mcp_servers_without_secrets(path: str) -> str | None:
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            items = json.load(f)
+    except (OSError, json.JSONDecodeError) as error:
+        logger.warning("left %s out of the backup because it could not be read: %s", path, error)
+        return None
+    if not isinstance(items, list):
+        logger.warning("left %s out of the backup because it holds a %s, not a list", path, type(items).__name__)
+        return None
+    return json.dumps(without_secret_values(items), indent=2)
+
+def _add_to_backup(zf: zipfile.ZipFile, full_path: str, relative_path: str) -> None:
+    if _holds_credentials(relative_path):
+        return
+    if relative_path == MCP_SERVERS_FILE:
+        blanked = _mcp_servers_without_secrets(full_path)
+        if blanked is not None:
+            zf.writestr(relative_path, blanked)
+        return
+    zf.write(full_path, arcname=relative_path)
+
 @router.get("/backup")
 async def backup_data():
     data_dir = os.path.abspath(config.data_dir)
@@ -1621,7 +1654,7 @@ async def backup_data():
         for root, _dirs, files in os.walk(data_dir):
             for name in files:
                 full = os.path.join(root, name)
-                zf.write(full, arcname=os.path.relpath(full, data_dir))
+                _add_to_backup(zf, full, os.path.relpath(full, data_dir))
     spooled.seek(0)
     from datetime import datetime, timezone
     filename = f"starfire-backup-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.zip"
@@ -1653,7 +1686,12 @@ async def restore_data(file: UploadFile):
                 target = os.path.abspath(os.path.join(data_dir, member))
                 if not target.startswith(data_dir + os.sep) and target != data_dir:
                     raise HTTPException(400, f"refusing to restore: unsafe path in archive ({member})")
-            unpacked = sum(info.file_size for info in zf.infolist())
+            kept = [info for info in zf.infolist() if not _holds_credentials(info.filename)]
+            skipped = sorted(info.filename for info in zf.infolist() if _holds_credentials(info.filename))
+            unpacked = sum(info.file_size for info in kept)
             require_room(data_dir, unpacked, config.min_free_disk_mb, "that backup")
-            zf.extractall(data_dir)
+            zf.extractall(data_dir, members=kept)
+    if skipped:
+        logger.info("restore kept this install's keys and sessions and left out these files from the backup: %s",
+                    ", ".join(skipped))
     return {"ok": True}

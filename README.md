@@ -480,6 +480,13 @@ Settings → Data can download a zip of the whole `data/` directory, or restore 
 thing the manual "copy the data folder" step below does, through the UI. Restoring **overwrites
 your current data** and can't be undone; back up first if you're not sure.
 
+The zip carries no credentials: it leaves out `.key`, `api_keys.json`, `sessions.json` and any
+`.env`, and blanks MCP server tokens and header values. After restoring on a new install, enter
+provider API keys, email passwords and MCP tokens again (the settings page marks email accounts
+and MCP servers that need it; remove and add them again). Account records keep their bcrypt
+password hashes, so everyone can still log in. Restoring an older zip that still holds `.key` or
+`api_keys.json` restores everything else and keeps this install's own keys.
+
 ## Command palette
 
 `Ctrl+K` / `Cmd+K` opens a fuzzy-filterable list of actions - new chat, export, open any
@@ -550,9 +557,11 @@ Settings UI so they're encrypted at rest rather than sitting in plaintext in `.e
 ## Data & security
 
 - `data/endpoints.json` - configured model endpoints (base URLs, non-secret).
-- `data/api_keys.json` - API keys, encrypted with [Fernet](https://cryptography.io/en/latest/fernet/).
+- `data/api_keys.json` - API keys, encrypted with [Fernet](https://cryptography.io/en/latest/fernet/),
+  `chmod 600` (owner-only).
 - `data/.key` - the per-install encryption key, `chmod 600` (owner-only).
-- `data/mcp_servers.json` - configured MCP servers (command/args, non-secret).
+- `data/mcp_servers.json` - configured MCP servers; env and header values (tokens) are
+  encrypted with the same key as `api_keys.json`.
 - `data/users.json` / `data/sessions.json` - accounts (bcrypt hashes) and login sessions.
 - `data/users/<id>/` - one folder per account holding that person's `memory.json`,
   `documents.json`, `tasks.json` / `task_runs.json`, `email_accounts.json` / `email_rules.json`
@@ -565,7 +574,8 @@ Settings UI so they're encrypted at rest rather than sitting in plaintext in `.e
   involved.
 
 Back up or delete the whole `data/` directory to reset the app (or use Settings → Data's
-one-click backup/restore); deleting `data/.key` makes any stored keys unrecoverable.
+one-click backup/restore, which leaves keys and passwords out); deleting `data/.key` makes any
+stored keys unrecoverable.
 
 ## Features
 

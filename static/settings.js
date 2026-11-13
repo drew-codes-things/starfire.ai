@@ -251,7 +251,7 @@ async function refreshMcpServerList() {
       li.innerHTML =
         `<label class="theme-toggle"><input type="checkbox" ${checked} /></label>` +
         `<span class="endpoint-label">${escapeHtml(s.name)}</span>` +
-        `<span class="endpoint-meta">${s.transport && s.transport !== 'stdio' ? escapeHtml(s.url) + ' · ' : ''}${s.tool_count} tool(s)${s.connected ? '' : ' · not running'}</span>` +
+        `<span class="endpoint-meta">${s.transport && s.transport !== 'stdio' ? escapeHtml(s.url) + ' · ' : ''}${s.tool_count} tool(s)${s.connected ? '' : ' · not running'}${s.secrets_missing ? ' · secret missing, remove and add it again' : ''}</span>` +
         `<button class="endpoint-remove admin-only" type="button" title="Remove" aria-label="Remove">×</button>`;
       li.querySelector('input[type="checkbox"]').onchange = e => {
         if (e.target.checked) enabledMcpServers.add(s.id); else enabledMcpServers.delete(s.id);
