@@ -3,12 +3,16 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import ipaddress
+import json
 import logging
 import re
 import secrets
+import socket
 import time
-from collections.abc import Callable
-from dataclasses import asdict, dataclass, field
+from collections.abc import Awaitable, Callable
+from dataclasses import MISSING as MISSING_DEFAULT, asdict, dataclass, field
+from typing import TypeVar
 from urllib.parse import quote, urlencode, urlsplit
 
 import httpx
@@ -18,6 +22,9 @@ from version import VERSION
 logger = logging.getLogger(__name__)
 
 HTTP_TIMEOUT_S = 15.0
+FLOW_DEADLINE_S = 40.0
+DNS_TIMEOUT_S = 5.0
+MAX_RESPONSE_BYTES = 256 * 1024
 PKCE_METHOD = "S256"
 PKCE_VERIFIER_BYTES = 64
 STATE_BYTES = 32
@@ -30,13 +37,19 @@ PROTECTED_RESOURCE_WELL_KNOWN = "/.well-known/oauth-protected-resource"
 AUTH_SERVER_WELL_KNOWN = "/.well-known/oauth-authorization-server"
 OPENID_WELL_KNOWN = "/.well-known/openid-configuration"
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+LOCAL_NAME_SUFFIX = ".localhost"
 PROBE_PROTOCOL_VERSION = "2025-06-18"
 MCP_ACCEPT = "application/json, text/event-stream"
 SECRET_AUTH_METHODS = ("client_secret_post", "client_secret_basic")
 USABLE_AUTH_METHODS = ("none", *SECRET_AUTH_METHODS)
 SIGN_IN_REFUSED_STATUSES = frozenset({400, 401, 403})
+INVALID_CLIENT = "invalid_client"
 OAUTH_ERROR_CODE = re.compile(r"[a-z_]{1,64}")
 CHALLENGE_PARAM = r'{name}\s*=\s*(?:"([^"]*)"|([^\s,]+))'
+ISS_SUPPORTED_FIELD = "authorization_response_iss_parameter_supported"
+REQUIRED_RECORD_TEXT = ("issuer", "authorization_endpoint", "token_endpoint", "resource", "client_id")
+
+Result = TypeVar("Result")
 
 
 class McpSignInError(Exception):
@@ -44,6 +57,12 @@ class McpSignInError(Exception):
 
 
 class SignInNeeded(McpSignInError):
+    def __init__(self, message: str, client_rejected: bool = False):
+        super().__init__(message)
+        self.client_rejected = client_rejected
+
+
+class ResponseTooLarge(McpSignInError):
     pass
 
 
@@ -59,6 +78,7 @@ class AuthorizationServer:
     registration_endpoint: str
     resource: str
     scope: str
+    iss_required: bool = False
 
 
 @dataclass
@@ -89,11 +109,37 @@ class OAuthGrant:
         return {**asdict(self.server), **asdict(self.registration), **asdict(self.tokens)}
 
     @classmethod
-    def from_record(cls, record: dict) -> "OAuthGrant":
+    def from_record(cls, record) -> "OAuthGrant":
+        if not isinstance(record, dict):
+            raise SignInNeeded("the saved sign-in is damaged, so it needs signing in again")
+        _check_record(record)
+
         def pick(kind) -> dict:
             return {name: record[name] for name in kind.__dataclass_fields__ if name in record}
         return cls(AuthorizationServer(**pick(AuthorizationServer)), ClientRegistration(**pick(ClientRegistration)),
                    TokenSet(**pick(TokenSet)))
+
+
+def _expected_type(kind, name: str) -> type | tuple:
+    annotation = kind.__dataclass_fields__[name].type
+    return {"str": str, "bool": bool, "float": (int, float)}[annotation]
+
+
+def _has_expected_type(value, expected) -> bool:
+    is_bool_for_number = isinstance(value, bool) and expected != bool
+    return isinstance(value, expected) and not is_bool_for_number
+
+
+def _check_record(record: dict) -> None:
+    for kind in (AuthorizationServer, ClientRegistration, TokenSet):
+        for name, spec in kind.__dataclass_fields__.items():
+            has_default = spec.default is not MISSING_DEFAULT
+            if name not in record and has_default:
+                continue
+            if name not in record or not _has_expected_type(record[name], _expected_type(kind, name)):
+                raise SignInNeeded(f"the saved sign-in is damaged ({name}), so it needs signing in again")
+    if not all(record[name] for name in REQUIRED_RECORD_TEXT):
+        raise SignInNeeded("the saved sign-in is incomplete, so it needs signing in again")
 
 
 @dataclass
@@ -112,10 +158,132 @@ def is_allowed_endpoint(url: str) -> bool:
     return parts.scheme == "https" or (parts.scheme == "http" and parts.hostname in LOOPBACK_HOSTS)
 
 
-def _require_endpoint(url, what: str) -> str:
-    if not isinstance(url, str) or not is_allowed_endpoint(url):
-        raise McpSignInError(f"the service published an unusable {what} ({url!r}); it must be an https address")
+def _ip_address(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    try:
+        address = ipaddress.ip_address(host.split("%", 1)[0])
+    except ValueError:
+        return None
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+        return address.ipv4_mapped
+    return address
+
+
+def _normalised_host(host: str) -> str:
+    return host.lower().rstrip(".")
+
+
+def _is_local_name(host: str) -> bool:
+    return host == "localhost" or host.endswith(LOCAL_NAME_SUFFIX)
+
+
+def is_loopback_host(host: str | None) -> bool:
+    if not host:
+        return False
+    host = _normalised_host(host)
+    address = _ip_address(host)
+    return _is_local_name(host) or (address is not None and address.is_loopback)
+
+
+def is_public_address(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+        address = address.ipv4_mapped
+    return address.is_global and not address.is_multicast
+
+
+async def resolve_addresses(host: str) -> list:
+    loop = asyncio.get_running_loop()
+    try:
+        answers = await asyncio.wait_for(loop.getaddrinfo(host, None, type=socket.SOCK_STREAM), DNS_TIMEOUT_S)
+    except (OSError, asyncio.TimeoutError):
+        return []
+    addresses = [_ip_address(str(answer[4][0])) for answer in answers]
+    return [address for address in addresses if address is not None]
+
+
+@dataclass(frozen=True)
+class EndpointRules:
+    allows_local: bool
+
+    @classmethod
+    def for_server(cls, server_url: str) -> "EndpointRules":
+        try:
+            host = urlsplit(server_url).hostname
+        except ValueError:
+            host = None
+        return cls(allows_local=is_loopback_host(host))
+
+    def permits(self, url) -> bool:
+        if not isinstance(url, str):
+            return False
+        if self.allows_local:
+            return is_allowed_endpoint(url)
+        try:
+            parts = urlsplit(url)
+        except ValueError:
+            return False
+        if parts.scheme != "https" or not parts.hostname:
+            return False
+        host = _normalised_host(parts.hostname)
+        address = _ip_address(host)
+        return not _is_local_name(host) and (address is None or is_public_address(address))
+
+    async def checked(self, url, what: str) -> str:
+        if not self.permits(url):
+            raise McpSignInError(f"the service published an unusable {what} ({url!r}); "
+                                 f"{self.requirement()}")
+        host = urlsplit(url).hostname
+        if self.allows_local or _ip_address(host) is not None:
+            return url
+        addresses = await resolve_addresses(host)
+        if not addresses:
+            raise McpSignInError(f"could not look up the {what} host {host}")
+        if not all(is_public_address(address) for address in addresses):
+            raise McpSignInError(f"the {what} host {host} points at a private or local network address, "
+                                 "which starfire only uses for an MCP server on this computer")
+        return url
+
+    def requirement(self) -> str:
+        if self.allows_local:
+            return "it must be an https address or an http address on this computer"
+        return "it must be a public https address"
+
+
+def _rules_for(server: AuthorizationServer) -> EndpointRules:
+    return EndpointRules.for_server(server.resource)
+
+
+def _require_endpoint(url, what: str, rules: EndpointRules) -> str:
+    if not rules.permits(url):
+        raise McpSignInError(f"the service published an unusable {what} ({url!r}); {rules.requirement()}")
     return url
+
+
+async def within_deadline(work: Awaitable[Result], what: str) -> Result:
+    try:
+        return await asyncio.wait_for(work, FLOW_DEADLINE_S)
+    except asyncio.TimeoutError as error:
+        raise McpSignInError(f"{what} took longer than {FLOW_DEADLINE_S:g} seconds") from error
+
+
+@dataclass
+class BoundedAnswer:
+    status_code: int
+    headers: httpx.Headers
+    body: bytes
+
+    def json(self):
+        return json.loads(self.body)
+
+
+async def bounded_request(client: httpx.AsyncClient, method: str, url: str, **options) -> BoundedAnswer:
+    async with client.stream(method, url, **options) as response:
+        body = bytearray()
+        async for chunk in response.aiter_bytes():
+            body.extend(chunk)
+            if len(body) > MAX_RESPONSE_BYTES:
+                raise ResponseTooLarge(f"the answer from {_origin(url)} was larger than "
+                                       f"{MAX_RESPONSE_BYTES // 1024} KiB")
+        return BoundedAnswer(response.status_code, response.headers, bytes(body))
 
 
 def _origin(url: str) -> str:
@@ -167,24 +335,31 @@ async def _probe_challenge(client: httpx.AsyncClient, server_url: str, evidence:
             "params": {"protocolVersion": PROBE_PROTOCOL_VERSION, "capabilities": {},
                        "clientInfo": {"name": CLIENT_NAME, "version": VERSION}}}
     try:
-        response = await client.post(server_url, json=body, headers={"Accept": MCP_ACCEPT})
+        async with client.stream("POST", server_url, json=body, headers={"Accept": MCP_ACCEPT}) as response:
+            status, answered = response.status_code, response.is_success
+            challenge = response.headers.get("www-authenticate", "")
     except httpx.HTTPError as error:
         raise McpSignInError(f"could not reach {_origin(server_url)}: {type(error).__name__}") from error
-    challenge = response.headers.get("www-authenticate", "")
-    evidence.append({"step": "mcp", "url": server_url, "status": response.status_code,
-                     "www_authenticate": bool(challenge)})
-    if response.is_success:
+    evidence.append({"step": "mcp", "url": server_url, "status": status, "www_authenticate": bool(challenge)})
+    if answered:
         raise McpSignInError("this server answered without asking for a sign-in; add it as a plain URL instead")
     return challenge_param(challenge, "resource_metadata"), challenge_param(challenge, "scope")
 
 
-async def _first_json(client: httpx.AsyncClient, urls: list[str], step: str, evidence: list) -> dict | None:
+async def _first_json(client: httpx.AsyncClient, urls: list[str], step: str, evidence: list,
+                      rules: EndpointRules | None = None) -> dict | None:
+    rules = rules or EndpointRules(allows_local=False)
     for url in urls:
-        if not is_allowed_endpoint(url):
-            evidence.append({"step": step, "url": url, "status": "skipped, not https"})
+        try:
+            await rules.checked(url, "metadata address")
+        except McpSignInError as error:
+            evidence.append({"step": step, "url": url, "status": f"skipped, {error}"})
             continue
         try:
-            response = await client.get(url, headers={"Accept": "application/json"})
+            response = await bounded_request(client, "GET", url, headers={"Accept": "application/json"})
+        except ResponseTooLarge:
+            evidence.append({"step": step, "url": url, "status": "skipped, answer too large"})
+            continue
         except httpx.HTTPError as error:
             evidence.append({"step": step, "url": url, "status": type(error).__name__})
             continue
@@ -220,37 +395,40 @@ def _checked_metadata(metadata: dict, issuer: str) -> None:
 
 
 async def discover(client: httpx.AsyncClient, server_url: str) -> Discovery:
+    rules = EndpointRules.for_server(server_url)
     evidence: list = []
     metadata_url, challenge_scope = await _probe_challenge(client, server_url, evidence)
     resource_metadata = await _first_json(client, protected_resource_urls(server_url, metadata_url),
-                                          "protected_resource", evidence)
+                                          "protected_resource", evidence, rules)
     if resource_metadata:
         servers = resource_metadata.get("authorization_servers")
         if not isinstance(servers, list) or not servers or not isinstance(servers[0], str):
             raise McpSignInError("the server's protected resource metadata names no sign-in server")
-        issuer = _require_endpoint(servers[0], "sign-in server address")
+        issuer = _require_endpoint(servers[0], "sign-in server address", rules)
         resource = resource_metadata.get("resource") or server_url
         if not isinstance(resource, str) or not resource_covers(resource, server_url):
             raise McpSignInError(f"the server's metadata is for {resource!r}, not for {server_url}")
     else:
         issuer, resource = _origin(server_url), server_url
-    metadata = await _first_json(client, authorization_server_urls(issuer), "authorization_server", evidence)
+    metadata = await _first_json(client, authorization_server_urls(issuer), "authorization_server", evidence, rules)
     if not metadata:
         raise McpSignInError(f"found no OAuth metadata for the sign-in server at {issuer}")
     _checked_metadata(metadata, issuer)
     registration_endpoint = metadata.get("registration_endpoint") or ""
     if registration_endpoint:
-        _require_endpoint(registration_endpoint, "registration address")
+        _require_endpoint(registration_endpoint, "registration address", rules)
     server = AuthorizationServer(
         issuer=_without_trailing_slash(metadata["issuer"]),
-        authorization_endpoint=_require_endpoint(metadata.get("authorization_endpoint"), "authorization address"),
-        token_endpoint=_require_endpoint(metadata.get("token_endpoint"), "token address"),
+        authorization_endpoint=_require_endpoint(metadata.get("authorization_endpoint"), "authorization address",
+                                                 rules),
+        token_endpoint=_require_endpoint(metadata.get("token_endpoint"), "token address", rules),
         registration_endpoint=registration_endpoint, resource=resource,
-        scope=_scope_from(challenge_scope, resource_metadata))
+        scope=_scope_from(challenge_scope, resource_metadata),
+        iss_required=metadata.get(ISS_SUPPORTED_FIELD) is True)
     return Discovery(server=server, evidence=evidence)
 
 
-def _oauth_error_code(response: httpx.Response) -> str:
+def _oauth_error_code(response: BoundedAnswer) -> str:
     try:
         code = response.json().get("error", "")
     except (ValueError, AttributeError):
@@ -258,7 +436,7 @@ def _oauth_error_code(response: httpx.Response) -> str:
     return code if isinstance(code, str) and OAUTH_ERROR_CODE.fullmatch(code) else ""
 
 
-def _refusal(what: str, response: httpx.Response) -> str:
+def _refusal(what: str, response: BoundedAnswer) -> str:
     code = _oauth_error_code(response)
     return f"{what} was refused ({response.status_code}{', ' + code if code else ''})"
 
@@ -273,8 +451,10 @@ async def register_client(client: httpx.AsyncClient, server: AuthorizationServer
             "token_endpoint_auth_method": "none"}
     if server.scope:
         body["scope"] = server.scope
+    await _rules_for(server).checked(server.registration_endpoint, "registration address")
     try:
-        response = await client.post(server.registration_endpoint, json=body, headers={"Accept": "application/json"})
+        response = await bounded_request(client, "POST", server.registration_endpoint, json=body,
+                                         headers={"Accept": "application/json"})
     except httpx.HTTPError as error:
         raise McpSignInError(f"could not reach the registration address: {type(error).__name__}") from error
     if response.status_code not in (200, 201):
@@ -326,7 +506,7 @@ def _client_auth(registration: ClientRegistration, form: dict) -> dict:
     return headers
 
 
-def _token_set(response: httpx.Response, previous_refresh: str, now: float) -> TokenSet:
+def _token_set(response: BoundedAnswer, previous_refresh: str, now: float) -> TokenSet:
     try:
         answer = response.json()
     except ValueError as error:
@@ -348,12 +528,13 @@ def _token_set(response: httpx.Response, previous_refresh: str, now: float) -> T
 async def _token_request(client: httpx.AsyncClient, grant: OAuthGrant, form: dict, what: str,
                          clock: Callable[[], float]) -> TokenSet:
     headers = _client_auth(grant.registration, form)
+    await _rules_for(grant.server).checked(grant.server.token_endpoint, "token address")
     try:
-        response = await client.post(grant.server.token_endpoint, data=form, headers=headers)
+        response = await bounded_request(client, "POST", grant.server.token_endpoint, data=form, headers=headers)
     except httpx.HTTPError as error:
         raise McpSignInError(f"could not reach the token address: {type(error).__name__}") from error
     if response.status_code in SIGN_IN_REFUSED_STATUSES:
-        raise SignInNeeded(_refusal(what, response))
+        raise SignInNeeded(_refusal(what, response), client_rejected=_oauth_error_code(response) == INVALID_CLIENT)
     if response.status_code != 200:
         raise McpSignInError(_refusal(what, response))
     return _token_set(response, grant.tokens.refresh_token, clock())
@@ -434,34 +615,44 @@ class PendingSignIns:
 
 class RefreshingBearerAuth(httpx.Auth):
     def __init__(self, grant: OAuthGrant, on_refreshed: Callable[[TokenSet], None],
-                 on_sign_in_needed: Callable[[str], None], clock: Callable[[], float] = time.time):
+                 on_sign_in_needed: Callable[[SignInNeeded], None], clock: Callable[[], float] = time.time):
         self.grant = grant
         self._on_refreshed = on_refreshed
         self._on_sign_in_needed = on_sign_in_needed
         self._clock = clock
         self._lock = asyncio.Lock()
 
-    async def _renew(self, stale_token: str) -> None:
+    async def _refreshed_tokens(self) -> TokenSet:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_S) as client:
+            return await refresh_tokens(client, self.grant, self._clock)
+
+    async def _renewed(self, stale_token: str) -> bool:
         async with self._lock:
             if self.grant.tokens.access_token != stale_token:
-                return
+                return True
             try:
-                async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_S) as client:
-                    renewed = await refresh_tokens(client, self.grant, self._clock)
+                renewed = await within_deadline(self._refreshed_tokens(), "renewing the sign-in")
             except SignInNeeded as error:
-                self._on_sign_in_needed(str(error))
+                self._on_sign_in_needed(error)
                 raise
+            except McpSignInError as error:
+                logger.warning("could not renew an MCP sign-in, this request fails and the next one tries "
+                               "again: %s", error)
+                return False
             self.grant.tokens = renewed
             self._on_refreshed(renewed)
+            return True
 
     async def async_auth_flow(self, request: httpx.Request):
+        renewal_worked = True
         if not self.grant.tokens.is_fresh(self._clock()):
-            await self._renew(self.grant.tokens.access_token)
+            renewal_worked = await self._renewed(self.grant.tokens.access_token)
         sent_token = self.grant.tokens.access_token
         request.headers["Authorization"] = f"Bearer {sent_token}"
         response = yield request
-        if response.status_code != 401:
+        if response.status_code != 401 or not renewal_worked:
             return
-        await self._renew(sent_token)
+        if not await self._renewed(sent_token):
+            return
         request.headers["Authorization"] = f"Bearer {self.grant.tokens.access_token}"
         yield request

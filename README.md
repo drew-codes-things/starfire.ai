@@ -294,6 +294,13 @@ server answers 401; when the service refuses a renewal, the server shows **Needs
 again** with a button that runs the sign-in once more. Only admins can sign in to services,
 the same rule as adding any MCP server.
 
+A sign-in address the server names (its metadata, registration and token addresses) must be a
+public https address, checked again after its name is looked up; addresses on this computer or
+a private network are only used when the MCP server itself is on this computer. When the
+server signs in through a different site than its own address, starfire names that site and
+asks before sending you there. If the service is briefly unreachable when a token needs
+renewing, that one tool call fails and the next one tries again.
+
 The address the service sends you back to is
 `<the address you opened starfire at>/api/mcp/servers/sign-in/callback`, taken from your
 browser's own origin (it must match the host the request came to). If everyone opens starfire

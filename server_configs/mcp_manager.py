@@ -2,6 +2,7 @@ import asyncio
 import logging
 from contextlib import AsyncExitStack
 
+import anyio
 import httpx
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.sse import sse_client
@@ -13,8 +14,13 @@ from mcp_servers_store import with_url_credentials_hidden, without_url_credentia
 logger = logging.getLogger(__name__)
 
 CONNECT_TIMEOUT_S = 45
+TOOL_CALL_TIMEOUT_S = 60
+REMOTE_CLOSE_TIMEOUT_S = 10
 REMOTE_TRANSPORTS = ("http", "sse")
 SIGNED_IN_TRANSPORT = "http"
+JSONRPC_CONNECTION_CLOSED = -32000
+CONNECTION_CLOSED_MESSAGE = "Connection closed"
+CLOSED_STREAM_ERRORS = (anyio.ClosedResourceError, anyio.BrokenResourceError, anyio.EndOfStream)
 
 
 class McpConnectionError(Exception):
@@ -26,6 +32,18 @@ def _root_cause(error: BaseException) -> str:
     while isinstance(seen, BaseExceptionGroup) and seen.exceptions:
         seen = seen.exceptions[0]
     return str(seen) or type(seen).__name__
+
+
+def _error_code(error: BaseException):
+    code = getattr(error, "code", None)
+    return code if code is not None else getattr(getattr(error, "error", None), "code", None)
+
+
+def _is_closed_connection(error: BaseException) -> bool:
+    if isinstance(error, CLOSED_STREAM_ERRORS):
+        return True
+    message = getattr(getattr(error, "error", None), "message", None) or str(error)
+    return _error_code(error) == JSONRPC_CONNECTION_CLOSED and message == CONNECTION_CLOSED_MESSAGE
 
 
 def _tool_list(result) -> list[dict]:
@@ -53,6 +71,7 @@ class McpManager:
                        env: dict[str, str] | None = None, transport: str = "stdio", url: str = "",
                        headers: dict[str, str] | None = None, auth: httpx.Auth | None = None) -> list[dict]:
         async with self._lock:
+            self._forget_ended_sessions()
             if server_id in self._sessions:
                 return self._tools_cache.get(server_id, [])
             if auth is not None and transport != SIGNED_IN_TRANSPORT:
@@ -127,12 +146,33 @@ class McpManager:
                 logger.warning("remote MCP server at %s closed: %s", without_url_credentials(url),
                                with_url_credentials_hidden(_root_cause(e)))
 
+    def _pop_entries(self, server_id: str):
+        stack = self._exit_stacks.pop(server_id, None)
+        remote = self._remote_tasks.pop(server_id, None)
+        self._sessions.pop(server_id, None)
+        self._tools_cache.pop(server_id, None)
+        return stack, remote
+
+    def _forget_ended_sessions(self) -> None:
+        ended = [server_id for server_id, (task, _stop) in self._remote_tasks.items() if task.done()]
+        for server_id in ended:
+            logger.info("remote MCP server %s is no longer connected, it reconnects when next needed", server_id)
+            self._pop_entries(server_id)
+
+    async def _drop_closed_session(self, server_id: str, session: ClientSession) -> None:
+        async with self._lock:
+            if self._sessions.get(server_id) is not session:
+                return
+            stack, remote = self._pop_entries(server_id)
+        logger.info("MCP server %s closed its connection, it reconnects when next needed", server_id)
+        await self._close(server_id, stack, remote)
+
     async def disconnect(self, server_id: str) -> None:
         async with self._lock:
-            stack = self._exit_stacks.pop(server_id, None)
-            remote = self._remote_tasks.pop(server_id, None)
-            self._sessions.pop(server_id, None)
-            self._tools_cache.pop(server_id, None)
+            stack, remote = self._pop_entries(server_id)
+        await self._close(server_id, stack, remote)
+
+    async def _close(self, server_id: str, stack: AsyncExitStack | None, remote) -> None:
         if stack:
             try:
                 await stack.aclose()
@@ -142,18 +182,21 @@ class McpManager:
             task, stop = remote
             stop.set()
             try:
-                await asyncio.wait_for(task, timeout=10)
+                await asyncio.wait_for(task, timeout=REMOTE_CLOSE_TIMEOUT_S)
             except (asyncio.TimeoutError, Exception) as e:
                 task.cancel()
                 logger.warning("error closing remote MCP server %s: %s", server_id, _root_cause(e))
 
     def is_connected(self, server_id: str) -> bool:
+        self._forget_ended_sessions()
         return server_id in self._sessions
 
     def list_tools(self, server_id: str) -> list[dict]:
+        self._forget_ended_sessions()
         return self._tools_cache.get(server_id, [])
 
     def get_all_openai_schemas(self, enabled_ids: set[str]) -> list[dict]:
+        self._forget_ended_sessions()
         schemas = []
         for server_id, tools in self._tools_cache.items():
             if server_id not in enabled_ids:
@@ -177,11 +220,19 @@ class McpManager:
         except ValueError:
             raise McpConnectionError(f"malformed MCP tool name: {qualified_name}")
 
+        self._forget_ended_sessions()
         session = self._sessions.get(server_id)
         if not session:
             raise McpConnectionError(f"MCP server not connected: {server_id}")
 
-        result = await asyncio.wait_for(session.call_tool(tool_name, arguments), timeout=60)
+        try:
+            result = await asyncio.wait_for(session.call_tool(tool_name, arguments), timeout=TOOL_CALL_TIMEOUT_S)
+        except Exception as error:
+            if not _is_closed_connection(error):
+                raise
+            await self._drop_closed_session(server_id, session)
+            raise McpConnectionError(f"MCP server {server_id} closed its connection; "
+                                     "it reconnects on the next chat") from error
         parts = []
         for block in getattr(result, "content", []) or []:
             text = getattr(block, "text", None)

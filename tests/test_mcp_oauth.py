@@ -245,7 +245,7 @@ def test_a_refused_refresh_reports_that_the_server_needs_signing_in_again(fake):
     fake.state.refuse_refresh = True
     with pytest.raises(SignInNeeded):
         run(call_mcp(fake, bearer_for(grant, recorder)))
-    assert recorder.refreshed == [] and len(recorder.problems) == 1 and "invalid_grant" in recorder.problems[0]
+    assert recorder.refreshed == [] and len(recorder.problems) == 1 and "invalid_grant" in str(recorder.problems[0])
 
 
 def pending(user_id="admin", digest="session-a") -> PendingSignIn:
@@ -310,3 +310,153 @@ def test_expired_and_surplus_pending_sign_ins_are_dropped():
     with pytest.raises(SignInRejected):
         store.take(states[0], "admin", "session-a")
     assert store.take(states[-1], "admin", "session-a").name == "A"
+
+
+def test_a_token_endpoint_blip_fails_the_request_but_does_not_end_the_session(fake, monkeypatch):
+    grant, _verifier = run(signed_in_grant(fake))
+    recorder = Recorder()
+    fake.state.revoke_access_tokens()
+
+    async def unreachable_token_address(client, held, clock):
+        raise McpSignInError("could not reach the token address: ConnectTimeout")
+
+    monkeypatch.setattr(mcp_oauth, "refresh_tokens", unreachable_token_address)
+    response = run(call_mcp(fake, bearer_for(grant, recorder)))
+    assert response.status_code == 401
+    assert recorder.problems == [] and recorder.refreshed == []
+
+
+REMOTE = "https://mcp.remote.example.test"
+LOCAL_TARGETS = ("http://127.0.0.1:2019/load", "https://127.0.0.1/token", "https://localhost/token",
+                 "https://api.localhost/token", "https://10.1.2.3/token", "https://192.168.1.16/token",
+                 "https://172.16.0.9/token", "https://169.254.169.254/latest", "https://[::1]/token",
+                 "https://[fe80::1]/token", "https://[fd00::5]/token", "https://[::ffff:127.0.0.1]/token",
+                 "https://0.0.0.0/token", "https://100.64.0.1/token", "http://auth.example.test/token")
+
+
+def test_endpoints_learned_from_a_remote_server_must_be_public_https_addresses():
+    remote = mcp_oauth.EndpointRules.for_server(f"{REMOTE}/mcp")
+    assert not remote.allows_local
+    assert remote.permits("https://auth.example.test/token") and remote.permits("https://93.184.216.34/token")
+    for target in LOCAL_TARGETS:
+        assert not remote.permits(target), target
+    local = mcp_oauth.EndpointRules.for_server("http://127.0.0.1:8123/mcp")
+    assert local.allows_local and local.permits("http://127.0.0.1:2019/token")
+    assert local.permits("https://auth.example.test/token") and not local.permits("http://auth.example.test/token")
+    assert mcp_oauth.EndpointRules.for_server("http://localhost:9000/mcp").allows_local
+
+
+def pivot_transport(seen: list) -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        url = str(request.url)
+        if url == f"{REMOTE}/mcp":
+            return httpx.Response(401, headers={
+                "WWW-Authenticate": 'Bearer resource_metadata="http://127.0.0.1:11434/api/tags"'})
+        if url == f"{REMOTE}/.well-known/oauth-protected-resource/mcp":
+            return httpx.Response(200, json={"resource": f"{REMOTE}/mcp", "authorization_servers": [REMOTE]})
+        if url == f"{REMOTE}/.well-known/oauth-authorization-server":
+            return httpx.Response(200, json={"issuer": REMOTE, "authorization_endpoint": f"{REMOTE}/authorize",
+                                             "token_endpoint": "http://127.0.0.1:2019/load",
+                                             "registration_endpoint": "http://localhost:2019/stop",
+                                             "code_challenge_methods_supported": ["S256"]})
+        return httpx.Response(404)
+    return httpx.MockTransport(handler)
+
+
+def is_local_request(url: str) -> bool:
+    return urlsplit(url).hostname in ("127.0.0.1", "localhost")
+
+
+def test_a_remote_server_cannot_point_starfire_at_addresses_on_this_computer(monkeypatch):
+    async def public(host):
+        return [mcp_oauth.ipaddress.ip_address("93.184.216.34")]
+
+    monkeypatch.setattr(mcp_oauth, "resolve_addresses", public, raising=False)
+    seen = []
+
+    async def discover():
+        async with httpx.AsyncClient(transport=pivot_transport(seen)) as client:
+            return await mcp_oauth.discover(client, f"{REMOTE}/mcp")
+
+    with pytest.raises(McpSignInError, match="unusable .* public https"):
+        run(discover())
+    assert seen and not any(is_local_request(url) for url in seen)
+
+
+def test_a_learned_host_whose_name_resolves_to_a_private_address_is_not_contacted(monkeypatch):
+    async def private(host):
+        return [mcp_oauth.ipaddress.ip_address("93.184.216.34"), mcp_oauth.ipaddress.ip_address("10.0.0.7")]
+
+    monkeypatch.setattr(mcp_oauth, "resolve_addresses", private, raising=False)
+    seen = []
+    server = mcp_oauth.AuthorizationServer(REMOTE, f"{REMOTE}/authorize", "https://token.rebind.example.test/token",
+                                           "https://token.rebind.example.test/register", f"{REMOTE}/mcp", "")
+    grant = OAuthGrant(server, ClientRegistration("client"), TokenSet("old", "refresh", 1.0))
+
+    async def attempts():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda r: seen.append(r) or httpx.Response(200))) \
+                as client:
+            with pytest.raises(McpSignInError, match="private or local"):
+                await mcp_oauth.register_client(client, server, CALLBACK)
+            with pytest.raises(McpSignInError, match="private or local"):
+                await mcp_oauth.refresh_tokens(client, grant)
+
+    run(attempts())
+    assert seen == []
+
+
+ENDLESS_CHUNK = b" " * 65536
+
+
+async def endless_body():
+    while True:
+        yield ENDLESS_CHUNK
+        await asyncio.sleep(0)
+
+
+def test_an_endless_metadata_answer_is_cut_off_instead_of_read_forever():
+    local_server = "http://127.0.0.1:9/mcp"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            return httpx.Response(401, headers={"WWW-Authenticate": "Bearer"})
+        return httpx.Response(200, headers={"content-type": "application/json"}, content=endless_body())
+
+    async def discover():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await mcp_oauth.discover(client, local_server)
+
+    with pytest.raises(McpSignInError, match="no OAuth metadata"):
+        run(asyncio.wait_for(discover(), timeout=20))
+
+
+def test_a_sign_in_step_that_runs_past_the_deadline_is_stopped(monkeypatch):
+    monkeypatch.setattr(mcp_oauth, "FLOW_DEADLINE_S", 0.2, raising=False)
+
+    async def slow():
+        await asyncio.sleep(1)
+        return "finished late"
+
+    async def attempt():
+        return await asyncio.wait_for(mcp_oauth.within_deadline(slow(), "finding the sign-in server"), timeout=5)
+
+    with pytest.raises(McpSignInError, match="took longer than 0.2 seconds"):
+        run(attempt())
+
+
+def test_a_damaged_stored_record_needs_a_new_sign_in_instead_of_crashing(fake):
+    grant, _verifier = run(signed_in_grant(fake))
+    good = {**grant.to_record(), "service": "x", "needs_sign_in": False}
+    for damaged in ({"access_token": "x"}, {**good, "expires_at": "soon"}, {**good, "issuer": 5},
+                    {**good, "token_endpoint": ""}, {**good, "client_id": None}, {**good, "expires_at": True},
+                    ["not", "a", "record"]):
+        with pytest.raises(SignInNeeded, match="saved sign-in"):
+            OAuthGrant.from_record(damaged)
+    assert OAuthGrant.from_record({key: value for key, value in good.items() if key != "iss_required"}) == grant
+
+
+def test_the_iss_requirement_is_read_from_the_sign_in_server_metadata(fake):
+    assert run(discovered_and_registered(fake))[0].server.iss_required is False
+    fake.state.advertise_iss = True
+    assert run(discovered_and_registered(fake))[0].server.iss_required is True

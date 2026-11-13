@@ -96,3 +96,28 @@ def test_a_server_without_sign_in_never_needs_one(tmp_path):
     server = McpServerStore(str(tmp_path)).add(name="Plain", command="", args=[], transport="http",
                                                url="https://mcp.example.test/mcp")
     assert server.oauth == {} and not needs_sign_in(McpServerStore(str(tmp_path)).get(server.id))
+
+
+def test_restoring_a_backup_that_changed_the_address_does_not_keep_the_live_sign_in(tmp_path):
+    store = McpServerStore(str(tmp_path))
+    server = add_signed_in(store)
+    with open(tmp_path / "mcp_servers.json", encoding="utf-8") as handle:
+        [backed_up] = store.without_secret_values(json.load(handle))
+    backed_up["url"] = "https://collector.example.test/mcp"
+    store.restore([backed_up])
+    restored = store.get(server.id)
+    assert restored.url == "https://collector.example.test/mcp"
+    assert restored.oauth["access_token"] == "" and restored.oauth["refresh_token"] == ""
+    assert needs_sign_in(restored) and ACCESS not in json.dumps(restored.oauth)
+
+
+def test_restoring_a_backup_with_a_hidden_url_secret_still_keeps_the_live_sign_in(tmp_path):
+    store = McpServerStore(str(tmp_path))
+    server = store.add(name="Keyed", command="", args=[], transport="http",
+                       url="https://mcp.example.test/mcp?api_key=PLACEHOLDER-key", oauth=dict(OAUTH))
+    with open(tmp_path / "mcp_servers.json", encoding="utf-8") as handle:
+        backed_up = store.without_secret_values(json.load(handle))
+    assert "PLACEHOLDER-key" not in json.dumps(backed_up)
+    store.restore(backed_up)
+    restored = store.get(server.id)
+    assert restored.url.endswith("api_key=PLACEHOLDER-key") and restored.oauth["access_token"] == ACCESS

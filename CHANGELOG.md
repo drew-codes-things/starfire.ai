@@ -103,6 +103,29 @@
   89%. Four bugs they found are listed under Fixed.
 
 ### Fixed
+- MCP browser sign-in hardening: a token address that is briefly unreachable fails one tool call
+  and the next call renews the sign-in, instead of ending the session for good; a session whose
+  connection ended (a refused renewal, a server that went away, a stdio server that exited) is
+  dropped, so the list stops saying Connected and the next chat reconnects it, for plain URL
+  servers too.
+- Sign-in addresses learned from an online MCP server (metadata, registration and token
+  addresses) must be public https addresses, also after the name is looked up; addresses on this
+  computer or a private network are only used when the MCP server itself is on this computer.
+  Each sign-in step has an overall time limit and answers are capped at 256 KiB.
+- "Sign in again" registers starfire afresh when the service rejected the old registration
+  (`invalid_client`), when the registration needs a client secret that is no longer stored, or
+  when the previous sign-in was never finished.
+- The sign-in code and state no longer reach the uvicorn access log; the callback is logged
+  without its query.
+- The sign-in result toast only appears in the tab that started the sign-in, and only enables a
+  server that is really in the list.
+- Non-admins see a generic problem text for MCP servers instead of the full error with the
+  server address.
+- A damaged saved sign-in asks for a new sign-in instead of raising an error at startup, a
+  restore that changes a server's address does not keep the live tokens, and a saved sign-in is
+  never sent to an address it was not issued for.
+- When a server signs in through another site, starfire names that site and asks before sending
+  the browser there, and a sign-in server that promises the `iss` answer parameter must send it.
 - MCP server arguments and URLs are encrypted in `mcp_servers.json` like env and header values,
   so a connection string with a password or a URL with `?api_key=` is no longer in plain text
   on disk; a plain file is encrypted the first time it is read. Backups keep the arguments and
