@@ -17,6 +17,11 @@ from auth import SESSION_COOKIE, LoginLimiter, SessionStore, UserStore
 PASSWORD = "correct horse battery staple"
 
 
+def read_text(path):
+    with open(path, encoding="utf-8") as handle:
+        return handle.read()
+
+
 def fast_hash(password: str) -> str:
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt(rounds=4)).decode()
 
@@ -226,7 +231,7 @@ def test_setup_creates_one_admin_and_logs_in(setup_client, users):
     response = setup_client.post("/api/auth/setup", json=setup_body())
     assert {k: response.json()[k] for k in ("email", "name", "role")} == {"email": "drew@example.com", "name": "Drew", "role": "admin"}
     assert setup_client.get("/api/secret").status_code == 200
-    assert PASSWORD not in open(users.path).read()
+    assert PASSWORD not in read_text(users.path)
     again = setup_client.post("/api/auth/setup", json=setup_body(email="evil@example.com"))
     assert again.status_code == 409
     assert [u.email for u in users.list()] == ["drew@example.com"]

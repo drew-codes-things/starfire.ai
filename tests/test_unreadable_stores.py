@@ -10,6 +10,12 @@ import pytest
 from api_key_manager import APIKeyManager
 from documents_store import DocumentStore
 
+
+def read_text(path):
+    with open(path, encoding="utf-8") as handle:
+        return handle.read()
+
+
 BROKEN = "{broken"
 
 
@@ -23,7 +29,7 @@ def test_an_unreadable_key_file_is_kept_aside_not_overwritten(tmp_path, content)
     (tmp_path / "api_keys.json").write_text(content)
     keys.save("openai", "sk-new")
     [aside] = set_aside_copies(tmp_path / "api_keys.json")
-    assert open(aside).read() == content
+    assert read_text(aside) == content
     assert keys.load() == {"openai": "sk-new"}
 
 
@@ -33,7 +39,7 @@ def test_an_unreadable_documents_file_is_kept_aside_not_overwritten(tmp_path, co
     (tmp_path / "documents.json").write_text(content)
     assert documents.list() == []
     [aside] = set_aside_copies(tmp_path / "documents.json")
-    assert open(aside).read() == content
+    assert read_text(aside) == content
     documents.add("notes.txt", b"One line. Two lines.")
     assert [d.filename for d in documents.list()] == ["notes.txt"]
-    assert open(aside).read() == content
+    assert read_text(aside) == content
