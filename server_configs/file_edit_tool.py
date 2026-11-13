@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 import difflib
+import logging
 import os
 import uuid
+
+logger = logging.getLogger(__name__)
 
 def read_current(path: str) -> str:
     try:
         with open(path, "r", encoding="utf-8") as f:
             return f.read()
-    except (OSError, UnicodeDecodeError):
+    except FileNotFoundError:
+        logger.debug("%s does not exist yet, so an edit starts from nothing", path)
+        return ""
+    except (OSError, UnicodeDecodeError) as error:
+        logger.warning("could not read %s as text, so an edit diff shows it as empty: %s", path, error)
         return ""
 
 def make_diff(path: str, old_content: str, new_content: str) -> str:

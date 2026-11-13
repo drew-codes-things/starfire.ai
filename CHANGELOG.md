@@ -74,6 +74,11 @@
 - Testable browser logic moved into `static/uiLogic.js`.
 
 ### Fixed
+- Errors the server used to swallow in silence are now logged with what failed: a store file
+  that is not JSON (read as empty, and replaced by the next save), a temp file that could not
+  be removed, a scheduled time that is not HH:MM, a failed web search or embedding, a key file
+  whose permissions could not be tightened, a background task failing at shutdown. Nothing a
+  user sees changes.
 - On a phone the actions under the last reply stay on one row: the buttons narrow a little to
   fit, and the regenerate button opens the model list itself (picking a model regenerates with
   it). Wider screens keep the model select beside the button, now headed "Regenerate with…".

@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import platform
 import re
+
+logger = logging.getLogger(__name__)
 
 _SYSTEM = platform.system()
 
@@ -30,7 +33,8 @@ async def _run(cmd: list[str], timeout: float = 5.0) -> tuple[int, str]:
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
         )
         stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except (OSError, asyncio.TimeoutError):
+    except (OSError, asyncio.TimeoutError) as error:
+        logger.debug("could not run %s: %r", cmd[0], error)
         return -1, ""
     return proc.returncode, stdout.decode("utf-8", errors="replace")
 
@@ -41,8 +45,8 @@ async def _read_total_ram_gb() -> float | None:
                 for line in f:
                     if line.startswith("MemTotal:"):
                         return round(int(line.split()[1]) / (1024 * 1024), 1)
-        except (OSError, ValueError, IndexError):
-            pass
+        except (OSError, ValueError, IndexError) as error:
+            logger.warning("could not read total RAM from /proc/meminfo: %r", error)
         return None
     if _SYSTEM == "Darwin":
         code, out = await _run(["sysctl", "-n", "hw.memsize"])
@@ -87,12 +91,12 @@ async def _read_cpu_info_linux(info: dict) -> dict:
                 try:
                     info["cores"] = int(line.split(":", 1)[1].strip())
                 except ValueError:
-                    pass
+                    logger.debug("lscpu gave a CPU count that is not a number: %s", line)
             elif line.startswith("CPU max MHz:"):
                 try:
                     info["max_mhz"] = round(float(line.split(":", 1)[1].strip()))
                 except ValueError:
-                    pass
+                    logger.debug("lscpu gave a max speed that is not a number: %s", line)
         if info["model"]:
             return info
 
@@ -106,8 +110,8 @@ async def _read_cpu_info_linux(info: dict) -> dict:
         speeds = re.findall(r"^cpu MHz\s*:\s*([\d.]+)$", text, re.MULTILINE)
         if speeds:
             info["max_mhz"] = round(max(float(s) for s in speeds))
-    except OSError:
-        pass
+    except OSError as error:
+        logger.warning("could not read CPU details from /proc/cpuinfo: %s", error)
     return info
 
 async def _read_cpu_info_macos(info: dict) -> dict:

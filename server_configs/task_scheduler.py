@@ -28,7 +28,7 @@ def compute_next_run(schedule: str, scheduled_time: str = "", scheduled_day: str
         try:
             hour, minute = (int(p) for p in scheduled_time.split(":", 1))
         except ValueError:
-            pass
+            logger.warning("scheduled time %r is not HH:MM, so the task runs at %02d:%02d", scheduled_time, hour, minute)
 
     candidate = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
@@ -75,7 +75,7 @@ class TaskScheduler:
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=TICK_SECONDS)
             except asyncio.TimeoutError:
-                pass
+                logger.debug("task scheduler woke after %ss", TICK_SECONDS)
 
     def stop(self):
         self._stop.set()

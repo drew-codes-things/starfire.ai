@@ -1,13 +1,17 @@
+import logging
 from urllib.parse import urlparse
 
 from config import config
+
+logger = logging.getLogger(__name__)
 
 def _host_match(url: str, *domains: str) -> bool:
     if not url:
         return False
     try:
         host = (urlparse(url).hostname or "").lower().rstrip(".")
-    except Exception:
+    except (ValueError, AttributeError) as error:
+        logger.debug("could not read the host of a base URL: %r", error)
         return False
     return bool(host) and any(host == d or host.endswith("." + d) for d in domains)
 
@@ -18,7 +22,8 @@ def _is_configured_ollama(parsed) -> bool:
 def _is_ollama_native_url(url: str) -> bool:
     try:
         parsed = urlparse(url or "")
-    except Exception:
+    except (ValueError, AttributeError) as error:
+        logger.debug("could not parse a base URL: %r", error)
         return False
     host = parsed.hostname or ""
     path = (parsed.path or "").rstrip("/")

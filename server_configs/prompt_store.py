@@ -6,7 +6,7 @@ import re
 import uuid
 from dataclasses import asdict, dataclass
 
-from atomic_io import atomic_write_json
+from atomic_io import atomic_write_json, report_unreadable_store
 
 COMMAND_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 
@@ -28,7 +28,8 @@ class PromptStore:
         try:
             with open(self.path, "r", encoding="utf-8") as f:
                 raw = json.load(f)
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as error:
+            report_unreadable_store(self.path, error)
             return []
         if not isinstance(raw, list):
             return []

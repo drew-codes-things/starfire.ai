@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import re
 import time
@@ -13,6 +14,8 @@ import httpx
 
 from atomic_io import atomic_write_json
 from providers import _detect_provider, build_headers, build_models_url
+
+logger = logging.getLogger(__name__)
 
 KINDS = ("image", "audio", "video")
 MAX_BYTES = {"image": 20 * 1024 * 1024, "audio": 300 * 1024 * 1024, "video": 300 * 1024 * 1024}
@@ -132,7 +135,8 @@ class AttachmentStore:
             attachment_id = entry[:-5]
             try:
                 attachment = self.get(attachment_id)
-            except (AttachmentError, ValueError, OSError, TypeError):
+            except (AttachmentError, ValueError, OSError, TypeError) as error:
+                logger.warning("could not read attachment %s while pruning, so it is kept: %s", attachment_id, error)
                 continue
             if now - attachment.created < KEEP_SECONDS:
                 continue
