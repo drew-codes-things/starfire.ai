@@ -415,3 +415,11 @@ def test_temporary_side_and_other_chats_never_save_a_memory(client, model_inbox,
     assert response.status_code == 200
     assert model_inbox == ["remember: my dog is Rex"]
     assert routes.memory.list() == []
+
+
+@pytest.mark.parametrize("content", [[{"type": "text", "text": "hi"}], {"text": "hi"}, 42])
+def test_a_chat_message_whose_content_is_not_text_is_refused_not_a_crash(client, model_inbox, content):
+    response = client.post("/api/chat_stream", json={
+        "endpoint_id": "ep1", "model": "m", "messages": [{"role": "user", "content": content}]})
+    assert response.status_code == 422
+    assert model_inbox == []

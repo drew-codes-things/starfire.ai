@@ -11,7 +11,7 @@ from typing import Annotated
 import httpx
 from fastapi import APIRouter, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 import auth_routes
 import builtin_tools
@@ -955,6 +955,15 @@ class ChatBody(BaseModel):
     require_edit_approval: bool = False
     require_shell_approval: bool = True
     memory_commands: bool = False
+
+    @field_validator("messages")
+    @classmethod
+    def contents_are_text(cls, messages: list[dict]) -> list[dict]:
+        for index, message in enumerate(messages):
+            content = message.get("content")
+            if content is not None and not isinstance(content, str):
+                raise ValueError(f"message {index}: content must be text")
+        return messages
 
 def _remember_command_text(body: ChatBody) -> str | None:
     if not body.memory_commands or not body.messages:
