@@ -79,6 +79,11 @@
   `settingsNotes.js`, `settingsSystem.js`, `compare.js` and `palette.js`. `app.js` keeps the
   keyboard and focus handling, the microphone, the theme and startup. Nothing a user sees
   changes.
+- `static/workspace.js` (1,553 lines) is split the same way into eleven scripts that load
+  after `app.js`: `workspaceCore.js`, `sidebar.js`, `sidebarMenus.js`, `chatManagement.js`,
+  `prompts.js`, `modelPicker.js`, `chatControls.js`, `composerTools.js`, `attachments.js`,
+  `composerPopup.js` and `voiceCall.js`. `workspace.js` keeps the scroll button, the keyboard
+  shortcuts, the account menu, the shortcuts sheet and startup. Nothing a user sees changes.
 - More server tests (394 to 628): one account reaching another's items by id, admin-only
   routes, backup restore with unsafe paths, API key storage and which endpoint gets which key,
   edit and shell approvals, scheduled tasks, email rules, the model's built-in tools and chat

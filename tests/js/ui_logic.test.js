@@ -223,7 +223,8 @@ test('other keys, and Enter that only confirms an input method choice, do not su
 
 test('the dialog field and the one-line add fields hand Enter to that helper', () => {
   const fs = require('node:fs');
-  const workspace = fs.readFileSync(path.join(__dirname, '..', '..', 'static', 'workspace.js'), 'utf8');
+  const workspace = ['workspaceCore.js', 'workspace.js']
+    .map(name => fs.readFileSync(path.join(__dirname, '..', '..', 'static', name), 'utf8')).join('');
   assert.match(workspace, /dialogEls\.input\.onkeydown = submitOnEnter\(/);
   for (const field of ['newMemoryText', 'noteNewItem', 'presetName']) {
     assert.match(workspace, new RegExp(`\\['${field}', '\\w+'\\]`), `${field} has no Enter key`);
@@ -267,7 +268,8 @@ test('Escape on a menu or dialog closes it and is used up, so it cannot also clo
 
 test('the dialog, the chat row menu and the model menu close through that helper, and the page-wide Escape respects it', () => {
   const fs = require('node:fs');
-  const workspace = fs.readFileSync(path.join(__dirname, '..', '..', 'static', 'workspace.js'), 'utf8');
+  const workspace = ['workspaceCore.js', 'sidebarMenus.js', 'modelPicker.js', 'workspace.js']
+    .map(name => fs.readFileSync(path.join(__dirname, '..', '..', 'static', name), 'utf8')).join('');
   assert.match(workspace, /dialogEls\.modal\.onkeydown = closeOnEscape\(/);
   assert.match(workspace, /\$\('chatMenu'\)\.addEventListener\('keydown', closeOnEscape\(closeContextMenu\)\)/);
   assert.match(workspace, /\$\('modelSearch'\)\.addEventListener\('keydown', closeOnEscape\(/);
@@ -320,7 +322,7 @@ test('the menu key handler focuses the next item, and Escape closes the menu and
 
 test('the plus menu is driven by that key handler and gives focus back to its button', () => {
   const fs = require('node:fs');
-  const workspace = fs.readFileSync(path.join(__dirname, '..', '..', 'static', 'workspace.js'), 'utf8');
+  const workspace = fs.readFileSync(path.join(__dirname, '..', '..', 'static', 'composerTools.js'), 'utf8');
   assert.match(workspace, /\$\('plusMenu'\)\.addEventListener\('keydown', menuKeyHandler\(plusMenuItems, closePlusMenu\)\)/);
   assert.match(workspace, /function closePlusMenu\(\) \{[^}]*\$\('plusBtn'\)\.focus\(\);/);
   assert.match(workspace, /if \(opening\) \{[^}]*plusMenuItems\(\)\[0\]/);
