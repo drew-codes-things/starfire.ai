@@ -72,6 +72,12 @@
 - Static files are sent gzip-compressed to browsers that accept it (about 548 KB of page,
   style and script down to about 138 KB). API replies and streams are not compressed.
 - Testable browser logic moved into `static/uiLogic.js`.
+- `static/app.js` (4,318 lines) is split into thirteen smaller scripts that load just before
+  it: `appState.js`, `chatMessages.js`, `codeBlocks.js`, `chatCards.js`, `chatSend.js`,
+  `helperTasks.js`, `settings.js`, `settingsMemoryTasks.js`, `settingsEmail.js`,
+  `settingsNotes.js`, `settingsSystem.js`, `compare.js` and `palette.js`. `app.js` keeps the
+  keyboard and focus handling, the microphone, the theme and startup. Nothing a user sees
+  changes.
 
 ### Fixed
 - On a phone the actions under the last reply stay on one row: the buttons narrow a little to
