@@ -89,7 +89,7 @@ def test_another_account_cannot_see_approve_or_reject_an_edit(admin, sam, tmp_pa
     target = tmp_path / "server.conf"
     edit_id = stage_edit(admin, target)
     assert sam.get("/api/pending-edits").json()["edits"] == []
-    assert sam.post(f"/api/pending-edits/{edit_id}/approve").status_code == 404
+    assert sam.post(f"/api/pending-edits/{edit_id}/approve").status_code == 403
     assert sam.post(f"/api/pending-edits/{edit_id}/reject").status_code == 404
     assert not target.exists()
     assert [e["id"] for e in admin.get("/api/pending-edits").json()["edits"]] == [edit_id]
@@ -108,7 +108,7 @@ def test_another_account_cannot_approve_or_reject_a_shell_command(admin, sam):
     async def scenario():
         pending_id = shell_tool.stage("rm -rf /srv/data", None, owner=admin.user_id)
         assert sam.get("/api/pending-shell").json()["commands"] == []
-        assert sam.post(f"/api/pending-shell/{pending_id}/approve").status_code == 404
+        assert sam.post(f"/api/pending-shell/{pending_id}/approve").status_code == 403
         assert sam.post(f"/api/pending-shell/{pending_id}/reject").status_code == 404
         assert [c["id"] for c in admin.get("/api/pending-shell").json()["commands"]] == [pending_id]
         assert admin.post(f"/api/pending-shell/{pending_id}/reject").json() == {"rejected": True}
@@ -126,3 +126,49 @@ def test_a_command_can_only_be_decided_once(admin):
         assert await shell_tool.wait_for_decision(pending_id) is True
 
     asyncio.run(scenario())
+
+
+def demote(client):
+    auth_routes.users.update(client.user_id, role="user")
+
+
+def test_an_admin_demoted_after_a_command_was_staged_cannot_approve_it(admin):
+    other_admin = auth_routes.users.find_by_email("sam@example.com")
+    auth_routes.users.update(other_admin.id, role="admin")
+
+    async def scenario():
+        pending_id = shell_tool.stage("echo staged-while-admin", None, owner=admin.user_id)
+        demote(admin)
+        response = admin.post(f"/api/pending-shell/{pending_id}/approve")
+        assert response.status_code == 403
+        assert response.json()["detail"].startswith("only an admin can")
+        assert not shell_tool._pending[pending_id]["future"].done()
+        assert [c["id"] for c in admin.get("/api/pending-shell").json()["commands"]] == [pending_id]
+        assert admin.post(f"/api/pending-shell/{pending_id}/reject").json() == {"rejected": True}
+        assert await shell_tool.wait_for_decision(pending_id) is False
+
+    asyncio.run(scenario())
+
+
+def test_an_admin_demoted_after_an_edit_was_staged_cannot_approve_it(admin, tmp_path):
+    other_admin = auth_routes.users.find_by_email("sam@example.com")
+    auth_routes.users.update(other_admin.id, role="admin")
+    target = tmp_path / "staged-while-admin.txt"
+    edit_id = stage_edit(admin, target)
+    demote(admin)
+    response = admin.post(f"/api/pending-edits/{edit_id}/approve")
+    assert response.status_code == 403
+    assert response.json()["detail"].startswith("only an admin can")
+    assert not target.exists()
+    assert [e["id"] for e in admin.get("/api/pending-edits").json()["edits"]] == [edit_id]
+
+
+def test_a_disabled_admin_cannot_approve_what_was_staged_earlier(admin, tmp_path):
+    other_admin = auth_routes.users.find_by_email("sam@example.com")
+    auth_routes.users.update(other_admin.id, role="admin")
+    target = tmp_path / "staged-before-disabling.txt"
+    edit_id = stage_edit(admin, target)
+    auth_routes.users.update(admin.user_id, disabled=True)
+    assert admin.post(f"/api/pending-edits/{edit_id}/approve").status_code in (401, 403)
+    assert not target.exists()
+    assert file_edit_tool.get_pending(edit_id, admin.user_id) is not None

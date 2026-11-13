@@ -1394,8 +1394,13 @@ async def pull_model(body: dict):
 async def list_pending_shell():
     return {"commands": shell_tool.list_pending(user_data.current_user_id.get())}
 
+def _require_host_tool_access(action: str) -> None:
+    if not _current_user_is_active_admin():
+        raise HTTPException(403, f"only an admin can {action}")
+
 @router.post("/pending-shell/{pending_id}/approve")
 async def approve_pending_shell(pending_id: str):
+    _require_host_tool_access("approve shell commands")
     if not shell_tool.resolve(pending_id, True, user_data.current_user_id.get()):
         raise HTTPException(404, "no command is waiting with that id (already decided, timed out, or the server restarted)")
     return {"approved": True}
@@ -1412,6 +1417,7 @@ async def list_pending_edits():
 
 @router.post("/pending-edits/{edit_id}/approve")
 async def approve_pending_edit(edit_id: str):
+    _require_host_tool_access("approve file edits")
     owner = user_data.current_user_id.get()
     edit = file_edit_tool.get_pending(edit_id, owner)
     if not edit:

@@ -143,6 +143,9 @@
   overwritten with an empty one.
 - Normal accounts no longer see MCP server commands, arguments or full URLs, and cannot start
   a network scan or read the hardware page.
+- Approving a waiting shell command or file edit checks that the account is still an active
+  admin, so an admin demoted after the command or edit was proposed gets a 403 and it stays
+  waiting.
 
 ## 1.1.0 - 2026-11-03
 
