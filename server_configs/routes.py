@@ -1538,12 +1538,8 @@ async def get_generated_file(file_id: str):
     path = generated_files.path_for(entry)
     if not os.path.exists(path):
         raise HTTPException(404, "file data missing on disk")
-    with open(path, "rb") as f:
-        data = f.read()
-    return StreamingResponse(
-        iter([data]), media_type=entry.content_type,
-        headers={"Content-Disposition": f'inline; filename="{entry.filename}"'},
-    )
+    return FileResponse(path, media_type=entry.content_type, filename=entry.filename,
+                        content_disposition_type="inline")
 
 @router.delete("/generated/{file_id}")
 async def delete_generated_file(file_id: str):

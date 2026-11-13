@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from dataclasses import dataclass
 
 import comfyui_client
@@ -477,6 +478,13 @@ async def _generate_video(args: dict, ctx: ToolContext) -> str:
         saved.append({"kind": kind, "id": entry.id, "url": f"/api/generated/{entry.id}", "filename": filename})
     return json.dumps({"files": saved})
 
+UNSAFE_NAME_CHARACTERS = re.compile(r'[\x00-\x1f\x7f"/\\]')
+MAX_DOCUMENT_NAME_CHARS = 120
+
+def _document_name(requested: str) -> str:
+    cleaned = UNSAFE_NAME_CHARACTERS.sub("_", requested).strip()
+    return cleaned[:MAX_DOCUMENT_NAME_CHARS] or "document"
+
 def _generate_document(args: dict, ctx: ToolContext) -> str:
     content = args.get("content", "")
     fmt = args.get("format", "md")
@@ -488,7 +496,7 @@ def _generate_document(args: dict, ctx: ToolContext) -> str:
         data = media_generation.generate_document(content, fmt)
     except Exception as e:
         return f"error: could not generate document: {e}"
-    filename = (args.get("filename") or "document").strip() + "." + fmt
+    filename = _document_name(args.get("filename") or "") + "." + fmt
     entry = ctx.generated_files.add("document", filename, media_generation.CONTENT_TYPES[fmt],
                                       data, source=content[:200])
     return json.dumps({"kind": "document", "id": entry.id, "url": f"/api/generated/{entry.id}", "filename": filename})
