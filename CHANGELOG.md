@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Added
+- Sign in to online MCP services from Settings → Tools: pick Notion, Linear, Atlassian, Sentry,
+  Cloudflare, Stripe, PayPal, Canva or Webflow (or type any MCP server URL) and starfire sends
+  you to the service's own sign-in page, then connects the server when you come back. Follows the
+  MCP authorization spec (metadata discovery, dynamic registration, PKCE S256, a one-time state
+  tied to the session); tokens are encrypted, kept out of backups and renewed before they run out
+  or on a 401, and a refused renewal shows "Needs sign-in again" with a button to redo it.
+  `PUBLIC_BASE_URL` sets the return address when starfire has one public address.
 - Approval cards (Arty CLI Allow/Deny, a shell command's run it/reject, a proposed edit's
   approve/reject) show a short "New question" flash and ignore clicks, taps, Enter and Space on
   their buttons until they have been on screen for one second, so a tap aimed at something that
