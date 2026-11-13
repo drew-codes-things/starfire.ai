@@ -148,6 +148,10 @@
   waiting.
 - `api_keys.json` is written readable by its owner only (600), like `.key`, and an existing
   file left readable by others is tightened when it is next read, with an info log line.
+- MCP server environment values (tokens) and header values are stored encrypted in
+  `mcp_servers.json` with the same key as `api_keys.json`. A file saved in plain text is
+  encrypted the first time it is read; values saved by another install are left out with a
+  warning naming the server and key, and kept on disk. The API still never returns them.
 
 ## 1.1.0 - 2026-11-03
 
