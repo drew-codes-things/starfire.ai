@@ -439,7 +439,16 @@ def client_address(request: Request, trusted: tuple = LOOPBACK_PROXIES,
     return str(real) if real is not None else nearest
 
 
+DOT_SEGMENTS = frozenset({".", ".."})
+
+
+def has_dot_segment(path: str) -> bool:
+    return any(segment in DOT_SEGMENTS for segment in path.split("/"))
+
+
 def is_public(path: str) -> bool:
+    if has_dot_segment(path):
+        return False
     return path in PUBLIC_PATHS or path.startswith(PUBLIC_PREFIXES)
 
 

@@ -539,3 +539,21 @@ def test_hosts_are_compared_without_case_or_default_ports():
     assert auth.normalise_host("claude.example:80") == "claude.example"
     assert auth.normalise_host(" 127.0.0.1:8090 ") == "127.0.0.1:8090"
     assert auth.normalise_host("[::1]:443") == "[::1]"
+
+
+@pytest.mark.parametrize("path", ["/assets/../app.js", "/assets/../index.html", "/vendor/fonts/../../workspace.js",
+                                  "/assets/./../app.js"])
+def test_public_prefixes_do_not_cover_paths_that_climb_out_of_them(path):
+    assert not auth.is_public(path)
+
+
+def test_a_climbing_path_to_app_code_still_needs_a_login(users, sessions):
+    users.upsert("drew@example.com", "Drew", "admin", fast_hash(PASSWORD))
+    app = build_app(users, sessions)
+
+    @app.get("/{rest:path}")
+    def anything(rest: str):
+        return {"served": rest}
+
+    response = TestClient(app).get("/assets/%2e%2e/app.js", follow_redirects=False)
+    assert response.status_code == 303
