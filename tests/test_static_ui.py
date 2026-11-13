@@ -250,3 +250,13 @@ def test_opening_a_settings_tab_shows_loading_in_its_empty_lists():
     assert ids <= set(Page(read("index.html")).ids)
     show_tab = re.search(r"function showSettingsTab\(tab\) \{(.*?)\n\}", app, re.S).group(1)
     assert "showListLoading" in show_tab
+
+
+def test_adding_a_memory_reports_a_failure_under_the_field():
+    html = read("index.html")
+    assert re.search(r'<p class="settings-hint" id="memoryAddResult" role="status"></p>', html)
+    handler = re.search(r"settingsEls\.addMemoryEntryBtn\.onclick = async \(\) => \{(.*?)\n\};", read("app.js"), re.S)
+    assert handler, "no memory add handler"
+    body = handler.group(1)
+    assert "if (!r.ok) throw new Error(await failureMessage(r, " in body
+    assert "settingsEls.memoryAddResult.className = 'settings-hint error';" in body

@@ -162,6 +162,7 @@ const settingsEls = {
   newMemoryText:  $('newMemoryText'),
   newMemoryCategory: $('newMemoryCategory'),
   addMemoryEntryBtn: $('addMemoryEntryBtn'),
+  memoryAddResult: $('memoryAddResult'),
   memoryList:     $('memoryList'),
   documentFile:   $('documentFile'),
   uploadDocumentBtn: $('uploadDocumentBtn'),
@@ -2431,10 +2432,19 @@ document.querySelectorAll('#memoryCategoryTabs button').forEach(btn => {
 settingsEls.addMemoryEntryBtn.onclick = async () => {
   const text = settingsEls.newMemoryText.value.trim();
   if (!text) return;
-  await fetch('/api/memory', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text, category: settingsEls.newMemoryCategory.value }),
-  });
+  settingsEls.memoryAddResult.textContent = '';
+  settingsEls.memoryAddResult.className = 'settings-hint';
+  try {
+    const r = await fetch('/api/memory', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, category: settingsEls.newMemoryCategory.value }),
+    });
+    if (!r.ok) throw new Error(await failureMessage(r, `could not add the memory (server error ${r.status})`));
+  } catch (e) {
+    settingsEls.memoryAddResult.textContent = e.message;
+    settingsEls.memoryAddResult.className = 'settings-hint error';
+    return;
+  }
   settingsEls.newMemoryText.value = '';
   await refreshMemoryList();
 };

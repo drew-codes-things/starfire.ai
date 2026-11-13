@@ -336,3 +336,11 @@ test('an empty settings list shows a loading row, a list already showing items i
   assert.equal(filled.innerHTML, '<li>kept</li>');
   assert.equal(logic.showListLoading(null), false);
 });
+
+test('a failed request is explained with the server detail, or the fallback when there is none', async () => {
+  const answer = body => ({ json: async () => body });
+  assert.equal(await logic.failureMessage(answer({ detail: 'text is required' }), 'could not add'), 'text is required');
+  assert.equal(await logic.failureMessage(answer({ detail: [{ msg: 'field required' }] }), 'could not add'), 'could not add');
+  assert.equal(await logic.failureMessage(answer({}), 'could not add'), 'could not add');
+  assert.equal(await logic.failureMessage({ json: async () => { throw new SyntaxError('not json'); } }, 'could not add'), 'could not add');
+});
