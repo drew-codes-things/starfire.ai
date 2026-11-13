@@ -174,6 +174,10 @@
   or knowledge gives exactly the keyword results, as the README promises, instead of every
   memory or document ranked by nothing: a question about something you never saved no longer
   pulls unrelated memories and passages into the chat.
+- Sending email no longer reports a failure when the mail server hangs up at the very end: a
+  message the server had accepted was shown as not sent (so it could be sent twice), and a
+  wrong password could show up as "Connection unexpectedly closed" instead of the server's
+  reason.
 
 ## 1.1.0 - 2026-11-03
 

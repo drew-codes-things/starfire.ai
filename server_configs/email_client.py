@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import email as email_pkg
 import imaplib
+import logging
 import smtplib
 from email.header import decode_header
 from email.mime.text import MIMEText
 from email.utils import formatdate, make_msgid
 
 from email_store import EmailAccount
+
+logger = logging.getLogger(__name__)
 
 def _decode(value: str | None) -> str:
     if not value:
@@ -215,7 +218,14 @@ def send_message(account: EmailAccount, password: str, to: str, subject: str, bo
         server.login(account.username or account.email_address, password)
         server.send_message(msg)
     finally:
+        _say_goodbye(server, smtp_host)
+
+def _say_goodbye(server: smtplib.SMTP, smtp_host: str) -> None:
+    try:
         server.quit()
+    except smtplib.SMTPServerDisconnected as error:
+        logger.info("%s had already closed the SMTP connection: %s", smtp_host, error)
+        server.close()
 
 def reply_message(account: EmailAccount, password: str, folder: str, uid: str, body: str) -> None:
     original = read_message(account, password, folder, uid, mark_seen=False)

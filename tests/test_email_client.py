@@ -266,6 +266,20 @@ def test_a_refused_recipient_is_reported(smtp):
         email_client.send_message(ACCOUNT, PASSWORD, "nobody@example.test", "Plans", "Hi")
 
 
+def test_a_rejected_smtp_login_is_still_what_is_reported_when_the_server_then_hangs_up(smtp):
+    smtp.login_error = smtplib.SMTPAuthenticationError(535, b"5.7.8 Username and Password not accepted")
+    smtp.hangs_up_on_quit = True
+    with pytest.raises(smtplib.SMTPAuthenticationError, match="Username and Password not accepted"):
+        email_client.send_message(ACCOUNT, "wrong", "ana@example.test", "Plans", "Hi")
+
+
+def test_mail_the_server_accepted_counts_as_sent_even_if_the_server_hangs_up_before_goodbye(smtp):
+    smtp.hangs_up_on_quit = True
+    email_client.send_message(ACCOUNT, PASSWORD, "ana@example.test", "Plans", "Hi")
+    assert len(smtp.sent) == 1
+    assert smtp.connections[0][-2:] == [("quit",), ("close",)]
+
+
 def test_a_reply_goes_to_the_sender_threaded_and_with_one_re(mailbox, smtp):
     email_client.reply_message(ACCOUNT, PASSWORD, "INBOX", "2", "Eight works.")
     [sent] = smtp.sent
