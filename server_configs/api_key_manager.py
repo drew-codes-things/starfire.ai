@@ -4,6 +4,8 @@ import logging
 from typing import Dict
 from cryptography.fernet import Fernet, InvalidToken
 
+from atomic_io import set_aside_unreadable
+
 logger = logging.getLogger(__name__)
 
 IS_WINDOWS = os.name == "nt"
@@ -47,18 +49,22 @@ class APIKeyManager:
         f = Fernet(self.get_or_create_key())
         return f.decrypt(encrypted_key.encode()).decode()
 
+    def _start_again_without(self, reason: str) -> Dict[str, str]:
+        aside = set_aside_unreadable(self.api_keys_file)
+        logger.error("API keys file could not be read because %s; moved it to %s and starting with no keys",
+                     reason, aside)
+        return {}
+
     def _load_raw(self) -> Dict[str, str]:
         if not os.path.exists(self.api_keys_file):
             return {}
         try:
             with open(self.api_keys_file, 'r', encoding="utf-8") as f:
                 encrypted_keys = json.load(f)
-        except (json.JSONDecodeError, OSError) as e:
-            logger.warning("Failed to read API keys file: %s", e)
-            return {}
+        except json.JSONDecodeError as e:
+            return self._start_again_without(f"it is not valid JSON ({e})")
         if not isinstance(encrypted_keys, dict):
-            logger.warning("API keys file has unexpected shape (%s); ignoring", type(encrypted_keys).__name__)
-            return {}
+            return self._start_again_without(f"it holds a {type(encrypted_keys).__name__}, not an object")
 
         return {
             str(provider): key

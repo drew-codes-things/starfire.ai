@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import time
 
 def atomic_write_json(path: str, data) -> None:
     directory, name = os.path.split(os.path.abspath(path))
@@ -17,3 +18,8 @@ def atomic_write_json(path: str, data) -> None:
         except OSError:
             pass
         raise
+
+def set_aside_unreadable(path: str) -> str:
+    aside = f"{path}.unreadable-{time.strftime('%Y%m%d-%H%M%S')}"
+    os.replace(path, aside)
+    return aside

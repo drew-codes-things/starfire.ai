@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import uuid
@@ -8,12 +9,14 @@ from dataclasses import asdict, dataclass
 
 import embeddings as embeddings_module
 import lexical_search
-from atomic_io import atomic_write_json
+from atomic_io import atomic_write_json, set_aside_unreadable
 from config import config
 from model_endpoints import detect_ollama
 
 CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 200
+
+logger = logging.getLogger(__name__)
 
 _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 
@@ -68,16 +71,21 @@ class DocumentStore:
     def __init__(self, data_dir: str):
         self.path = os.path.join(data_dir, "documents.json")
 
+    def _start_again_without(self, reason: str) -> dict:
+        aside = set_aside_unreadable(self.path)
+        logger.error("documents file could not be read because %s; moved it to %s and starting empty", reason, aside)
+        return {"documents": [], "chunks": []}
+
     def _load_raw(self) -> dict:
         if not os.path.exists(self.path):
             return {"documents": [], "chunks": []}
         try:
             with open(self.path, "r", encoding="utf-8") as f:
                 raw = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            return {"documents": [], "chunks": []}
+        except json.JSONDecodeError as e:
+            return self._start_again_without(f"it is not valid JSON ({e})")
         if not isinstance(raw, dict):
-            return {"documents": [], "chunks": []}
+            return self._start_again_without(f"it holds a {type(raw).__name__}, not an object")
         return {"documents": raw.get("documents", []), "chunks": raw.get("chunks", [])}
 
     def _save_raw(self, data: dict) -> None:
