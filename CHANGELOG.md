@@ -152,6 +152,10 @@
   `mcp_servers.json` with the same key as `api_keys.json`. A file saved in plain text is
   encrypted the first time it is read; values saved by another install are left out with a
   warning naming the server and key, and kept on disk. The API still never returns them.
+- Two requests changing the same saved file at once no longer lose one of the changes: every
+  store holds a lock on its file while it reads, changes and rewrites it. Searching documents
+  or memories no longer writes back an older copy over something added meanwhile, and two
+  first uses of the encryption key no longer race to create `.key`.
 
 ## 1.1.0 - 2026-11-03
 

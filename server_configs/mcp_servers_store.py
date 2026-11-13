@@ -9,7 +9,7 @@ from dataclasses import asdict, dataclass, field
 from cryptography.fernet import InvalidToken
 
 from api_key_manager import APIKeyManager
-from atomic_io import atomic_write_json, report_unreadable_store
+from atomic_io import atomic_write_json, holds_file_lock, report_unreadable_store
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +110,7 @@ class McpServerStore:
         self.path = os.path.join(data_dir, "mcp_servers.json")
         self.cipher = APIKeyManager(data_dir)
 
+    @holds_file_lock()
     def _read_items(self) -> list:
         if not os.path.exists(self.path):
             return []
@@ -195,6 +196,7 @@ class McpServerStore:
                 return s
         return None
 
+    @holds_file_lock()
     def add(self, name: str, command: str, args: list[str], env: dict[str, str] | None = None,
             transport: str = "stdio", url: str = "", headers: dict[str, str] | None = None) -> McpServerConfig:
         items = self._read_items()
@@ -204,6 +206,7 @@ class McpServerStore:
         self._write_items(items)
         return server
 
+    @holds_file_lock()
     def set_enabled(self, server_id: str, enabled: bool) -> bool:
         items = self._read_items()
         found = False
@@ -215,6 +218,7 @@ class McpServerStore:
             self._write_items(items)
         return found
 
+    @holds_file_lock()
     def delete(self, server_id: str) -> bool:
         items = self._read_items()
         remaining = [item for item in items if not (_is_usable(item) and item["id"] == server_id)]

@@ -5,7 +5,7 @@ import os
 import uuid
 from dataclasses import asdict, dataclass, field
 
-from atomic_io import atomic_write_json, report_unreadable_store
+from atomic_io import atomic_write_json, holds_file_lock, report_unreadable_store
 
 VALID_SCHEDULES = {"once", "daily", "weekly", "cron"}
 
@@ -82,6 +82,7 @@ class TaskStore:
                 return t
         return None
 
+    @holds_file_lock()
     def add(self, task: ScheduledTask) -> ScheduledTask:
         if not task.id:
             task.id = uuid.uuid4().hex[:12]
@@ -90,6 +91,7 @@ class TaskStore:
         self._save(tasks)
         return task
 
+    @holds_file_lock()
     def update(self, task_id: str, **fields) -> bool:
         tasks = self._load()
         found = False
@@ -103,6 +105,7 @@ class TaskStore:
             self._save(tasks)
         return found
 
+    @holds_file_lock()
     def delete(self, task_id: str) -> bool:
         tasks = self._load()
         remaining = [t for t in tasks if t.id != task_id]
@@ -140,6 +143,7 @@ class TaskRunStore:
     def _save(self, runs: list[TaskRun]) -> None:
         atomic_write_json(self.path, [asdict(r) for r in runs])
 
+    @holds_file_lock()
     def add(self, run: TaskRun) -> TaskRun:
         if not run.id:
             run.id = uuid.uuid4().hex[:12]
@@ -148,6 +152,7 @@ class TaskRunStore:
         self._save(runs)
         return run
 
+    @holds_file_lock()
     def update(self, run_id: str, **fields) -> bool:
         runs = self._load()
         found = False

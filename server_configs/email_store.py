@@ -5,7 +5,7 @@ import os
 import uuid
 from dataclasses import asdict, dataclass
 
-from atomic_io import atomic_write_json, report_unreadable_store
+from atomic_io import atomic_write_json, holds_file_lock, report_unreadable_store
 
 @dataclass
 class EmailAccount:
@@ -58,6 +58,7 @@ class EmailAccountStore:
                 return a
         return None
 
+    @holds_file_lock()
     def add(self, label: str, email_address: str, imap_host: str, imap_port: int,
             smtp_host: str, smtp_port: int, username: str = "") -> EmailAccount:
         accounts = self._load()
@@ -70,6 +71,7 @@ class EmailAccountStore:
         self._save(accounts)
         return account
 
+    @holds_file_lock()
     def delete(self, account_id: str) -> bool:
         accounts = self._load()
         remaining = [a for a in accounts if a.id != account_id]
@@ -134,6 +136,7 @@ class EmailRuleStore:
                 return r
         return None
 
+    @holds_file_lock()
     def add(self, **fields) -> EmailRule:
         rules = self._load()
         if fields.get("match_field") not in VALID_MATCH_FIELDS:
@@ -145,6 +148,7 @@ class EmailRuleStore:
         self._save(rules)
         return rule
 
+    @holds_file_lock()
     def update(self, rule_id: str, **fields) -> bool:
         rules = self._load()
         found = False
@@ -158,6 +162,7 @@ class EmailRuleStore:
             self._save(rules)
         return found
 
+    @holds_file_lock()
     def delete(self, rule_id: str) -> bool:
         rules = self._load()
         remaining = [r for r in rules if r.id != rule_id]

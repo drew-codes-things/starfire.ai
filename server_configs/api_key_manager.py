@@ -5,7 +5,7 @@ import stat
 from typing import Dict
 from cryptography.fernet import Fernet, InvalidToken
 
-from atomic_io import atomic_write_json, set_aside_unreadable
+from atomic_io import atomic_write_json, holds_file_lock, set_aside_unreadable
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,7 @@ class APIKeyManager:
         self.api_keys_file = os.path.join(data_dir, "api_keys.json")
         self.key_file = os.path.join(data_dir, ".key")
 
+    @holds_file_lock("key_file")
     def get_or_create_key(self) -> bytes:
         if os.path.exists(self.key_file):
             safe_chmod(self.key_file, 0o600)
@@ -89,11 +90,13 @@ class APIKeyManager:
         atomic_write_json(self.api_keys_file, keys)
         safe_chmod(self.api_keys_file, PRIVATE_FILE_MODE)
 
+    @holds_file_lock("api_keys_file")
     def save(self, provider: str, api_key: str):
         keys = self._load_raw()
         keys[provider] = self.encrypt_api_key(api_key)
         self._write(keys)
 
+    @holds_file_lock("api_keys_file")
     def delete(self, provider: str):
         keys = self._load_raw()
         if provider not in keys:

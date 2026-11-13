@@ -6,7 +6,7 @@ import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 
-from atomic_io import atomic_write_json, report_unreadable_store
+from atomic_io import atomic_write_json, holds_file_lock, report_unreadable_store
 
 VALID_REPEATS = {"none", "daily", "weekly", "monthly", "yearly"}
 VALID_NOTE_TYPES = {"note", "checklist"}
@@ -82,6 +82,7 @@ class NoteStore:
                 return n
         return None
 
+    @holds_file_lock()
     def add(self, title: str = "", content: str = "", items: list[dict] | None = None,
              note_type: str = "note", color: str = "", label: str = "", due_date: str = "",
              repeat: str = "none", source: str = "user") -> Note:
@@ -100,6 +101,7 @@ class NoteStore:
         self._save(notes)
         return note
 
+    @holds_file_lock()
     def update(self, note_id: str, **fields) -> bool:
         notes = self._load()
         found = False
@@ -116,6 +118,7 @@ class NoteStore:
             self._save(notes)
         return found
 
+    @holds_file_lock()
     def delete(self, note_id: str) -> bool:
         notes = self._load()
         remaining = [n for n in notes if n.id != note_id]
@@ -124,12 +127,15 @@ class NoteStore:
         self._save(remaining)
         return True
 
+    @holds_file_lock()
     def set_pinned(self, note_id: str, pinned: bool) -> bool:
         return self.update(note_id, pinned=pinned)
 
+    @holds_file_lock()
     def set_archived(self, note_id: str, archived: bool) -> bool:
         return self.update(note_id, archived=archived)
 
+    @holds_file_lock()
     def toggle_item(self, note_id: str, index: int) -> bool:
         notes = self._load()
         for n in notes:
@@ -192,6 +198,7 @@ class NoteTemplateStore:
                 return t
         return None
 
+    @holds_file_lock()
     def add(self, **fields) -> NoteTemplate:
         templates = self._load()
         template = NoteTemplate(id=uuid.uuid4().hex[:12], **fields)
@@ -199,6 +206,7 @@ class NoteTemplateStore:
         self._save(templates)
         return template
 
+    @holds_file_lock()
     def delete(self, template_id: str) -> bool:
         templates = self._load()
         remaining = [t for t in templates if t.id != template_id]
