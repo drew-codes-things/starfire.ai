@@ -89,7 +89,7 @@ def test_a_plain_text_file_is_encrypted_on_first_load(tmp_path):
     assert stored_text(tmp_path) == migrated
 
 
-def test_secrets_from_another_install_are_skipped_quietly_and_kept_on_disk(tmp_path, caplog, capsys):
+def test_secrets_from_another_install_are_flagged_quietly_and_kept_on_disk(tmp_path, caplog, capsys):
     old_dir, new_dir = tmp_path / "old", tmp_path / "new"
     old_dir.mkdir()
     new_dir.mkdir()
@@ -100,7 +100,7 @@ def test_secrets_from_another_install_are_skipped_quietly_and_kept_on_disk(tmp_p
 
     with caplog.at_level(logging.WARNING, logger="mcp_servers_store"):
         [seen] = McpServerStore(str(new_dir)).list()
-    assert seen.id == server.id and seen.name == "GitHub" and seen.env == {}
+    assert seen.id == server.id and seen.name == "GitHub" and seen.env == {"GITHUB_PERSONAL_ACCESS_TOKEN": ""}
     assert "GITHUB_PERSONAL_ACCESS_TOKEN" in caplog.text and "GitHub" in caplog.text
     assert TOKEN not in caplog.text and ciphertext not in caplog.text
     printed = capsys.readouterr()
@@ -139,3 +139,43 @@ def test_the_api_never_returns_env_or_header_values(tmp_path, monkeypatch):
     assert TOKEN not in listed.text
     assert "env" not in listed.json()["servers"][0] and "headers" not in listed.json()["servers"][0]
     assert TOKEN not in stored_text(tmp_path)
+
+
+def drop_the_marker(data_dir) -> None:
+    items = stored_items(data_dir)
+    for item in items:
+        item.pop("secrets_encrypted", None)
+    write_plain_file(data_dir, items)
+
+
+def test_ciphertext_left_by_a_rollback_is_not_encrypted_a_second_time(tmp_path):
+    store = McpServerStore(str(tmp_path))
+    server = store.add(name="Remote", command="", args=[], transport="http",
+                       url="https://mcp.example.test/mcp", env={"GITHUB_PERSONAL_ACCESS_TOKEN": TOKEN},
+                       headers={"Authorization": BEARER})
+    before = stored_items(tmp_path)[0]
+    drop_the_marker(tmp_path)
+
+    reloaded = McpServerStore(str(tmp_path)).get(server.id)
+    assert reloaded.env == {"GITHUB_PERSONAL_ACCESS_TOKEN": TOKEN}
+    assert reloaded.headers == {"Authorization": BEARER}
+    after = stored_items(tmp_path)[0]
+    assert after["env"] == before["env"] and after["headers"] == before["headers"]
+
+
+def test_a_token_from_another_key_without_the_marker_is_flagged_not_passed_through(tmp_path):
+    from mcp_servers_store import has_missing_secrets
+
+    old_dir, new_dir = tmp_path / "old", tmp_path / "new"
+    old_dir.mkdir()
+    new_dir.mkdir()
+    server = McpServerStore(str(old_dir)).add(name="GitHub", command="npx", args=[],
+                                              env={"GITHUB_PERSONAL_ACCESS_TOKEN": TOKEN})
+    shutil.copy(old_dir / "mcp_servers.json", new_dir / "mcp_servers.json")
+    drop_the_marker(new_dir)
+    foreign = stored_items(new_dir)[0]["env"]["GITHUB_PERSONAL_ACCESS_TOKEN"]
+
+    seen = McpServerStore(str(new_dir)).get(server.id)
+    assert seen.env == {"GITHUB_PERSONAL_ACCESS_TOKEN": ""}
+    assert has_missing_secrets(seen)
+    assert stored_items(new_dir)[0]["env"]["GITHUB_PERSONAL_ACCESS_TOKEN"] == foreign

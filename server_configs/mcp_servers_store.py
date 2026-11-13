@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import logging
 import os
+import re
 import uuid
 from dataclasses import asdict, dataclass, field
 
@@ -16,6 +19,10 @@ logger = logging.getLogger(__name__)
 TRANSPORTS = ("stdio", "http", "sse")
 SECRET_FIELDS = ("env", "headers")
 SECRETS_ENCRYPTED = "secrets_encrypted"
+FERNET_VERSION_BYTE = 0x80
+FERNET_FIXED_BYTES = 57
+FERNET_BLOCK_BYTES = 16
+FERNET_TOKEN_TEXT = re.compile(r"[A-Za-z0-9_-]+={0,2}")
 
 @dataclass
 class McpServerConfig:
@@ -137,18 +144,22 @@ class McpServerStore:
             logger.info("encrypted the MCP server env and header values stored in %s", self.path)
         return migrated
 
+    def _encrypted_if_plain(self, value):
+        return self.cipher.encrypt_api_key(value) if _is_plain_text(value) else value
+
     def _with_encrypted_secrets(self, item: dict) -> dict:
         encrypted = dict(item, **{SECRETS_ENCRYPTED: True})
         for secret_field in SECRET_FIELDS:
             values = item.get(secret_field)
             if isinstance(values, dict):
-                encrypted[secret_field] = {key: self.cipher.encrypt_api_key(value) if isinstance(value, str) else value
-                                           for key, value in values.items()}
+                encrypted[secret_field] = {key: self._encrypted_if_plain(value) for key, value in values.items()}
         return encrypted
 
     def _decrypted_or_none(self, value) -> str | None:
         if not isinstance(value, str):
             return None
+        if not _looks_like_token(value):
+            return value
         try:
             return self.cipher.decrypt_api_key(value)
         except (InvalidToken, ValueError):
@@ -162,8 +173,8 @@ class McpServerStore:
             decrypted = self._decrypted_or_none(value)
             if decrypted is None:
                 logger.warning("could not decrypt %s %s of MCP server %s (saved by another install?), "
-                               "starting it without that value", secret_field, key, server_name)
-                continue
+                               "it needs entering again", secret_field, key, server_name)
+                decrypted = ""
             plain[key] = decrypted
         return plain
 
@@ -232,8 +243,31 @@ def _is_usable(item) -> bool:
     return isinstance(item, dict) and "id" in item and bool(item.get("command") or item.get("url"))
 
 
+def _looks_like_token(value: str) -> bool:
+    if not FERNET_TOKEN_TEXT.fullmatch(value):
+        return False
+    try:
+        raw = base64.urlsafe_b64decode(value)
+    except (binascii.Error, ValueError):
+        return False
+    is_whole_blocks = (len(raw) - FERNET_FIXED_BYTES) % FERNET_BLOCK_BYTES == 0
+    return len(raw) > FERNET_FIXED_BYTES and raw[0] == FERNET_VERSION_BYTE and is_whole_blocks
+
+
+def _is_plain_text(value) -> bool:
+    return isinstance(value, str) and value != "" and not _looks_like_token(value)
+
+
+def _secret_values(item: dict) -> list:
+    values = []
+    for secret_field in SECRET_FIELDS:
+        if isinstance(item.get(secret_field), dict):
+            values.extend(item[secret_field].values())
+    return values
+
+
 def _holds_plain_secrets(item) -> bool:
-    return isinstance(item, dict) and not item.get(SECRETS_ENCRYPTED)
+    return isinstance(item, dict) and any(_is_plain_text(value) for value in _secret_values(item))
 
 
 def without_secret_values(items: list) -> list:
