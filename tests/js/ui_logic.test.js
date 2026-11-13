@@ -281,3 +281,47 @@ test('a regenerate pick names the model and its connection, and the "Regenerate 
   assert.equal(logic.regenerateChoice(undefined), null);
   assert.equal(logic.REGENERATE_WITH, 'Regenerate with…');
 });
+
+test('arrow keys move through a menu and wrap, Home and End jump to the ends', () => {
+  assert.equal(logic.menuFocusIndex('ArrowDown', -1, 4), 0);
+  assert.equal(logic.menuFocusIndex('ArrowUp', -1, 4), 3);
+  assert.equal(logic.menuFocusIndex('ArrowDown', 1, 4), 2);
+  assert.equal(logic.menuFocusIndex('ArrowDown', 3, 4), 0);
+  assert.equal(logic.menuFocusIndex('ArrowUp', 0, 4), 3);
+  assert.equal(logic.menuFocusIndex('Home', 2, 4), 0);
+  assert.equal(logic.menuFocusIndex('End', 0, 4), 3);
+  assert.equal(logic.menuFocusIndex('Enter', 1, 4), -1);
+  assert.equal(logic.menuFocusIndex('ArrowDown', -1, 0), -1);
+  assert.equal(logic.menuFocusIndex('toString', 0, 4), -1);
+});
+
+test('the menu key handler focuses the next item, and Escape closes the menu and is used up', () => {
+  const focused = [];
+  const items = ['upload', 'knowledge', 'prompts'].map(name => ({ name, focus() { focused.push(name); } }));
+  let current = items[0];
+  let closed = 0;
+  const onKey = logic.menuKeyHandler(() => items, () => { closed += 1; }, () => current);
+  const down = keyPress('ArrowDown');
+  onKey(down);
+  assert.deepEqual(focused, ['knowledge']);
+  assert.equal(down.prevented, true);
+  current = items[1];
+  onKey(keyPress('End'));
+  onKey(keyPress('Home'));
+  assert.deepEqual(focused, ['knowledge', 'prompts', 'upload']);
+  const typed = keyPress('a');
+  onKey(typed);
+  assert.equal(typed.prevented, false);
+  const escape = keyPress('Escape');
+  onKey(escape);
+  assert.equal(closed, 1);
+  assert.equal(escape.prevented, true);
+});
+
+test('the plus menu is driven by that key handler and gives focus back to its button', () => {
+  const fs = require('node:fs');
+  const workspace = fs.readFileSync(path.join(__dirname, '..', '..', 'static', 'workspace.js'), 'utf8');
+  assert.match(workspace, /\$\('plusMenu'\)\.addEventListener\('keydown', menuKeyHandler\(plusMenuItems, closePlusMenu\)\)/);
+  assert.match(workspace, /function closePlusMenu\(\) \{[^}]*\$\('plusBtn'\)\.focus\(\);/);
+  assert.match(workspace, /if \(opening\) \{[^}]*plusMenuItems\(\)\[0\]/);
+});

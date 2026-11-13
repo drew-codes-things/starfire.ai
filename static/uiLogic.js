@@ -150,6 +150,32 @@ function regenerateChoice(option) {
   return { id: option.value, endpoint_id: option.dataset.endpointId };
 }
 
+const MENU_STEPS = { ArrowDown: 1, ArrowUp: -1 };
+
+function menuFocusIndex(key, current, count) {
+  if (!count) return -1;
+  if (key === 'Home') return 0;
+  if (key === 'End') return count - 1;
+  if (!Object.hasOwn(MENU_STEPS, key)) return -1;
+  if (current < 0) return MENU_STEPS[key] > 0 ? 0 : count - 1;
+  return (current + MENU_STEPS[key] + count) % count;
+}
+
+function menuKeyHandler(getItems, close, getFocused = () => document.activeElement) {
+  return event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      close();
+      return;
+    }
+    const items = getItems();
+    const next = menuFocusIndex(event.key, items.indexOf(getFocused()), items.length);
+    if (next < 0) return;
+    event.preventDefault();
+    items[next].focus();
+  };
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     DAY_MS, TOAST_MS, TOAST_ERROR_MS, TOAST_FADE_MS,
@@ -158,5 +184,6 @@ if (typeof module !== 'undefined' && module.exports) {
     CHAT_TITLE_CHARS, submitOnEnter, closeOnEscape, chatTitleFrom, firstUnusedModel,
     MAX_SPOKEN_CHARS, takeSpokenSentences, speakableText, spokenPieces,
     REGENERATE_WITH, regenerateChoice,
+    menuFocusIndex, menuKeyHandler,
   };
 }

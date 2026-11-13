@@ -70,6 +70,7 @@ function closeAllMenus(except) {
   });
   $('modelPickerBtn').setAttribute('aria-expanded', String(!$('modelMenu').hidden));
   $('accountMenuBtn').setAttribute('aria-expanded', String(!$('accountMenu').hidden));
+  $('plusBtn').setAttribute('aria-expanded', String(!$('plusMenu').hidden));
 }
 
 document.addEventListener('click', e => {
@@ -1057,6 +1058,17 @@ function refreshActiveTools() {
 
 TOOL_TOGGLES.forEach(([id]) => { const el = $(id); if (el) el.addEventListener('change', refreshActiveTools); });
 
+function plusMenuItems() {
+  return [...$('plusMenu').querySelectorAll('[role="menuitem"], #plusMenuTools input')]
+    .filter(item => item.getClientRects().length);
+}
+
+function closePlusMenu() {
+  $('plusMenu').hidden = true;
+  $('plusBtn').setAttribute('aria-expanded', 'false');
+  $('plusBtn').focus();
+}
+
 $('plusBtn').onclick = e => {
   e.stopPropagation();
   const menu = $('plusMenu');
@@ -1064,12 +1076,17 @@ $('plusBtn').onclick = e => {
   closeAllMenus();
   if (opening) renderPlusMenuTools();
   menu.hidden = !opening;
+  $('plusBtn').setAttribute('aria-expanded', String(opening));
+  if (opening) { const first = plusMenuItems()[0]; if (first) first.focus(); }
 };
+
+$('plusMenu').addEventListener('keydown', menuKeyHandler(plusMenuItems, closePlusMenu));
 
 $('plusMenu').addEventListener('click', e => {
   const act = e.target.closest('[data-act]');
   if (!act) return;
   $('plusMenu').hidden = true;
+  $('plusBtn').setAttribute('aria-expanded', 'false');
   if (act.dataset.act === 'upload') $('attachFileInput').click();
   else if (act.dataset.act === 'knowledge') insertTrigger('#');
   else if (act.dataset.act === 'prompts') insertTrigger('/');
