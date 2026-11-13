@@ -222,6 +222,8 @@ a { color: inherit; }
 }
 .icon-btn:hover:not(:disabled) { background: var(--hover); color: var(--text); }
 .icon-btn.active { background: var(--accent-tint); color: var(--accent-text); }
+#setDefaultModelBtn.active { background: transparent; color: var(--text); }
+#setDefaultModelBtn.active:hover { background: var(--hover); }
 .icon-btn.small { width: var(--control-h-sm); height: var(--control-h-sm); }
 .icon-btn.small .icon { width: 16px; height: 16px; }
 

@@ -213,3 +213,16 @@ def test_the_phone_arty_cli_live_view_drops_the_brand_and_fills_the_screen():
     phone = PHONE_BLOCK.search(read("style.css")).group(1)
     assert ".arty-cli-live .login-brand, .arty-cli-live .arty-back { display: none; }" in phone
     assert "body.login-page:has(.arty-cli-live) { padding: 0; }" in phone
+
+
+def css_rule(selector: str, css: str | None = None) -> str:
+    match = re.search(rf"^{re.escape(selector)} \{{(.*?)\}}", css if css is not None else read("style.css"), re.S | re.M)
+    assert match, f"style.css has no rule for {selector}"
+    return match.group(1)
+
+
+def test_the_default_model_star_is_a_quiet_filled_star_not_a_red_disc():
+    star = css_rule("#setDefaultModelBtn.active")
+    assert "background: transparent;" in star
+    assert "color: var(--text);" in star
+    assert "accent" not in star
