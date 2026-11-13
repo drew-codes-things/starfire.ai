@@ -262,6 +262,7 @@ def test_mcp_server_add_validates_remote_urls(client, monkeypatch):
         return [{"name": "ping", "description": "", "input_schema": {}}]
 
     monkeypatch.setattr(routes.mcp_manager, "connect_server", fake_connect)
+    monkeypatch.setattr(routes, "_current_user_is_active_admin", lambda: True)
     bad = client.post("/api/mcp/servers", json={"transport": "http", "url": "localhost:3001"})
     assert bad.status_code == 400
     assert client.post("/api/mcp/servers", json={"transport": "carrier-pigeon", "url": "http://x"}).status_code == 400

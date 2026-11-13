@@ -7,6 +7,7 @@ import re
 import tempfile
 import zipfile
 from typing import Annotated
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import APIRouter, HTTPException, UploadFile
@@ -300,14 +301,21 @@ async def list_mcp_repository():
         for rid, p in MCP_SERVER_REPOSITORY.items()
     ]}
 
+def _site_of(url: str) -> str:
+    parts = urlsplit(url)
+    return f"{parts.scheme}://{parts.hostname}" if parts.scheme and parts.hostname else ""
+
+def _mcp_server_view(server, full: bool) -> dict:
+    return {"id": server.id, "name": server.name, "enabled": server.enabled, "transport": server.transport,
+            "command": server.command if full else "", "args": server.args if full else [],
+            "url": server.url if full else _site_of(server.url),
+            "connected": mcp_manager.is_connected(server.id), "tool_count": len(mcp_manager.list_tools(server.id))}
+
 @router.get("/mcp/servers")
 async def list_mcp_servers():
-    return {"servers": [
-        {"id": s.id, "name": s.name, "command": s.command, "args": s.args, "enabled": s.enabled,
-         "transport": s.transport, "url": s.url,
-         "connected": mcp_manager.is_connected(s.id), "tool_count": len(mcp_manager.list_tools(s.id))}
-        for s in mcp_servers.list()
-    ], "presets": [{"id": pid, **{k: v for k, v in p.items() if k != "args"}} for pid, p in REFERENCE_SERVERS.items()]}
+    full = _current_user_is_active_admin()
+    return {"servers": [_mcp_server_view(s, full) for s in mcp_servers.list()],
+            "presets": [{"id": pid, **{k: v for k, v in p.items() if k != "args"}} for pid, p in REFERENCE_SERVERS.items()]}
 
 @router.post("/mcp/servers")
 async def add_mcp_server(body: AddMcpServerBody):

@@ -132,3 +132,29 @@ def test_per_user_proxy_requires_a_signed_in_user(tmp_path):
     user_data.configure(str(tmp_path))
     with pytest.raises(user_data.NoUserContext):
         user_data.PerUser("notes").list()
+
+
+def test_users_see_mcp_servers_without_their_commands_arguments_or_full_addresses(app, admin, tmp_path, monkeypatch):
+    from mcp_servers_store import McpServerStore
+
+    monkeypatch.setattr(routes, "mcp_servers", McpServerStore(str(tmp_path)))
+    routes.mcp_servers.add(name="local", command="npx", args=["some-server", "--api-key", "PLACEHOLDER-TOKEN"])
+    routes.mcp_servers.add(name="remote", command="", args=[], transport="http",
+                           url="https://mcp.example.com/sse?token=PLACEHOLDER-TOKEN")
+    admin.post("/api/auth/users", json={"email": "sam@example.com", "password": PASSWORD})
+    sam = login(app, "sam@example.com")
+    seen = sam.get("/api/mcp/servers")
+    assert seen.status_code == 200
+    assert "PLACEHOLDER-TOKEN" not in seen.text
+    by_name = {server["name"]: server for server in seen.json()["servers"]}
+    assert by_name["local"]["args"] == [] and by_name["local"]["command"] == ""
+    assert by_name["remote"]["url"] == "https://mcp.example.com"
+    assert "PLACEHOLDER-TOKEN" in admin.get("/api/mcp/servers").text
+
+
+def test_users_cannot_scan_the_network_or_read_the_hardware(app, admin):
+    admin.post("/api/auth/users", json={"email": "sam@example.com", "password": PASSWORD})
+    sam = login(app, "sam@example.com")
+    assert sam.get("/api/discover").status_code == 403
+    assert sam.get("/api/hardware").status_code == 403
+    assert sam.get("/api/hardware/ollama").status_code == 403
