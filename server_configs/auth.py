@@ -27,6 +27,7 @@ ACCOUNT_MAX_FAILED_LOGINS = 20
 ACCOUNT_LOCKOUT_SECONDS = 60 * 60
 KNOWN_ADDRESS_SECONDS = 90 * 24 * 3600
 MAX_KNOWN_ADDRESSES = 20
+MAX_LIMITER_KEYS = 10_000
 LOGIN_PAGE = "/login.html"
 SETUP_PAGE = "/setup.html"
 PUBLIC_PATHS = frozenset({LOGIN_PAGE, "/login.js", "/loginNext.js", "/style.css", "/vendor/fonts.css", "/api/auth/login",
@@ -306,9 +307,11 @@ class SessionStore:
 
 class LoginLimiter:
 
-    def __init__(self, max_failures: int = MAX_FAILED_LOGINS, lockout_seconds: int = LOCKOUT_SECONDS):
+    def __init__(self, max_failures: int = MAX_FAILED_LOGINS, lockout_seconds: int = LOCKOUT_SECONDS,
+                 max_keys: int = MAX_LIMITER_KEYS):
         self.max_failures = max_failures
         self.lockout_seconds = lockout_seconds
+        self.max_keys = max_keys
         self._failures: dict[str, list[float]] = {}
         self._lock = threading.Lock()
 
@@ -326,7 +329,20 @@ class LoginLimiter:
     def record_failure(self, key: str) -> None:
         now = time.time()
         with self._lock:
-            self._failures[key] = self._recent(key, now) + [now]
+            recent = self._recent(key, now) + [now]
+            self._forget_expired(now)
+            self._make_room_for(key)
+            self._failures[key] = recent
+
+    def _forget_expired(self, now: float) -> None:
+        self._failures = {key: times for key, times in self._failures.items()
+                          if times and now - times[-1] < self.lockout_seconds}
+
+    def _make_room_for(self, key: str) -> None:
+        self._failures.pop(key, None)
+        while len(self._failures) >= self.max_keys:
+            stalest = min(self._failures, key=lambda tracked: self._failures[tracked][-1])
+            del self._failures[stalest]
 
     def reset(self, key: str) -> None:
         with self._lock:

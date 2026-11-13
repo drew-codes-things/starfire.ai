@@ -453,3 +453,26 @@ def test_only_the_most_recent_known_addresses_are_kept(tmp_path, monkeypatch):
         known.remember("drew@example.com", f"198.51.100.{index}")
     assert not known.is_known("drew@example.com", "198.51.100.0")
     assert known.is_known("drew@example.com", f"198.51.100.{auth.MAX_KNOWN_ADDRESSES + 4}")
+
+
+def test_the_limiter_forgets_failures_once_their_lockout_window_has_passed(monkeypatch):
+    limiter = LoginLimiter(max_failures=3, lockout_seconds=60)
+    clock = [1_000_000.0]
+    monkeypatch.setattr(auth.time, "time", lambda: clock[0])
+    for index in range(300):
+        limiter.record_failure(f"203.0.113.1|n{index}@example.com")
+    clock[0] += 61
+    limiter.record_failure("203.0.113.1|drew@example.com")
+    assert len(limiter._failures) == 1
+
+
+def test_the_limiter_keeps_the_newest_keys_when_it_is_full(monkeypatch):
+    limiter = LoginLimiter(max_failures=1, lockout_seconds=60, max_keys=3)
+    clock = [1_000_000.0]
+    monkeypatch.setattr(auth.time, "time", lambda: clock[0])
+    for index in range(5):
+        clock[0] += 1
+        limiter.record_failure(f"key-{index}")
+    assert len(limiter._failures) == 3
+    assert limiter.seconds_locked("key-4") > 0
+    assert limiter.seconds_locked("key-0") == 0
