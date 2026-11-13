@@ -324,7 +324,8 @@ The thresholds are two constants at the top of `server_configs/model_capabilitie
 
 Settings → Memory is a persistent fact store - "user prefers dark mode", "user's dog is named
 Rex" - that survives across chats. Add facts manually there, or just type `remember: ...` in
-the chat (handled instantly, without calling the model at all). Enable "Remember & recall
+the chat (handled instantly, without calling the model at all; the colon is required, and
+temporary and side chats send it to the model like any other message). Enable "Remember & recall
 facts" in Settings → Tools to let the model itself list, add, edit, delete, or search your
 memory during a conversation. Search is keyword/token overlap by default - fast,
 dependency-free, no setup - **optionally blended with semantic similarity** when a local Ollama

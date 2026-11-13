@@ -92,7 +92,7 @@ def _tool_context(base_url: str = "", api_key: str | None = None, model: str = "
         events=asyncio.Queue() if interactive else None,
     )
 
-_INLINE_MEMORY_RE = re.compile(r"^(?:remember|memorize|save|note|store)[:\-]?\s+(.+)$", re.IGNORECASE)
+_INLINE_MEMORY_RE = re.compile(r"^remember\s*:\s*(.+)$", re.IGNORECASE)
 
 def _api_key_for(endpoint_id: str, provider: str) -> str | None:
     keys = api_keys.load()
@@ -926,6 +926,17 @@ class ChatBody(BaseModel):
     enabled_builtin_tools: list[str] = []
     require_edit_approval: bool = False
     require_shell_approval: bool = True
+    memory_commands: bool = False
+
+def _remember_command_text(body: ChatBody) -> str | None:
+    if not body.memory_commands or not body.messages:
+        return None
+    last = body.messages[-1]
+    content = last.get("content")
+    if last.get("role") != "user" or not isinstance(content, str):
+        return None
+    match = _INLINE_MEMORY_RE.match(content.strip())
+    return match.group(1).strip() if match else None
 
 async def _track_usage(gen, provider: str, model: str, input_text: str):
     output_parts: list[str] = []
@@ -947,14 +958,11 @@ async def _synthetic_reply(text: str):
 
 @router.post("/chat_stream")
 async def chat_stream_endpoint(body: ChatBody):
-    if body.messages:
-        last = body.messages[-1]
-        if last.get("role") == "user":
-            m = _INLINE_MEMORY_RE.match((last.get("content") or "").strip())
-            if m:
-                entry = memory.add(m.group(1).strip(), source="inline_command")
-                return StreamingResponse(_synthetic_reply(f"Saved to memory: “{entry.text}”"),
-                                          media_type="text/event-stream")
+    remembered = _remember_command_text(body)
+    if remembered:
+        entry = memory.add(remembered, source="inline_command")
+        return StreamingResponse(_synthetic_reply(f"Saved to memory: “{entry.text}”"),
+                                 media_type="text/event-stream")
 
     endpoint = endpoints.get(body.endpoint_id)
     if not endpoint:

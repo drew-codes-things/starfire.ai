@@ -1403,6 +1403,7 @@ async function send(text, overrideModel, extra = {}) {
         enabled_builtin_tools: modelHasOwnTools(model) ? [] : [...enabledBuiltinTools],
         require_edit_approval: requireEditApproval,
         require_shell_approval: requireShellApproval,
+        memory_commands: !isTemporaryChat(),
       }),
     });
 

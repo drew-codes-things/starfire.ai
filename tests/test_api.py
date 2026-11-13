@@ -361,3 +361,57 @@ def test_a_task_the_model_creates_in_a_chat_runs_on_that_chat_endpoint(client, m
     run = routes._task_chat_fn(task.endpoint_id, task.model, task.prompt, task.enabled_mcp_servers,
                                task.enabled_builtin_tools)
     assert asyncio.run(run) == "Here is the summary."
+
+
+@pytest.fixture
+def model_inbox(client, monkeypatch):
+    from types import SimpleNamespace
+
+    endpoint = SimpleNamespace(id="ep1", base_url="http://model", provider="openai", label="Model", kind="api")
+    monkeypatch.setattr(routes, "endpoints", SimpleNamespace(get=lambda endpoint_id: endpoint if endpoint_id == "ep1" else None))
+    monkeypatch.setattr(routes, "api_keys", SimpleNamespace(load=lambda: {}))
+    monkeypatch.setattr(routes, "usage", SimpleNamespace(record=lambda *args: None))
+    received = []
+
+    async def fake_stream(base_url, api_key, model, messages, *args, **kwargs):
+        received.append(messages[-1]["content"])
+        yield b'data: {"delta": "ok"}\n\n'
+
+    monkeypatch.setattr(routes, "stream_chat", fake_stream)
+    return received
+
+
+def send(client, text, **extra):
+    return client.post("/api/chat_stream", json={
+        "endpoint_id": "ep1", "model": "m", "messages": [{"role": "user", "content": text}], **extra})
+
+
+@pytest.mark.parametrize("text", [
+    "Save the file as CSV instead of JSON",
+    "Note that the function returns null. Why?",
+    "remember when we fixed the login bug? do that again",
+    "Store manager wants a refund letter, write one",
+    "Please remember: my dog is Rex",
+    "remember - the meeting moved",
+    "memorize: the capital of France",
+])
+def test_ordinary_messages_reach_the_model_and_are_not_saved(client, model_inbox, text):
+    response = send(client, text, memory_commands=True)
+    assert response.status_code == 200
+    assert model_inbox == [text]
+    assert routes.memory.list() == []
+
+
+def test_remember_with_a_colon_is_saved_without_calling_the_model(client, model_inbox):
+    response = send(client, "Remember:  my dog is Rex ", memory_commands=True)
+    assert "Saved to memory" in response.text
+    assert model_inbox == []
+    assert [entry.text for entry in routes.memory.list()] == ["my dog is Rex"]
+
+
+@pytest.mark.parametrize("extra", [{}, {"memory_commands": False}])
+def test_temporary_side_and_other_chats_never_save_a_memory(client, model_inbox, extra):
+    response = send(client, "remember: my dog is Rex", **extra)
+    assert response.status_code == 200
+    assert model_inbox == ["remember: my dog is Rex"]
+    assert routes.memory.list() == []

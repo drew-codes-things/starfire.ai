@@ -49,3 +49,9 @@ def test_archiving_or_deleting_the_chat_behind_a_side_chat_closes_both():
     assert "if (archived && isChatOpen(session.id)) clearChat();" in workspace
     assert "if (isChatOpen(session.id)) clearChat();" in workspace
     assert "sessionId === sideChat.mainSessionId" in read("app.js")
+
+
+def test_only_the_main_chat_asks_for_remember_commands():
+    app = read("app.js")
+    assert app.count("memory_commands:") == 1
+    assert "memory_commands: !isTemporaryChat()," in app
