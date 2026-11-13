@@ -40,13 +40,14 @@ def topic_vector(text):
 
 @pytest.fixture
 def ollama(monkeypatch):
-    state = {"reachable": True, "embedding_model": True, "embedded": []}
+    state = {"reachable": True, "embedding_model": True, "embedded": [], "asked": 0}
 
     async def detect(_override):
         return OLLAMA if state["reachable"] else None
 
     def handle(request):
         prompt = json.loads(request.content)["prompt"]
+        state["asked"] += 1
         if not state["embedding_model"]:
             return httpx.Response(404, json={"error": "model 'nomic-embed-text' not found, try pulling it first"})
         state["embedded"].append(prompt)
@@ -173,3 +174,17 @@ def test_the_model_hears_there_is_nothing_relevant_when_the_embedding_model_is_m
     ollama["embedding_model"] = False
     result = asyncio.run(builtin_tools._search_documents({"query": "quantum chromodynamics"}, store))
     assert result == "no matching passages found"
+
+
+def test_a_search_without_an_embedding_model_asks_ollama_once(tmp_path, ollama):
+    ollama["embedding_model"] = False
+    (tmp_path / "memory").mkdir()
+    (tmp_path / "documents").mkdir()
+    memory = memories(tmp_path / "memory")
+    asyncio.run(memory.relevant("bakery"))
+    assert ollama["asked"] == 1
+    documents = knowledge(tmp_path / "documents")
+    for name in ("a.txt", "b.txt", "c.txt"):
+        documents.add(name, f"Notes kept in {name} about the harbour.".encode())
+    asyncio.run(documents.search("harbour"))
+    assert ollama["asked"] == 2
