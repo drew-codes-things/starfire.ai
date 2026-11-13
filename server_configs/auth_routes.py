@@ -2,13 +2,14 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from auth import (MAX_FIELD_CHARS, SESSION_COOKIE, SESSION_LIFETIME_SECONDS, AccountError, LoginLimiter, SessionStore,
-                  UserStore, client_address, current_user, normalise_email, require_admin)
+                  UserStore, client_address, current_user, normalise_email, parse_networks, require_admin)
 from config import config
 
 router = APIRouter(prefix="/api/auth")
 users = UserStore(config.data_dir)
 sessions = SessionStore(config.data_dir)
 limiter = LoginLimiter()
+TRUSTED_PROXIES = parse_networks(config.trusted_proxies)
 
 MAX_FIELD_LENGTH = MAX_FIELD_CHARS
 
@@ -70,7 +71,7 @@ def _start_session(response: Response, user_id: str) -> None:
 def login(body: LoginRequest, request: Request, response: Response):
     if len(body.email) > MAX_FIELD_LENGTH or len(body.password) > MAX_FIELD_LENGTH:
         raise HTTPException(status_code=400, detail="email or password is too long")
-    limit_key = f"{client_address(request)}|{normalise_email(body.email)}"
+    limit_key = f"{client_address(request, TRUSTED_PROXIES, config.client_ip_header)}|{normalise_email(body.email)}"
     wait = limiter.seconds_locked(limit_key)
     if wait:
         raise HTTPException(status_code=429, detail=f"too many attempts - try again in {wait // 60 + 1} min")

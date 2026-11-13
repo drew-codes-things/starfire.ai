@@ -1,3 +1,4 @@
+import ipaddress
 import os
 import stat
 import sys
@@ -318,3 +319,66 @@ def test_new_passwords_must_fit_in_what_bcrypt_reads():
     with pytest.raises(auth.AccountError, match="too long"):
         auth.check_new_password("é" * 40, "é" * 40)
     auth.check_new_password("x" * 72, "x" * 72)
+
+
+TUNNEL = "192.168.1.10"
+BEHIND_TUNNEL = tuple(ipaddress.ip_network(n) for n in ("127.0.0.1", "::1", TUNNEL))
+
+
+def proxied_request(peer, forwarded="", real=""):
+    headers = []
+    if forwarded:
+        headers.append((b"x-forwarded-for", forwarded.encode()))
+    if real:
+        headers.append((b"cf-connecting-ip", real.encode()))
+    return Request({"type": "http", "client": (peer, 1234), "headers": headers})
+
+
+def test_a_visitor_through_the_tunnel_is_known_by_the_address_cloudflare_saw():
+    request = proxied_request("127.0.0.1", TUNNEL, "203.0.113.9")
+    assert auth.client_address(request, BEHIND_TUNNEL) == "203.0.113.9"
+
+
+def test_a_lan_client_cannot_pick_its_address_with_the_cloudflare_header():
+    request = proxied_request("127.0.0.1", "192.168.1.50", "203.0.113.9")
+    assert auth.client_address(request, BEHIND_TUNNEL) == "192.168.1.50"
+
+
+def test_a_peer_that_is_not_a_trusted_proxy_is_used_as_it_is():
+    request = proxied_request("192.168.1.77", TUNNEL, "203.0.113.9")
+    assert auth.client_address(request, BEHIND_TUNNEL) == "192.168.1.77"
+
+
+def test_a_tunnel_request_without_a_usable_cloudflare_header_counts_as_the_tunnel():
+    assert auth.client_address(proxied_request("127.0.0.1", TUNNEL, "not-an-address"), BEHIND_TUNNEL) == TUNNEL
+    assert auth.client_address(proxied_request("127.0.0.1", TUNNEL), BEHIND_TUNNEL) == TUNNEL
+
+
+def test_a_proxy_chain_that_already_names_the_visitor_is_followed_past_trusted_hops():
+    request = proxied_request("127.0.0.1", f"6.6.6.6, 203.0.113.9, {TUNNEL}", "198.51.100.1")
+    assert auth.client_address(request, BEHIND_TUNNEL) == "203.0.113.9"
+
+
+def test_the_cloudflare_header_is_ignored_unless_the_tunnel_is_trusted():
+    request = proxied_request("127.0.0.1", TUNNEL, "203.0.113.9")
+    assert auth.client_address(request) == TUNNEL
+
+
+def test_trusted_proxies_must_be_addresses_or_networks():
+    assert auth.parse_networks(" 127.0.0.1 , 10.0.0.0/8,,::1 ") == tuple(
+        ipaddress.ip_network(n) for n in ("127.0.0.1/32", "10.0.0.0/8", "::1/128"))
+    with pytest.raises(ValueError, match="cloudflared"):
+        auth.parse_networks("127.0.0.1,cloudflared")
+
+
+def test_a_stranger_through_the_tunnel_cannot_lock_the_owner_out(login_client, monkeypatch):
+    import auth_routes
+    monkeypatch.setattr(auth_routes, "TRUSTED_PROXIES", BEHIND_TUNNEL, raising=False)
+    owner = TestClient(login_client.app, base_url="https://testserver", client=("127.0.0.1", 50001))
+    stranger = TestClient(login_client.app, base_url="https://testserver", client=("127.0.0.1", 50002))
+    wrong = {"email": "drew@example.com", "password": "nope"}
+    for _ in range(3):
+        stranger.post("/api/auth/login", json=wrong, headers={"X-Forwarded-For": TUNNEL, "CF-Connecting-IP": "203.0.113.66"})
+    right = {"email": "drew@example.com", "password": PASSWORD}
+    response = owner.post("/api/auth/login", json=right, headers={"X-Forwarded-For": TUNNEL, "CF-Connecting-IP": "198.51.100.7"})
+    assert response.status_code == 200

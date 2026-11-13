@@ -329,21 +329,51 @@ class LoginLimiter:
             self._failures.pop(key, None)
 
 
-def is_loopback(host: str) -> bool:
-    if host == "localhost":
-        return True
+def parse_networks(text: str) -> tuple:
+    networks = []
+    for item in text.split(","):
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            networks.append(ipaddress.ip_network(item, strict=False))
+        except ValueError as error:
+            raise ValueError(f"TRUSTED_PROXIES must list addresses or networks, not {item!r}") from error
+    return tuple(networks)
+
+
+LOOPBACK_PROXIES = parse_networks("127.0.0.1,::1")
+REAL_ADDRESS_HEADER = "cf-connecting-ip"
+
+
+def _parsed_address(text: str):
     try:
-        return ipaddress.ip_address(host).is_loopback
+        return ipaddress.ip_address(text.strip())
     except ValueError:
-        return False
+        return None
 
 
-def client_address(request: Request) -> str:
+def _is_trusted(address, trusted: tuple) -> bool:
+    return address is not None and any(address in network for network in trusted)
+
+
+def client_address(request: Request, trusted: tuple = LOOPBACK_PROXIES,
+                   real_address_header: str = REAL_ADDRESS_HEADER) -> str:
     peer = request.client.host if request.client else ""
-    forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded and is_loopback(peer):
-        return forwarded.split(",")[-1].strip()
-    return peer
+    hop = _parsed_address(peer)
+    if not _is_trusted(hop, trusted):
+        return peer
+    nearest = str(hop)
+    forwarded = [entry for entry in request.headers.get("x-forwarded-for", "").split(",") if entry.strip()]
+    for entry in reversed(forwarded):
+        hop = _parsed_address(entry)
+        if hop is None:
+            return nearest
+        nearest = str(hop)
+        if not _is_trusted(hop, trusted):
+            return nearest
+    real = _parsed_address(request.headers.get(real_address_header, ""))
+    return str(real) if real is not None else nearest
 
 
 def is_public(path: str) -> bool:

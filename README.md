@@ -526,6 +526,8 @@ rather use that instead)
 | `INLINE_MEDIA_PREFIXES` | `/arty-files/` | Comma-separated path prefixes whose image and video links render inline in replies; links to another host with one of these paths load through this server instead |
 | `MODEL_VOICES` | (empty) | Comma-separated `pattern=voice.onnx@speed` rules giving models a server voice (Piper, `*` wildcards, speed 0.5 to 2, default 1). With read-aloud or a voice call on, a matching model's reply is spoken sentence by sentence while it streams, instead of by the browser at the end |
 | `MODEL_VOICES_DIR` | `<DATA_DIR>/voices` | Folder holding the `.onnx` voices (and their `.onnx.json`) named in `MODEL_VOICES` |
+| `TRUSTED_PROXIES` | `127.0.0.1,::1` | Comma-separated addresses or networks of proxies in front of starfire. The login lockout follows `X-Forwarded-For` back through these hops to the visitor; when every hop is trusted (a Cloudflare tunnel's `cloudflared` included), the visitor's address is read from `CLIENT_IP_HEADER`. List only machines that set those headers themselves |
+| `CLIENT_IP_HEADER` | `CF-Connecting-IP` | Header holding the visitor's address, read only when the request came through trusted proxies alone |
 
 Hosted-provider API keys are **not** set via environment variables - add them through the
 Settings UI so they're encrypted at rest rather than sitting in plaintext in `.env`.

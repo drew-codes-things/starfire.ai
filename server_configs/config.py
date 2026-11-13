@@ -20,6 +20,8 @@ class AppConfig(BaseSettings):
     arty_access_client_secret: str = ""
     model_voices: str = ""
     model_voices_dir: str = ""
+    trusted_proxies: str = "127.0.0.1,::1"
+    client_ip_header: str = "CF-Connecting-IP"
 
     def own_tools_patterns(self) -> list[str]:
         return [p.strip() for p in self.own_tools_models.split(",") if p.strip()]
