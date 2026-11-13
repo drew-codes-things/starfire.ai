@@ -36,6 +36,9 @@ async def generate(text: str, voice_model_path: str) -> bytes:
         with open(out_path, "rb") as f:
             return f.read()
     except asyncio.TimeoutError as e:
+        if proc.returncode is None:
+            proc.kill()
+        await proc.wait()
         raise RuntimeError(f"piper timed out after {TIMEOUT:.0f}s") from e
     finally:
         discard_temp_file(out_path)

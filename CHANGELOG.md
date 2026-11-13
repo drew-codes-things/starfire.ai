@@ -79,10 +79,21 @@
   `settingsNotes.js`, `settingsSystem.js`, `compare.js` and `palette.js`. `app.js` keeps the
   keyboard and focus handling, the microphone, the theme and startup. Nothing a user sees
   changes.
+- `static/workspace.js` (1,553 lines) is split the same way into eleven scripts that load
+  after `app.js`: `workspaceCore.js`, `sidebar.js`, `sidebarMenus.js`, `chatManagement.js`,
+  `prompts.js`, `modelPicker.js`, `chatControls.js`, `composerTools.js`, `attachments.js`,
+  `composerPopup.js` and `voiceCall.js`. `workspace.js` keeps the scroll button, the keyboard
+  shortcuts, the account menu, the shortcuts sheet and startup. Nothing a user sees changes.
 - More server tests (394 to 628): one account reaching another's items by id, admin-only
   routes, backup restore with unsafe paths, API key storage and which endpoint gets which key,
   edit and shell approvals, scheduled tasks, email rules, the model's built-in tools and chat
   provider routing. Server line coverage goes from 64% to 78%. Nothing a user sees changes.
+- More server tests (689 to 803) on the parts that were still thin: the model's tool loop
+  (tool errors, model errors, stopped and cancelled replies), semantic search with and without
+  an embedding model, finding Ollama and local model servers, picture, speech, video and
+  document generation through ComfyUI, OpenAI and Piper, the hardware page on Linux, macOS and
+  Windows, and IMAP and SMTP email, all against fakes. Server line coverage goes from 79% to
+  89%. Four bugs they found are listed under Fixed.
 
 ### Fixed
 - Errors the server used to swallow in silence are now logged with what failed: a store file
@@ -161,6 +172,21 @@
   Account records keep their bcrypt hashes so people can still log in. Restoring keeps this
   install's own keys and sessions, also from an older zip that still holds them, and Settings
   marks email accounts and MCP servers whose password or token must be entered again.
+- Documents the model makes as PDF are made again: any PDF with more than one line failed with
+  "not enough horizontal space" (each line started at the right edge of the one before), and a
+  heading with a character outside Latin-1 (an emoji, a tick) failed too; such characters now
+  print as "?" in headings as they already did in body text.
+- With Ollama running but no embedding model pulled (or embeddings failing), searching memory
+  or knowledge gives exactly the keyword results, as the README promises, instead of every
+  memory or document ranked by nothing: a question about something you never saved no longer
+  pulls unrelated memories and passages into the chat.
+- Sending email no longer reports a failure when the mail server hangs up at the very end: a
+  message the server had accepted was shown as not sent (so it could be sent twice), and a
+  wrong password could show up as "Connection unexpectedly closed" instead of the server's
+  reason.
+- A command that hangs past its time limit is stopped instead of left running: a stuck
+  `nvidia-smi`, `lscpu`, `dmidecode` or PowerShell query behind the hardware page (one more each
+  time the page opened, now logged as a warning), and a stuck Piper voice.
 
 ## 1.1.0 - 2026-11-03
 

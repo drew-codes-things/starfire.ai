@@ -6,7 +6,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATIC = os.path.join(ROOT, "static")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from test_static_ui import APP_JS_PARTS, read_app
+from test_static_ui import APP_JS_PARTS, read_app, read_workspace
 
 
 def read(name: str) -> str:
@@ -34,7 +34,7 @@ def test_replies_in_a_side_chat_see_the_main_chat():
 
 
 def test_side_chats_are_never_saved():
-    workspace = read("workspace.js")
+    workspace = read_workspace()
     assert re.search(r"function isTemporaryChat\(\) \{ return tempChatToggle\.checked \|\| isSideChatOpen\(\); \}", workspace)
     fork = re.search(r"async function forkSession\(uptoIdx, textBeingSent\) \{(.*?)\n\}", read_app(), re.S)
     assert fork and "isTemporaryChat()" in fork.group(1), "forkSession saves temporary and side chats"
@@ -42,14 +42,14 @@ def test_side_chats_are_never_saved():
 
 def test_the_composer_and_palette_open_side_chats():
     app = read_app()
-    workspace = read("workspace.js")
+    workspace = read_workspace()
     assert "parseSideChatCommand(" in app
     assert "'Toggle side chat'" in app
     assert "sideChatCommandsMatching(" in workspace
 
 
 def test_archiving_or_deleting_the_chat_behind_a_side_chat_closes_both():
-    workspace = read("workspace.js")
+    workspace = read_workspace()
     assert "if (archived && isChatOpen(session.id)) clearChat();" in workspace
     assert "if (isChatOpen(session.id)) clearChat();" in workspace
     assert "sessionId === sideChat.mainSessionId" in read_app()

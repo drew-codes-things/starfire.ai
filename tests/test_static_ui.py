@@ -11,7 +11,10 @@ PAGES = ["index.html", "login.html", "setup.html"]
 APP_JS_PARTS = ["appState.js", "chatMessages.js", "codeBlocks.js", "chatCards.js", "chatSend.js", "helperTasks.js",
                 "settings.js", "settingsMemoryTasks.js", "settingsEmail.js", "settingsNotes.js", "settingsSystem.js",
                 "compare.js", "palette.js", "app.js"]
-APP_SCRIPTS = [*APP_JS_PARTS, "workspace.js", "uiLogic.js", "login.js", "setup.js"]
+WORKSPACE_JS_PARTS = ["workspaceCore.js", "sidebar.js", "sidebarMenus.js", "chatManagement.js", "prompts.js",
+                      "modelPicker.js", "chatControls.js", "composerTools.js", "attachments.js", "composerPopup.js",
+                      "voiceCall.js", "workspace.js"]
+APP_SCRIPTS = [*APP_JS_PARTS, *WORKSPACE_JS_PARTS, "uiLogic.js", "login.js", "setup.js"]
 IDS_BUILT_BY_SCRIPTS = {"emailAiResult", "emailReplyBox", "ollamaStartBtn", "ollamaStartMsg", "welcomeConnectBtn"}
 UNLABELLED_TYPES = {"hidden"}
 HEX_COLOUR = re.compile(r"#[0-9a-fA-F]{3,8}\b")
@@ -30,6 +33,10 @@ def read(name: str) -> str:
 
 def read_app() -> str:
     return "".join(read(name) for name in APP_JS_PARTS)
+
+
+def read_workspace() -> str:
+    return "".join(read(name) for name in WORKSPACE_JS_PARTS)
 
 
 class Page(HTMLParser):
@@ -111,9 +118,16 @@ def test_the_chat_page_loads_the_app_parts_in_order_with_app_js_last():
     assert scripts.index("sideChat.js") < first < scripts.index("workspace.js")
 
 
+def test_the_chat_page_loads_the_workspace_parts_after_app_js_with_workspace_js_last():
+    scripts = re.findall(r'<script src="([^"]+)"', read("index.html"))
+    first = scripts.index(WORKSPACE_JS_PARTS[0])
+    assert scripts[first - 1] == "app.js"
+    assert scripts[first:] == WORKSPACE_JS_PARTS
+
+
 def test_scripts_only_look_up_elements_that_exist():
     ids = set(Page(read("index.html")).ids)
-    scripts = read_app() + read("workspace.js")
+    scripts = read_app() + read_workspace()
     wanted = set(re.findall(r"\$\('([A-Za-z0-9_]+)'\)", scripts))
     wanted |= set(re.findall(r"getElementById\('([A-Za-z0-9_]+)'\)", scripts))
     missing = sorted(wanted - ids - IDS_BUILT_BY_SCRIPTS)
@@ -124,7 +138,7 @@ def test_icons_used_by_pages_and_scripts_are_in_the_sprite():
     html = read("index.html")
     defined = set(re.findall(r'<symbol id="i-([a-z-]+)"', html))
     used = set(re.findall(r'href="#i-([a-z-]+)"', html))
-    scripts = read_app() + read("workspace.js")
+    scripts = read_app() + read_workspace()
     used |= set(re.findall(r"icon\('([a-z-]+)'", scripts))
     action_icons = re.search(r"const ACTION_ICONS = \{(.*?)\};", scripts, re.S).group(1)
     used |= set(re.findall(r"\['([a-z-]+)'", action_icons))
@@ -206,7 +220,7 @@ PHONE_BLOCK = re.compile(r"@media \(max-width: 600px\) \{(.*?)^\}", re.S | re.M)
 def test_the_chat_controls_get_a_backdrop_on_small_screens_that_closes_them():
     assert 'id="controlsScrim"' in read("index.html")
     assert ".controls-scrim:not([hidden])" in NARROW_BLOCK.search(read("style.css")).group(1)
-    workspace = read("workspace.js")
+    workspace = read_workspace()
     assert "$('controlsScrim').hidden = panel.hidden || !isNarrowScreen();" in workspace
     assert "$('controlsScrim').onclick = () => toggleControls(false);" in workspace
 
