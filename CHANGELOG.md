@@ -166,6 +166,10 @@
   Account records keep their bcrypt hashes so people can still log in. Restoring keeps this
   install's own keys and sessions, also from an older zip that still holds them, and Settings
   marks email accounts and MCP servers whose password or token must be entered again.
+- Documents the model makes as PDF are made again: any PDF with more than one line failed with
+  "not enough horizontal space" (each line started at the right edge of the one before), and a
+  heading with a character outside Latin-1 (an emoji, a tick) failed too; such characters now
+  print as "?" in headings as they already did in body text.
 
 ## 1.1.0 - 2026-11-03
 

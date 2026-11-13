@@ -59,6 +59,10 @@ def _plain_bytes(content: str) -> bytes:
     return content.encode("utf-8")
 
 
+def _latin1(text: str) -> str:
+    return text.encode("latin-1", errors="replace").decode("latin-1")
+
+
 def _to_pdf(content: str) -> bytes:
     from fpdf import FPDF
 
@@ -69,14 +73,13 @@ def _to_pdf(content: str) -> bytes:
         heading = re.match(r"^(#{1,3})\s+(.*)", line)
         if heading:
             pdf.set_font("Helvetica", "B", 16 - 2 * (len(heading.group(1)) - 1))
-            pdf.multi_cell(0, 8, heading.group(2))
+            pdf.multi_cell(0, 8, _latin1(heading.group(2)), new_x="LMARGIN", new_y="NEXT")
             pdf.set_font("Helvetica", size=11)
         elif not line.strip():
             pdf.ln(6)
         else:
             text = re.sub(r"^[-*]\s+", "-  ", line)
-            safe_text = text.encode("latin-1", errors="replace").decode("latin-1")
-            pdf.multi_cell(0, 6, safe_text)
+            pdf.multi_cell(0, 6, _latin1(text), new_x="LMARGIN", new_y="NEXT")
     return bytes(pdf.output())
 
 

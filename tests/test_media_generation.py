@@ -352,6 +352,13 @@ def test_a_checkpoint_that_is_not_found_leaves_no_file_behind(servers, tmp_path)
 DOCUMENT = "# Trip plan\n\n## Day one\n- Train at 9\n- Lunch in Café Nero\n\nBring a coat. Ünïcödé ✓"
 
 
+def test_a_pdf_document_is_a_real_pdf_even_with_characters_its_font_lacks(ctx):
+    result = json.loads(call("generate_document", {"content": DOCUMENT, "format": "pdf", "filename": "trip"}, ctx))
+    entry, data = saved_bytes(ctx, json.dumps(result))
+    assert (result["filename"], entry.content_type) == ("trip.pdf", "application/pdf")
+    assert data.startswith(b"%PDF-") and data.rstrip().endswith(b"%%EOF")
+
+
 def test_a_word_document_keeps_headings_bullets_and_text(ctx):
     import io
     import docx
