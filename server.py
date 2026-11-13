@@ -43,6 +43,7 @@ import arty_devices
 import auth
 import auth_routes
 import routes
+import security_headers
 import static_files
 import upload_limits
 import user_data
@@ -139,6 +140,7 @@ async def revalidate_app_files(request: Request, call_next):
 
 upload_limits.install(app, config)
 auth.install(app, auth_routes.users, auth_routes.sessions)
+security_headers.install(app)
 
 @app.get("/api/health")
 async def health():
