@@ -104,6 +104,15 @@ and appears in the model list with no setup. Otherwise, open **Settings → Conn
 either click **add ollama** (fills in the default endpoint, then Test/Add) or **scan
 network** to probe common local model-server ports.
 
+Any server that speaks Ollama's API can stand in for Ollama. Arty runs on
+[ArtyEngine](https://github.com/drew-codes-things/ArtyEngine), its own Ollama-compatible server
+built on llama.cpp, and starfire talks to it the same way: set `OLLAMA_BASE_URL` in `.env` to
+its address (`http://127.0.0.1:11438` on the same machine; auto-detection only tries port 11434,
+and **scan network** 11434, 1234 and 8080). From another machine, reach it through a reverse
+proxy as ArtyEngine's README describes, since it listens on loopback by default. The **Start
+Ollama** button and the install checks are for Ollama itself. ArtyEngine is a separate project
+under its own licence, PolyForm Strict 1.0.0, not starfire's Apache 2.0.
+
 ## Arty, Arty CLI and starfire.ai
 
 These three projects are made to work together, and each one links to the other two.
@@ -578,7 +587,7 @@ rather use that instead)
 | `PORT` | `8080` | Port the server listens on |
 | `BIND_HOST` | `127.0.0.1` | Address to listen on; keep it on loopback unless an account exists, since the shell tool can run commands |
 | `COOKIE_SECURE` | `true` | Set to `false` to allow the login cookie over plain HTTP on a trusted network |
-| `OLLAMA_BASE_URL` | _(auto-detect)_ | Override auto-detection with a specific Ollama URL |
+| `OLLAMA_BASE_URL` | _(auto-detect)_ | Override auto-detection with a specific Ollama URL (or an Ollama-compatible server such as ArtyEngine) |
 | `DATA_DIR` | `./data` | Where endpoint config and encrypted API keys are stored |
 | `TASK_MODEL` | _(chat's model)_ | Ollama model for titles, tags and follow-up suggestions |
 | `TASK_NUM_CTX` | `24576` | Context size for every request sent straight to Ollama (chats, `TASK_MODEL` jobs, warm-up); match the loaded model's to avoid a reload, `0` leaves it to Ollama |
