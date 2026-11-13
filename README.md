@@ -8,7 +8,7 @@
 [![FastAPI](https://img.shields.io/badge/fastapi-web-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Ollama](https://img.shields.io/badge/ollama-local%20models-000000?style=flat-square)](https://ollama.com/)
 [![Version](https://img.shields.io/badge/version-1.1.0-lightgrey?style=flat-square)](CHANGELOG.md)
-[![License](https://img.shields.io/badge/license-proprietary-red?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square)](LICENSE)
 
 </div>
 
@@ -621,8 +621,9 @@ files gzip-compressed to browsers that accept it and leaves API replies and stre
 
 ## License
 
-Proprietary - made by [Drew](https://github.com/drew-codes-things). You may install and run
-starfire.ai for your own use, as supplied. Copying, modifying, building on, redistributing or
-selling it is not permitted; see [LICENSE](LICENSE) for the full terms. The bundled
-third-party libraries and fonts in `static/vendor/` (marked, DOMPurify, highlight.js, IBM Plex)
-keep their own open-source licences, which sit next to them.
+Apache License 2.0 - made by [Drew](https://github.com/drew-codes-things). You may use, change
+and share starfire.ai, including commercially; see [LICENSE](LICENSE) for the full terms. If
+you share it or anything built from it, keep the [LICENSE](LICENSE) and [NOTICE](NOTICE)
+files, which credit its author, and say what you changed. The bundled third-party libraries
+and fonts in `static/vendor/` (marked, DOMPurify, highlight.js, IBM Plex) keep their own
+open-source licences, which sit next to them.

@@ -46,6 +46,7 @@
   WCAG AA contrast for every text colour on every surface in both themes.
 
 ### Changed
+- The licence is now Apache-2.0, with a NOTICE file that credits the author.
 - Toasts show at the top centre, so they no longer cover the message box.
 - On phones the chat controls dim the chat behind them and close with a tap outside, and the
   Arty CLI live view uses the whole screen with a one-line header.
