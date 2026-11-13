@@ -31,6 +31,8 @@ def app(tmp_path, monkeypatch):
     sessions = SessionStore(data_dir)
     monkeypatch.setattr(auth_routes, "users", users)
     monkeypatch.setattr(auth_routes, "sessions", sessions)
+    monkeypatch.setattr(auth_routes, "known_addresses", auth.KnownAddresses(data_dir))
+    monkeypatch.setattr(auth_routes, "account_limiter", auth.LoginLimiter())
     monkeypatch.setattr(routes, "registry", user_data.configure(data_dir))
     monkeypatch.setattr(auth, "hash_password", fast_hash)
     application = FastAPI()

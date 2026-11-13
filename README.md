@@ -53,7 +53,9 @@ The first time you open starfire it shows a setup page: choose your name, email 
 password (at least 10 characters). That makes the admin account, and the setup page closes
 for good. Until then, every other page and API call is locked, so set it up straight away
 on a new install. After that, every page and API call needs a login (kept for 30 days in an
-HttpOnly cookie; 5 wrong passwords lock that email from that address for 15 minutes). The
+HttpOnly cookie; 5 wrong passwords lock that email from that address for 15 minutes, and
+20 wrong passwords for one email within an hour, from anywhere, lock it for an hour except
+from an address that has signed in to it before or a browser already signed in to it). The
 login and setup pages can load only the stylesheet, the logo and the fonts without a login.
 Change your password under **Settings → Account**; that logs out every other browser. Forgot
 it? Reset it from the terminal on the machine starfire runs on (this also logs out every

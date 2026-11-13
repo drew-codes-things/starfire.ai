@@ -1,14 +1,20 @@
+import logging
+
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
-from auth import (MAX_FIELD_CHARS, SESSION_COOKIE, SESSION_LIFETIME_SECONDS, AccountError, LoginLimiter, SessionStore,
-                  UserStore, client_address, current_user, normalise_email, parse_networks, require_admin)
+from auth import (ACCOUNT_LOCKOUT_SECONDS, ACCOUNT_MAX_FAILED_LOGINS, MAX_FIELD_CHARS, SESSION_COOKIE,
+                  SESSION_LIFETIME_SECONDS, AccountError, KnownAddresses, LoginLimiter, SessionStore, UserStore,
+                  client_address, current_user, normalise_email, parse_networks, require_admin)
 from config import config
 
 router = APIRouter(prefix="/api/auth")
 users = UserStore(config.data_dir)
 sessions = SessionStore(config.data_dir)
 limiter = LoginLimiter()
+account_limiter = LoginLimiter(max_failures=ACCOUNT_MAX_FAILED_LOGINS, lockout_seconds=ACCOUNT_LOCKOUT_SECONDS)
+known_addresses = KnownAddresses(config.data_dir)
+logger = logging.getLogger(__name__)
 TRUSTED_PROXIES = parse_networks(config.trusted_proxies)
 
 MAX_FIELD_LENGTH = MAX_FIELD_CHARS
@@ -67,19 +73,35 @@ def _start_session(response: Response, user_id: str) -> None:
                         httponly=True, secure=config.cookie_secure, samesite="lax", path="/")
 
 
+def _already_signed_in_as(request: Request, email: str) -> bool:
+    user = current_user(request, users, sessions)
+    return user is not None and user.email == email
+
+
+def _account_wait(request: Request, email: str, address: str) -> int:
+    if known_addresses.is_known(email, address) or _already_signed_in_as(request, email):
+        return 0
+    return account_limiter.seconds_locked(email)
+
+
 @router.post("/login")
 def login(body: LoginRequest, request: Request, response: Response):
     if len(body.email) > MAX_FIELD_LENGTH or len(body.password) > MAX_FIELD_LENGTH:
         raise HTTPException(status_code=400, detail="email or password is too long")
-    limit_key = f"{client_address(request, TRUSTED_PROXIES, config.client_ip_header)}|{normalise_email(body.email)}"
-    wait = limiter.seconds_locked(limit_key)
+    address = client_address(request, TRUSTED_PROXIES, config.client_ip_header)
+    email = normalise_email(body.email)
+    limit_key = f"{address}|{email}"
+    wait = limiter.seconds_locked(limit_key) or _account_wait(request, email, address)
     if wait:
         raise HTTPException(status_code=429, detail=f"too many attempts - try again in {wait // 60 + 1} min")
     user = users.verify(body.email, body.password)
     if not user:
         limiter.record_failure(limit_key)
+        account_limiter.record_failure(email)
+        logger.warning("failed sign-in for %s from %s", email, address)
         raise HTTPException(status_code=401, detail="wrong email or password")
     limiter.reset(limit_key)
+    known_addresses.remember(email, address)
     _start_session(response, user.id)
     return user.public()
 

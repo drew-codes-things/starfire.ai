@@ -156,11 +156,13 @@ def test_the_address_is_the_one_the_local_proxy_added_not_one_the_client_sent():
 
 
 @pytest.fixture
-def login_client(users, sessions, monkeypatch):
+def login_client(users, sessions, monkeypatch, tmp_path):
     import auth_routes
     monkeypatch.setattr(auth_routes, "users", users)
     monkeypatch.setattr(auth_routes, "sessions", sessions)
     monkeypatch.setattr(auth_routes, "limiter", LoginLimiter(max_failures=2, lockout_seconds=60))
+    monkeypatch.setattr(auth_routes, "account_limiter", LoginLimiter())
+    monkeypatch.setattr(auth_routes, "known_addresses", auth.KnownAddresses(str(tmp_path)))
     users.upsert("drew@example.com", "Drew", "admin", fast_hash(PASSWORD))
     app = build_app(users, sessions)
     app.include_router(auth_routes.router)
@@ -382,3 +384,72 @@ def test_a_stranger_through_the_tunnel_cannot_lock_the_owner_out(login_client, m
     right = {"email": "drew@example.com", "password": PASSWORD}
     response = owner.post("/api/auth/login", json=right, headers={"X-Forwarded-For": TUNNEL, "CF-Connecting-IP": "198.51.100.7"})
     assert response.status_code == 200
+
+
+@pytest.fixture
+def account_client(login_client, monkeypatch):
+    import auth_routes
+    monkeypatch.setattr(auth_routes, "TRUSTED_PROXIES", BEHIND_TUNNEL)
+    monkeypatch.setattr(auth_routes, "account_limiter", LoginLimiter(max_failures=3, lockout_seconds=3600))
+    return login_client
+
+
+def sign_in_from(app, address, password=PASSWORD, cookie=None):
+    client = TestClient(app, base_url="https://testserver", client=("127.0.0.1", 50000))
+    if cookie:
+        client.cookies.set(SESSION_COOKIE, cookie)
+    response = client.post("/api/auth/login", json={"email": "drew@example.com", "password": password},
+                           headers={"X-Forwarded-For": TUNNEL, "CF-Connecting-IP": address})
+    return response
+
+
+def test_wrong_passwords_from_many_addresses_lock_the_account_for_new_addresses(account_client):
+    for address in ("203.0.113.1", "203.0.113.2", "203.0.113.3"):
+        assert sign_in_from(account_client.app, address, "nope").status_code == 401
+    assert sign_in_from(account_client.app, "198.51.100.20").status_code == 429
+
+
+def test_the_owner_still_gets_in_from_an_address_they_signed_in_from_before(account_client):
+    assert sign_in_from(account_client.app, "198.51.100.7").status_code == 200
+    for address in ("203.0.113.1", "203.0.113.2", "203.0.113.3", "203.0.113.4"):
+        sign_in_from(account_client.app, address, "nope")
+    assert sign_in_from(account_client.app, "198.51.100.7").status_code == 200
+
+
+def test_the_owner_still_gets_in_with_a_session_they_already_hold(account_client):
+    session = sign_in_from(account_client.app, "198.51.100.7").cookies.get(SESSION_COOKIE)
+    for address in ("203.0.113.1", "203.0.113.2", "203.0.113.3"):
+        sign_in_from(account_client.app, address, "nope")
+    assert sign_in_from(account_client.app, "192.0.2.44").status_code == 429
+    assert sign_in_from(account_client.app, "192.0.2.44", cookie=session).status_code == 200
+
+
+def test_wrong_passwords_never_make_an_address_known(account_client):
+    for _ in range(2):
+        sign_in_from(account_client.app, "203.0.113.1", "nope")
+    sign_in_from(account_client.app, "203.0.113.2", "nope")
+    assert sign_in_from(account_client.app, "203.0.113.1").status_code == 429
+    assert sign_in_from(account_client.app, "203.0.113.2").status_code == 429
+
+
+def test_known_addresses_are_private_and_forgotten_after_a_while(tmp_path, monkeypatch):
+    known = auth.KnownAddresses(str(tmp_path))
+    known.remember("drew@example.com", "198.51.100.7")
+    assert known.is_known("drew@example.com", "198.51.100.7")
+    assert not known.is_known("drew@example.com", "198.51.100.8")
+    assert not known.is_known("sam@example.com", "198.51.100.7")
+    assert stat.S_IMODE(os.stat(known.path).st_mode) == 0o600
+    later = auth.time.time() + auth.KNOWN_ADDRESS_SECONDS + 1
+    monkeypatch.setattr(auth.time, "time", lambda: later)
+    assert not known.is_known("drew@example.com", "198.51.100.7")
+
+
+def test_only_the_most_recent_known_addresses_are_kept(tmp_path, monkeypatch):
+    known = auth.KnownAddresses(str(tmp_path))
+    clock = [1_000_000.0]
+    monkeypatch.setattr(auth.time, "time", lambda: clock[0])
+    for index in range(auth.MAX_KNOWN_ADDRESSES + 5):
+        clock[0] += 1
+        known.remember("drew@example.com", f"198.51.100.{index}")
+    assert not known.is_known("drew@example.com", "198.51.100.0")
+    assert known.is_known("drew@example.com", f"198.51.100.{auth.MAX_KNOWN_ADDRESSES + 4}")

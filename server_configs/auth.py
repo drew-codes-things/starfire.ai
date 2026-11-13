@@ -23,6 +23,10 @@ SESSION_COOKIE = "starfire_session"
 SESSION_LIFETIME_SECONDS = 30 * 24 * 3600
 MAX_FAILED_LOGINS = 5
 LOCKOUT_SECONDS = 15 * 60
+ACCOUNT_MAX_FAILED_LOGINS = 20
+ACCOUNT_LOCKOUT_SECONDS = 60 * 60
+KNOWN_ADDRESS_SECONDS = 90 * 24 * 3600
+MAX_KNOWN_ADDRESSES = 20
 LOGIN_PAGE = "/login.html"
 SETUP_PAGE = "/setup.html"
 PUBLIC_PATHS = frozenset({LOGIN_PAGE, "/login.js", "/loginNext.js", "/style.css", "/vendor/fonts.css", "/api/auth/login",
@@ -327,6 +331,29 @@ class LoginLimiter:
     def reset(self, key: str) -> None:
         with self._lock:
             self._failures.pop(key, None)
+
+
+class KnownAddresses:
+
+    def __init__(self, data_dir: str):
+        self.path = os.path.join(data_dir, "login_addresses.json")
+        self._lock = threading.Lock()
+
+    def remember(self, email: str, address: str) -> None:
+        now = time.time()
+        with self._lock:
+            known = _read_json(self.path, dict)
+            recent = {seen_from: seen_at for seen_from, seen_at in known.get(email, {}).items()
+                      if now - seen_at < KNOWN_ADDRESS_SECONDS}
+            recent[address] = now
+            newest_first = sorted(recent.items(), key=lambda item: item[1], reverse=True)
+            known[email] = dict(newest_first[:MAX_KNOWN_ADDRESSES])
+            atomic_write_json(self.path, known)
+            os.chmod(self.path, 0o600)
+
+    def is_known(self, email: str, address: str) -> bool:
+        seen_at = _read_json(self.path, dict).get(email, {}).get(address)
+        return seen_at is not None and time.time() - seen_at < KNOWN_ADDRESS_SECONDS
 
 
 def parse_networks(text: str) -> tuple:
