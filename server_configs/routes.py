@@ -1618,8 +1618,22 @@ CREDENTIAL_FILE_NAMES = frozenset({".key", "sessions.json", ".env"})
 CREDENTIAL_FILE_PREFIXES = ("api_keys.json", ".api_keys.json.", ".env.")
 MCP_SERVERS_FILE = "mcp_servers.json"
 
+DOT_SEGMENTS = frozenset({os.curdir, os.pardir})
+ARCHIVE_SEPARATORS = re.compile(r"[\\/]")
+
+def _extracted_name(member: str) -> str:
+    arcname = member.replace("/", os.sep)
+    if os.altsep:
+        arcname = arcname.replace(os.altsep, os.sep)
+    arcname = os.path.splitdrive(arcname)[1]
+    return os.sep.join(part for part in arcname.split(os.sep) if part and part not in DOT_SEGMENTS)
+
+def _is_unsafe_member(member: str) -> bool:
+    is_absolute = member.startswith(("/", "\\")) or bool(os.path.splitdrive(member)[0])
+    return is_absolute or any(part in DOT_SEGMENTS for part in ARCHIVE_SEPARATORS.split(member))
+
 def _holds_credentials(relative_path: str) -> bool:
-    name = os.path.basename(relative_path)
+    name = os.path.basename(_extracted_name(relative_path)).lower()
     return name in CREDENTIAL_FILE_NAMES or name.startswith(CREDENTIAL_FILE_PREFIXES)
 
 def _mcp_servers_without_secrets(path: str) -> str | None:
@@ -1683,7 +1697,8 @@ async def restore_data(file: UploadFile):
         with zf:
             for member in zf.namelist():
                 target = os.path.abspath(os.path.join(data_dir, member))
-                if not target.startswith(data_dir + os.sep) and target != data_dir:
+                escapes = not target.startswith(data_dir + os.sep) and target != data_dir
+                if escapes or _is_unsafe_member(member):
                     raise HTTPException(400, f"refusing to restore: unsafe path in archive ({member})")
             kept = [info for info in zf.infolist() if not _holds_credentials(info.filename)]
             skipped = sorted(info.filename for info in zf.infolist() if _holds_credentials(info.filename))

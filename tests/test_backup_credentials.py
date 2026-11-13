@@ -228,3 +228,37 @@ def test_credentials_in_mcp_arguments_and_urls_stay_out_of_backups(tmp_path, mon
     restored = login(app_for(new_dir, monkeypatch), "admin@example.com")
     listed = restored.get("/api/mcp/servers").json()["servers"]
     assert len(listed) == 2 and all(server["secrets_missing"] for server in listed)
+
+
+def credential_files(data_dir: str) -> dict[str, bytes]:
+    names = (".key", "api_keys.json", "sessions.json")
+    return {name: open(os.path.join(data_dir, name), "rb").read() for name in names}
+
+
+def test_restore_refuses_dot_segment_and_absolute_member_names(tmp_path, monkeypatch):
+    data_dir = str(tmp_path / "data")
+    admin = login(install(data_dir, monkeypatch, "admin@example.com"), "admin@example.com")
+    routes.api_keys.save("current-endpoint", PROVIDER_KEY)
+    before = credential_files(data_dir)
+    for member in (".key/.", "api_keys.json/.", "sessions.json/..", "./.key", "notes/../.key", "/restored-note.txt",
+                   "users\\..\\.key"):
+        archive = zip_of({member: b"planted by the backup", "restored-note.txt": b"data"})
+        response = admin.post("/api/restore", files={"file": ("backup.zip", archive, "application/zip")})
+        assert response.status_code == 400, member
+        assert "unsafe path" in response.json()["detail"]
+        assert credential_files(data_dir) == before, member
+        assert not os.path.exists(os.path.join(data_dir, "restored-note.txt")), member
+    assert routes.api_keys.load() == {"current-endpoint": PROVIDER_KEY}
+
+
+def test_restore_skips_credential_files_whatever_their_case_or_spelling(tmp_path, monkeypatch):
+    data_dir = str(tmp_path / "data")
+    admin = login(install(data_dir, monkeypatch, "admin@example.com"), "admin@example.com")
+    routes.api_keys.save("current-endpoint", PROVIDER_KEY)
+    archive = zip_of({".KEY": b"planted", "API_KEYS.JSON": b"{}", "Sessions.Json": b"{}", "users//.env": b"X=1",
+                      "restored-note.txt": b"data"})
+    assert admin.post("/api/restore", files={"file": ("backup.zip", archive, "application/zip")}).json() == {"ok": True}
+    assert sorted(name for name in os.listdir(data_dir) if name.lower() in {".key", "api_keys.json", "sessions.json"}) \
+        == [".key", "api_keys.json", "sessions.json"]
+    assert not os.path.exists(os.path.join(data_dir, "users", ".env"))
+    assert open(os.path.join(data_dir, "restored-note.txt"), "rb").read() == b"data"
