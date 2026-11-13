@@ -162,9 +162,11 @@ class MemoryStore:
         lexical_ranked = [i for i, s in sorted(lexical_scores.items(), key=lambda p: p[1], reverse=True)
                             if s >= 0.05]
 
+        keyword_ranked = list(dict.fromkeys(lexical_ranked + [i for i in boosted_ids if i not in lexical_ranked]))
+
         ollama_url = await detect_ollama(config.ollama_base_url)
         if not ollama_url or not unpinned:
-            return list(dict.fromkeys(lexical_ranked + [i for i in boosted_ids if i not in lexical_ranked]))
+            return keyword_ranked
 
         await self._ensure_embeddings(unpinned, ollama_url)
         query_vec = await embeddings_module.embed(query, ollama_url)
@@ -174,6 +176,8 @@ class MemoryStore:
                 e.id: embeddings_module.cosine_similarity(query_vec, e.embedding)
                 for e in unpinned if e.embedding
             }
+        if not semantic_scores:
+            return keyword_ranked
         blended = embeddings_module.blend_scores(lexical_scores, semantic_scores)
         ranked = [i for i, _ in sorted(blended.items(), key=lambda p: p[1], reverse=True)]
         return list(dict.fromkeys(ranked + [i for i in boosted_ids if i not in ranked]))

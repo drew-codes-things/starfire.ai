@@ -170,6 +170,10 @@
   "not enough horizontal space" (each line started at the right edge of the one before), and a
   heading with a character outside Latin-1 (an emoji, a tick) failed too; such characters now
   print as "?" in headings as they already did in body text.
+- With Ollama running but no embedding model pulled (or embeddings failing), searching memory
+  or knowledge gives exactly the keyword results, as the README promises, instead of every
+  memory or document ranked by nothing: a question about something you never saved no longer
+  pulls unrelated memories and passages into the chat.
 
 ## 1.1.0 - 2026-11-03
 

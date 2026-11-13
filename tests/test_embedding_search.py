@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(ROOT, "server_configs"))
 import httpx
 import pytest
 
+import builtin_tools
 import documents_store
 import embeddings
 import memory_store
@@ -124,6 +125,16 @@ def test_memory_embeds_each_entry_once_and_keeps_the_vectors(tmp_path, ollama):
     assert all(entry.embedding for entry in MemoryStore(str(tmp_path)).list())
 
 
+@pytest.mark.parametrize("query", ["sailing boats", "bakery", "something unrelated entirely"])
+def test_memory_without_an_embedding_model_gives_exactly_the_keyword_results(tmp_path, ollama, query):
+    store = memories(tmp_path)
+    ollama["reachable"] = False
+    keyword_only = texts(asyncio.run(store.relevant(query)))
+    ollama["reachable"] = True
+    ollama["embedding_model"] = False
+    assert texts(asyncio.run(store.relevant(query))) == keyword_only
+
+
 def knowledge(tmp_path):
     store = DocumentStore(str(tmp_path))
     store.add("pets.txt", b"Rex is a golden retriever who sleeps by the fire.")
@@ -145,3 +156,20 @@ def test_documents_embed_each_chunk_once_and_keep_the_vectors(tmp_path, ollama):
     stored = DocumentStore(str(tmp_path))._load_raw()["chunks"]
     assert sorted(chunk_texts) == sorted(chunk["text"] for chunk in stored)
     assert all(chunk.get("embedding") for chunk in stored)
+
+
+@pytest.mark.parametrize("query", ["golden retriever", "bakery shifts", "something unrelated entirely"])
+def test_documents_without_an_embedding_model_give_exactly_the_keyword_results(tmp_path, ollama, query):
+    store = knowledge(tmp_path)
+    ollama["reachable"] = False
+    keyword_only = asyncio.run(store.search(query))
+    ollama["reachable"] = True
+    ollama["embedding_model"] = False
+    assert asyncio.run(store.search(query)) == keyword_only
+
+
+def test_the_model_hears_there_is_nothing_relevant_when_the_embedding_model_is_missing(tmp_path, ollama):
+    store = knowledge(tmp_path)
+    ollama["embedding_model"] = False
+    result = asyncio.run(builtin_tools._search_documents({"query": "quantum chromodynamics"}, store))
+    assert result == "no matching passages found"

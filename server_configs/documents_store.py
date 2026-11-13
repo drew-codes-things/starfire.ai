@@ -178,6 +178,8 @@ class DocumentStore:
                 c["id"]: embeddings_module.cosine_similarity(query_vec, c["embedding"])
                 for c in chunks if c.get("embedding")
             }
+        if not semantic_scores:
+            return lexical_ranked
         blended = embeddings_module.blend_scores(lexical_scores, semantic_scores)
         return [i for i, _ in sorted(blended.items(), key=lambda p: p[1], reverse=True)]
 
