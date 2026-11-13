@@ -27,6 +27,10 @@ class AttachmentError(ValueError):
     pass
 
 
+class AttachmentNoRoom(AttachmentError):
+    pass
+
+
 @dataclass
 class Attachment:
     id: str
@@ -63,7 +67,10 @@ class AttachmentStore:
         base = os.path.join(self.root, attachment_id)
         return base, base + ".json"
 
-    async def save(self, name: str, mime: str, chunks) -> Attachment:
+    def used_bytes(self) -> int:
+        return sum(entry.stat().st_size for entry in os.scandir(self.root) if entry.is_file())
+
+    async def save(self, name: str, mime: str, chunks, room_bytes: int | None = None) -> Attachment:
         kind = kind_of(mime)
         if not kind:
             raise AttachmentError(f"{mime or 'this file type'} can't be attached - use images, audio or video")
@@ -78,6 +85,8 @@ class AttachmentStore:
                     if attachment.size > limit:
                         raise AttachmentError(f"{attachment.name} is over the {limit // (1024 * 1024)} MB limit "
                                               f"for {kind}")
+                    if room_bytes is not None and attachment.size > room_bytes:
+                        raise AttachmentNoRoom(f"there's no room left for {attachment.name}")
                     out.write(chunk)
         except BaseException:
             if os.path.exists(data_path):

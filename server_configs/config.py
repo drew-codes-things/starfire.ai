@@ -23,6 +23,10 @@ class AppConfig(BaseSettings):
     trusted_proxies: str = "127.0.0.1,::1"
     client_ip_header: str = "CF-Connecting-IP"
     session_check_hosts: str = ""
+    max_document_mb: int = 20
+    max_attachments_mb: int = 1024
+    max_restore_mb: int = 1024
+    min_free_disk_mb: int = 512
 
     def own_tools_patterns(self) -> list[str]:
         return [p.strip() for p in self.own_tools_models.split(",") if p.strip()]

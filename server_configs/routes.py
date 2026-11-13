@@ -1,10 +1,10 @@
 import asyncio
 import fnmatch
-import io
 import json
 import logging
 import os
 import re
+import tempfile
 import zipfile
 from typing import Annotated
 
@@ -26,7 +26,7 @@ import model_voices
 import ollama_manager
 import shell_tool
 from agent_loop import run_chat_with_tools
-from attachments import AttachmentError, expand_attachments
+from attachments import AttachmentError, AttachmentNoRoom, expand_attachments
 from api_key_manager import APIKeyManager
 from chat_stream import _sse_line, stream_chat
 from config import config
@@ -40,6 +40,7 @@ from mcp_servers_store import MCP_SERVER_REPOSITORY, REFERENCE_SERVERS, McpServe
 from model_endpoints import ModelEndpointStore, detect_ollama, discover_servers
 from providers import build_models_url, is_embedding_model
 from task_scheduler import TaskScheduler, compute_next_run
+from upload_limits import MIB, require_room, room_on_disk, too_large
 from task_store import ScheduledTask
 import user_data
 from version import VERSION
@@ -413,9 +414,15 @@ async def list_documents():
         for d in documents.list()
     ]}
 
+DOCUMENT_STORAGE_FACTOR = 2
+
 @router.post("/documents")
 async def add_document(file: UploadFile):
-    raw = await file.read()
+    limit = config.max_document_mb * MIB
+    raw = await file.read(limit + 1)
+    if len(raw) > limit:
+        raise too_large(file.filename or "that document", limit)
+    require_room(config.data_dir, len(raw) * DOCUMENT_STORAGE_FACTOR, config.min_free_disk_mb, "that document")
     try:
         doc = documents.add(file.filename or "untitled", raw)
     except ValueError as e:
@@ -426,11 +433,23 @@ async def _upload_chunks(file: UploadFile):
     while chunk := await file.read(1024 * 1024):
         yield chunk
 
+def _attachment_refusal(quota_left: int, disk_left: int) -> HTTPException:
+    if disk_left <= quota_left:
+        return HTTPException(507, "there isn't enough free disk space for that attachment - free some space and try again")
+    return HTTPException(413, f"attachments for one account are limited to {config.max_attachments_mb} MB - "
+                              "they expire after 30 days")
+
 @router.post("/attachments")
 async def add_attachment(file: UploadFile):
+    quota_left = config.max_attachments_mb * MIB - attachment_store.used_bytes()
+    disk_left = room_on_disk(config.data_dir, config.min_free_disk_mb)
+    if min(quota_left, disk_left) <= 0:
+        raise _attachment_refusal(quota_left, disk_left)
     try:
         attachment = await attachment_store.save(file.filename or "attachment", file.content_type or "",
-                                                 _upload_chunks(file))
+                                                 _upload_chunks(file), room_bytes=min(quota_left, disk_left))
+    except AttachmentNoRoom:
+        raise _attachment_refusal(quota_left, disk_left)
     except AttachmentError as e:
         raise HTTPException(400, str(e))
     return attachment.public()
@@ -1554,36 +1573,58 @@ async def delete_preset(preset_id: str):
         raise HTTPException(404, "preset not found")
     return {"ok": True}
 
+def _folder_bytes(folder: str) -> int:
+    return sum(os.path.getsize(os.path.join(root, name)) for root, _dirs, files in os.walk(folder) for name in files)
+
+def _chunks_then_close(handle):
+    try:
+        while chunk := handle.read(MIB):
+            yield chunk
+    finally:
+        handle.close()
+
 @router.get("/backup")
 async def backup_data():
-    buf = io.BytesIO()
     data_dir = os.path.abspath(config.data_dir)
-    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+    require_room(data_dir, _folder_bytes(data_dir), config.min_free_disk_mb, "a backup")
+    spooled = tempfile.TemporaryFile(dir=data_dir)
+    with zipfile.ZipFile(spooled, "w", zipfile.ZIP_DEFLATED) as zf:
         for root, _dirs, files in os.walk(data_dir):
             for name in files:
                 full = os.path.join(root, name)
                 zf.write(full, arcname=os.path.relpath(full, data_dir))
-    buf.seek(0)
+    spooled.seek(0)
     from datetime import datetime, timezone
     filename = f"starfire-backup-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.zip"
     return StreamingResponse(
-        buf, media_type="application/zip",
+        _chunks_then_close(spooled), media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
+async def _spool_capped(file: UploadFile, spooled, limit: int) -> None:
+    size = 0
+    while chunk := await file.read(MIB):
+        size += len(chunk)
+        if size > limit:
+            raise too_large("that backup", limit)
+        spooled.write(chunk)
+    spooled.seek(0)
+
 @router.post("/restore")
 async def restore_data(file: UploadFile):
-    raw = await file.read()
     data_dir = os.path.abspath(config.data_dir)
-    try:
-        zf = zipfile.ZipFile(io.BytesIO(raw))
-    except zipfile.BadZipFile:
-        raise HTTPException(400, "not a valid zip file")
-
-    for member in zf.namelist():
-        target = os.path.abspath(os.path.join(data_dir, member))
-        if not target.startswith(data_dir + os.sep) and target != data_dir:
-            raise HTTPException(400, f"refusing to restore: unsafe path in archive ({member})")
-
-    zf.extractall(data_dir)
+    with tempfile.TemporaryFile(dir=data_dir) as spooled:
+        await _spool_capped(file, spooled, config.max_restore_mb * MIB)
+        try:
+            zf = zipfile.ZipFile(spooled)
+        except zipfile.BadZipFile:
+            raise HTTPException(400, "not a valid zip file")
+        with zf:
+            for member in zf.namelist():
+                target = os.path.abspath(os.path.join(data_dir, member))
+                if not target.startswith(data_dir + os.sep) and target != data_dir:
+                    raise HTTPException(400, f"refusing to restore: unsafe path in archive ({member})")
+            unpacked = sum(info.file_size for info in zf.infolist())
+            require_room(data_dir, unpacked, config.min_free_disk_mb, "that backup")
+            zf.extractall(data_dir)
     return {"ok": True}

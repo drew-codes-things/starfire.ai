@@ -17,8 +17,12 @@ CHUNK_OVERLAP = 200
 
 _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 
+def _pieces_no_longer_than(chunk_size: int, sentences: list[str]) -> list[str]:
+    return [sentence[start:start + chunk_size] for sentence in sentences
+            for start in range(0, len(sentence), chunk_size)]
+
 def split_into_chunks(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
-    sentences = [s.strip() for s in _SENTENCE_RE.split(text) if s.strip()]
+    sentences = _pieces_no_longer_than(chunk_size, [s.strip() for s in _SENTENCE_RE.split(text) if s.strip()])
     if not sentences:
         return []
 

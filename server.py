@@ -44,6 +44,7 @@ import auth
 import auth_routes
 import routes
 import static_files
+import upload_limits
 import user_data
 from config import config
 from mcp_manager import McpConnectionError, mcp_manager
@@ -136,6 +137,7 @@ async def revalidate_app_files(request: Request, call_next):
         response.headers.setdefault("Cache-Control", "no-cache")
     return response
 
+upload_limits.install(app, config)
 auth.install(app, auth_routes.users, auth_routes.sessions)
 
 @app.get("/api/health")

@@ -533,6 +533,10 @@ rather use that instead)
 | `MODEL_VOICES_DIR` | `<DATA_DIR>/voices` | Folder holding the `.onnx` voices (and their `.onnx.json`) named in `MODEL_VOICES` |
 | `TRUSTED_PROXIES` | `127.0.0.1,::1` | Comma-separated addresses or networks of proxies in front of starfire. The login lockout follows `X-Forwarded-For` back through these hops to the visitor; when every hop is trusted (a Cloudflare tunnel's `cloudflared` included), the visitor's address is read from `CLIENT_IP_HEADER`. List only machines that set those headers themselves |
 | `CLIENT_IP_HEADER` | `CF-Connecting-IP` | Header holding the visitor's address, read only when the request came through trusted proxies alone |
+| `MAX_DOCUMENT_MB` | `20` | Largest knowledge document one upload may be |
+| `MAX_ATTACHMENTS_MB` | `1024` | Total size of one account's chat attachments (each kept 30 days) |
+| `MAX_RESTORE_MB` | `1024` | Largest backup zip Settings → Data will restore |
+| `MIN_FREE_DISK_MB` | `512` | Uploads, restores and backups are refused when they would leave less free disk than this next to `DATA_DIR` |
 | `SESSION_CHECK_HOSTS` | _(none)_ | Extra `host:port` names, comma-separated, on which `GET /api/auth/me` answers for a session made on any host. `127.0.0.1:<PORT>`, `localhost:<PORT>` and `[::1]:<PORT>` are always included, so a service on the same machine can ask who a browser's cookie belongs to. Every other request only accepts a session on the host it was signed in on |
 
 Hosted-provider API keys are **not** set via environment variables - add them through the
