@@ -143,6 +143,13 @@ function spokenPieces(sentence, limit = MAX_SPOKEN_CHARS) {
   return pieces;
 }
 
+const REGENERATE_WITH = 'Regenerate with…';
+
+function regenerateChoice(option) {
+  if (!option || !option.value) return null;
+  return { id: option.value, endpoint_id: option.dataset.endpointId };
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     DAY_MS, TOAST_MS, TOAST_ERROR_MS, TOAST_FADE_MS,
@@ -150,5 +157,6 @@ if (typeof module !== 'undefined' && module.exports) {
     pendingApprovalCards, resolveChatControls, isLastAssistantMessage,
     CHAT_TITLE_CHARS, submitOnEnter, closeOnEscape, chatTitleFrom, firstUnusedModel,
     MAX_SPOKEN_CHARS, takeSpokenSentences, speakableText, spokenPieces,
+    REGENERATE_WITH, regenerateChoice,
   };
 }

@@ -226,3 +226,15 @@ def test_the_default_model_star_is_a_quiet_filled_star_not_a_red_disc():
     assert "background: transparent;" in star
     assert "color: var(--text);" in star
     assert "accent" not in star
+
+
+def test_on_phones_the_reply_actions_stay_on_one_row_and_the_model_pick_sits_on_the_regenerate_button():
+    phone = PHONE_BLOCK.search(read("style.css")).group(1)
+    assert "flex-wrap: nowrap;" in css_rule("  .line-actions", phone)
+    assert "flex: 0 1 var(--touch);" in css_rule("  .line-action-btn", phone)
+    picker = css_rule("  .regen-group .regen-model-select", phone)
+    assert "position: absolute;" in picker and "opacity: 0;" in picker
+    app = read("app.js")
+    assert "group.className = 'regen-group';" in app
+    assert "select.onchange = () => { if (regeneratePicksAndRuns()) regenerate(); };" in app
+    assert "REGENERATE_WITH" in app

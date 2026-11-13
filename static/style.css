@@ -1000,6 +1000,7 @@ html.sidebar-closed #sidebarOpenBtn, html.sidebar-closed .header-new-chat { disp
   color: var(--muted);
   font-size: var(--fs-xs);
 }
+.regen-group { position: relative; display: inline-flex; align-items: center; gap: 2px; }
 .msg-info { margin-top: var(--s-1); color: var(--faint); font-size: var(--fs-xs); }
 
 .code-box {
@@ -1910,6 +1911,11 @@ body:not(.is-admin) .admin-only { display: none !important; }
 
 @media (max-width: 600px) {
   .output { padding: var(--s-3) var(--s-3) var(--s-4); }
+  .line-actions { flex-wrap: nowrap; gap: 0; }
+  .line-action-btn { flex: 0 1 var(--touch); min-width: 32px; padding: 0; }
+  .regen-group { flex: 0 1 var(--touch); min-width: 32px; }
+  .regen-group .line-action-btn { width: 100%; }
+  .regen-group .regen-model-select { position: absolute; inset: 0; width: 100%; min-width: 0; max-width: none; height: 100%; opacity: 0; cursor: pointer; }
   .composer-wrap { padding-left: calc(var(--s-2) + var(--safe-left)); padding-right: calc(var(--s-2) + var(--safe-right)); }
   .line-row.role-user .line { max-width: 92%; }
   .model-picker-btn { max-width: 44vw; padding: 0 var(--s-2); }

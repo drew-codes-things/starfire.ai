@@ -273,3 +273,11 @@ test('the dialog, the chat row menu and the model menu close through that helper
   assert.match(workspace, /\$\('modelSearch'\)\.addEventListener\('keydown', closeOnEscape\(/);
   assert.match(workspace, /key === 'escape' && !e\.defaultPrevented/);
 });
+
+test('a regenerate pick names the model and its connection, and the "Regenerate with" heading names none', () => {
+  const picked = { value: 'fake-echo', dataset: { endpointId: 'ep1' } };
+  assert.deepEqual(logic.regenerateChoice(picked), { id: 'fake-echo', endpoint_id: 'ep1' });
+  assert.equal(logic.regenerateChoice({ value: '', dataset: {} }), null);
+  assert.equal(logic.regenerateChoice(undefined), null);
+  assert.equal(logic.REGENERATE_WITH, 'Regenerate with…');
+});

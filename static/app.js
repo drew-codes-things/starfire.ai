@@ -592,13 +592,22 @@ function addEditButton(actions, idx) {
   actions.appendChild(btn);
 }
 
-function addRegenerateButton(actions, idx) {
+const PHONE_SCREEN = '(max-width: 600px)';
 
+function regeneratePicksAndRuns() {
+  return window.matchMedia(PHONE_SCREEN).matches;
+}
+
+function regenerateModelSelect() {
   const select = document.createElement('select');
-  els.output.querySelectorAll('.regen-control').forEach(control => control.remove());
-  select.className = 'regen-model-select regen-control';
+  select.className = 'regen-model-select';
   select.title = 'Model to regenerate with';
   select.setAttribute('aria-label', 'Model to regenerate with');
+  const heading = document.createElement('option');
+  heading.value = '';
+  heading.disabled = true;
+  heading.textContent = REGENERATE_WITH;
+  select.appendChild(heading);
   for (const m of models) {
     const opt = document.createElement('option');
     opt.value = m.id;
@@ -607,26 +616,34 @@ function addRegenerateButton(actions, idx) {
     select.appendChild(opt);
   }
   const current = currentModel();
-  if (current) select.value = current.id;
+  select.value = current && !regeneratePicksAndRuns() ? current.id : '';
+  return select;
+}
+
+function addRegenerateButton(actions, idx) {
+  els.output.querySelectorAll('.regen-group').forEach(group => group.remove());
+  const group = document.createElement('span');
+  group.className = 'regen-group';
+  const select = regenerateModelSelect();
 
   const btn = document.createElement('button');
   btn.type = 'button';
   btn.className = 'line-action-btn';
-  btn.classList.add('regen-control');
   labelActionButton(btn, 'regenerate', 'Regenerate with the chosen model');
-  btn.onclick = async () => {
+  const regenerate = async () => {
     let userIdx = idx - 1;
     while (userIdx >= 0 && messages[userIdx].role !== 'user') userIdx--;
     if (userIdx < 0 || busy) return;
     const text = messages[userIdx].content;
-    const opt = select.selectedOptions[0];
-    const overrideModel = opt ? { id: opt.value, endpoint_id: opt.dataset.endpointId } : null;
+    const overrideModel = regenerateChoice(select.selectedOptions[0]);
     await forkSession(userIdx, messages[userIdx].display ?? text);
     rerenderAll();
     send(text, overrideModel);
   };
-  actions.appendChild(select);
-  actions.appendChild(btn);
+  btn.onclick = regenerate;
+  select.onchange = () => { if (regeneratePicksAndRuns()) regenerate(); };
+  group.append(select, btn);
+  actions.appendChild(group);
 }
 
 function speakText(text) {
