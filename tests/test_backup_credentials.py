@@ -290,3 +290,30 @@ def test_temp_and_backup_copies_of_credential_files_stay_out_of_backups_and_rest
     assert fresh.post("/api/restore", files={"file": ("backup.zip", planted, "application/zip")}).json() == {"ok": True}
     assert not [name for name in STRAY_COPIES if os.path.exists(os.path.join(new_dir, name))]
     assert open(os.path.join(new_dir, "restored-note.txt"), "rb").read() == b"data"
+
+
+def test_restoring_on_the_same_install_keeps_the_working_mcp_secrets(tmp_path, monkeypatch):
+    data_dir = str(tmp_path / "data")
+    admin = login(install(data_dir, monkeypatch, "admin@example.com"), "admin@example.com")
+    fill_with_credentials(admin, data_dir)
+    secret_args = ["server-postgres", f"postgresql://reader:{DB_PASSWORD}@db.example.test/x", "--api-key", FLAG_KEY]
+    secret_url = f"https://mcp.example.test/sse?api_key={QUERY_KEY}"
+    postgres = routes.mcp_servers.add(name="Postgres", command="npx", args=list(secret_args))
+    sse = routes.mcp_servers.add(name="SSE", command="", args=[], transport="sse", url=secret_url)
+    dropped = routes.mcp_servers.add(name="Dropped later", command="npx", args=[],
+                                     env={"GITHUB_PERSONAL_ACCESS_TOKEN": MCP_TOKEN})
+    archive = admin.get("/api/backup").content
+    assert routes.mcp_servers.delete(dropped.id)
+
+    assert admin.post("/api/restore", files={"file": ("backup.zip", archive, "application/zip")}).json() == {"ok": True}
+    servers = {server.name: server for server in McpServerStore(data_dir).list()}
+    assert servers["GitHub"].env == {"GITHUB_PERSONAL_ACCESS_TOKEN": MCP_TOKEN}
+    assert servers["Remote"].headers == {"Authorization": MCP_BEARER}
+    assert servers["Postgres"].args == secret_args and servers["Postgres"].id == postgres.id
+    assert servers["SSE"].url == secret_url and servers["SSE"].id == sse.id
+    assert servers["Dropped later"].env == {"GITHUB_PERSONAL_ACCESS_TOKEN": ""}
+    flags = {server["name"]: server["secrets_missing"] for server in admin.get("/api/mcp/servers").json()["servers"]}
+    assert flags == {"GitHub": False, "Remote": False, "Postgres": False, "SSE": False, "Dropped later": True}
+    on_disk = open(os.path.join(data_dir, "mcp_servers.json"), encoding="utf-8").read()
+    for secret in (MCP_TOKEN, MCP_BEARER, DB_PASSWORD, FLAG_KEY, QUERY_KEY, "server-postgres"):
+        assert secret not in on_disk

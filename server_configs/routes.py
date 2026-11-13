@@ -1650,6 +1650,20 @@ def _mcp_servers_without_secrets(path: str) -> str | None:
         return None
     return json.dumps(McpServerStore(os.path.dirname(path)).without_secret_values(items), indent=2)
 
+def _restored_mcp_servers(zf: zipfile.ZipFile, members: list) -> list | None:
+    servers_members = [info for info in members if _extracted_name(info.filename) == MCP_SERVERS_FILE]
+    if not servers_members:
+        return None
+    try:
+        items = json.loads(zf.read(servers_members[-1]))
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        logger.warning("restoring %s as it is because it could not be read as JSON: %s", MCP_SERVERS_FILE, error)
+        return None
+    if not isinstance(items, list):
+        logger.warning("restoring %s as it is because it holds a %s, not a list", MCP_SERVERS_FILE, type(items).__name__)
+        return None
+    return items
+
 def _add_to_backup(zf: zipfile.ZipFile, full_path: str, relative_path: str) -> None:
     if _holds_credentials(relative_path):
         return
@@ -1706,7 +1720,12 @@ async def restore_data(file: UploadFile):
             skipped = sorted(info.filename for info in zf.infolist() if _holds_credentials(info.filename))
             unpacked = sum(info.file_size for info in kept)
             require_room(data_dir, unpacked, config.min_free_disk_mb, "that backup")
+            restored_servers = _restored_mcp_servers(zf, kept)
+            if restored_servers is not None:
+                kept = [info for info in kept if _extracted_name(info.filename) != MCP_SERVERS_FILE]
             zf.extractall(data_dir, members=kept)
+    if restored_servers is not None:
+        McpServerStore(data_dir).restore(restored_servers)
     if skipped:
         logger.info("restore kept this install's keys and sessions and left out these files from the backup: %s",
                     ", ".join(skipped))

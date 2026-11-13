@@ -488,7 +488,8 @@ looks like a key, token, secret, password or auth, the value after a flag such a
 passed as a bare argument with none of these markers can't be told apart from a file name, so
 give tokens to MCP servers as env values. After restoring on a new install, enter
 provider API keys, email passwords and MCP tokens again (the settings page marks email accounts
-and MCP servers that need it; remove and add them again). Account records keep their bcrypt
+and MCP servers that need it; remove and add them again). Restoring on the same install keeps
+the MCP tokens, arguments and URLs of servers that still exist there. Account records keep their bcrypt
 password hashes, so everyone can still log in. Restoring an older zip that still holds `.key` or
 `api_keys.json` restores everything else and keeps this install's own keys.
 

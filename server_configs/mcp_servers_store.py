@@ -263,6 +263,13 @@ class McpServerStore:
         return server
 
     @holds_file_lock()
+    def restore(self, restored_items: list) -> None:
+        live_by_id = {item["id"]: item for item in self._read_items() if _is_usable(item)}
+        merged = [_with_live_secrets(item, live_by_id[item["id"]]) if _is_usable(item) and item["id"] in live_by_id
+                  else item for item in restored_items]
+        self._write_items([self._with_encrypted_secrets(item) if isinstance(item, dict) else item for item in merged])
+
+    @holds_file_lock()
     def set_enabled(self, server_id: str, enabled: bool) -> bool:
         items = self._read_items()
         found = False
@@ -315,6 +322,25 @@ def _secret_values(item: dict) -> list:
 
 def _holds_plain_secrets(item) -> bool:
     return isinstance(item, dict) and any(_is_plain_text(value) for value in _secret_values(item))
+
+
+def _holds_removed_secret(value) -> bool:
+    if isinstance(value, list):
+        return any(_holds_removed_secret(part) for part in value)
+    return isinstance(value, str) and SECRET_REMOVED in value
+
+
+def _with_live_secrets(restored: dict, live: dict) -> dict:
+    merged = dict(restored)
+    for secret_field in SECRET_FIELDS:
+        restored_values, live_values = restored.get(secret_field), live.get(secret_field)
+        if isinstance(restored_values, dict) and isinstance(live_values, dict):
+            merged[secret_field] = {key: live_values[key] if value == "" and key in live_values else value
+                                    for key, value in restored_values.items()}
+    for removable_field in ("args", "url"):
+        if _holds_removed_secret(restored.get(removable_field)) and removable_field in live:
+            merged[removable_field] = live[removable_field]
+    return merged
 
 
 def _names_a_secret(name: str) -> bool:
