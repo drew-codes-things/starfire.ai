@@ -176,6 +176,14 @@ function menuKeyHandler(getItems, close, getFocused = () => document.activeEleme
   };
 }
 
+const LIST_LOADING_ROW = '<li class="settings-hint" role="status">loading…</li>';
+
+function showListLoading(list) {
+  if (!list || list.children.length) return false;
+  list.innerHTML = LIST_LOADING_ROW;
+  return true;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     DAY_MS, TOAST_MS, TOAST_ERROR_MS, TOAST_FADE_MS,
@@ -185,5 +193,6 @@ if (typeof module !== 'undefined' && module.exports) {
     MAX_SPOKEN_CHARS, takeSpokenSentences, speakableText, spokenPieces,
     REGENERATE_WITH, regenerateChoice,
     menuFocusIndex, menuKeyHandler,
+    showListLoading,
   };
 }

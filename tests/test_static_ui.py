@@ -238,3 +238,15 @@ def test_on_phones_the_reply_actions_stay_on_one_row_and_the_model_pick_sits_on_
     assert "group.className = 'regen-group';" in app
     assert "select.onchange = () => { if (regeneratePicksAndRuns()) regenerate(); };" in app
     assert "REGENERATE_WITH" in app
+
+
+def test_opening_a_settings_tab_shows_loading_in_its_empty_lists():
+    app = read("app.js")
+    listed = re.search(r"const SETTINGS_TAB_LISTS = \{(.*?)\};", app, re.S)
+    assert listed, "app.js has no SETTINGS_TAB_LISTS"
+    ids = set(re.findall(r"'([A-Za-z]+List)'", listed.group(1)))
+    assert {"memoryList", "documentList", "endpointList", "mcpServerList", "presetList", "promptList", "noteList",
+            "taskList", "emailAccountList", "ruleList", "workflowList", "accountList"} <= ids
+    assert ids <= set(Page(read("index.html")).ids)
+    show_tab = re.search(r"function showSettingsTab\(tab\) \{(.*?)\n\}", app, re.S).group(1)
+    assert "showListLoading" in show_tab

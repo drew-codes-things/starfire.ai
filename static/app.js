@@ -1776,6 +1776,20 @@ els.input.addEventListener('input', () => {
 try { els.sysPrompt.value = localStorage.getItem('sf_sys') || ''; } catch (_) {}
 els.sysPrompt.addEventListener('input', () => onChatControlsEdited());
 
+const SETTINGS_TAB_LISTS = {
+  providers: ['endpointList'],
+  tools: ['mcpServerList'],
+  memory: ['memoryList'],
+  documents: ['documentList'],
+  notes: ['noteTemplateList', 'noteList'],
+  automations: ['taskList', 'taskRunList'],
+  email: ['emailAccountList', 'ruleList'],
+  presets: ['presetList'],
+  prompts: ['promptList'],
+  localgen: ['workflowList'],
+  accounts: ['accountList'],
+};
+
 const SETTINGS_TAB_LOADERS = {
   chats: () => { refreshChatManagement(); },
   usage: () => { refreshUsage(); },
@@ -1799,6 +1813,7 @@ function showSettingsTab(tab) {
     if (t === tab) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
   });
   settingsEls.panels.forEach(p => { p.hidden = p.dataset.panel !== tab.dataset.tab; });
+  (SETTINGS_TAB_LISTS[tab.dataset.tab] || []).forEach(id => showListLoading(document.getElementById(id)));
   const load = SETTINGS_TAB_LOADERS[tab.dataset.tab];
   if (load) load();
 }

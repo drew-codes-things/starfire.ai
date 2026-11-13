@@ -325,3 +325,14 @@ test('the plus menu is driven by that key handler and gives focus back to its bu
   assert.match(workspace, /function closePlusMenu\(\) \{[^}]*\$\('plusBtn'\)\.focus\(\);/);
   assert.match(workspace, /if \(opening\) \{[^}]*plusMenuItems\(\)\[0\]/);
 });
+
+
+test('an empty settings list shows a loading row, a list already showing items is left alone', () => {
+  const empty = { children: [], innerHTML: '' };
+  assert.equal(logic.showListLoading(empty), true);
+  assert.match(empty.innerHTML, /<li class="settings-hint" role="status">loading…<\/li>/);
+  const filled = { children: [{}], innerHTML: '<li>kept</li>' };
+  assert.equal(logic.showListLoading(filled), false);
+  assert.equal(filled.innerHTML, '<li>kept</li>');
+  assert.equal(logic.showListLoading(null), false);
+});
