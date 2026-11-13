@@ -322,7 +322,7 @@ def test_pending_shell_commands_can_be_approved_or_rejected(client, monkeypatch)
 
 
 def test_mcp_server_add_validates_remote_urls(client, monkeypatch):
-    async def fake_connect(server):
+    async def fake_connect(server, auth=None):
         return [{"name": "ping", "description": "", "input_schema": {}}]
 
     monkeypatch.setattr(routes.mcp_manager, "connect_server", fake_connect)

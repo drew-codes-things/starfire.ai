@@ -20,7 +20,7 @@ const SETTINGS_TAB_LOADERS = {
   presets: () => { refreshPresetList(); },
   documents: () => { refreshDocumentList(); },
   prompts: () => { refreshPromptList(); },
-  tools: () => { refreshMcpServerList(); refreshMcpRepository(); },
+  tools: () => { refreshMcpServerList(); refreshMcpRepository(); refreshMcpSignInServices(); },
   memory: () => { refreshMemoryList(); },
   notes: () => { refreshNoteList(); refreshNoteTemplateList(); },
   automations: () => { refreshTaskEndpointOptions(); refreshTaskList(); refreshTaskRunList(); },
@@ -248,11 +248,15 @@ async function refreshMcpServerList() {
       const li = document.createElement('li');
       li.className = 'endpoint-row';
       const checked = enabledMcpServers.has(s.id) ? 'checked' : '';
+      const state = mcpServerState(s);
       li.innerHTML =
         `<label class="theme-toggle"><input type="checkbox" ${checked} /></label>` +
         `<span class="endpoint-label">${escapeHtml(s.name)}</span>` +
-        `<span class="endpoint-meta">${s.transport && s.transport !== 'stdio' ? escapeHtml(s.url) + ' · ' : ''}${s.tool_count} tool(s)${s.connected ? '' : ' · not running'}${s.secrets_missing ? ' · secret missing, remove and add it again' : ''}</span>` +
+        `<span class="endpoint-meta mcp-state-${state.kind}">${s.transport && s.transport !== 'stdio' ? escapeHtml(s.url) + ' · ' : ''}${escapeHtml(state.text)}${s.secrets_missing ? ' · secret missing, remove and add it again' : ''}</span>` +
+        (s.needs_sign_in ? '<button class="btn ghost admin-only mcp-sign-in-again" type="button">Sign in again</button>' : '') +
         `<button class="endpoint-remove admin-only" type="button" title="Remove" aria-label="Remove">×</button>`;
+      const signInAgain = li.querySelector('.mcp-sign-in-again');
+      if (signInAgain) signInAgain.onclick = () => startMcpSignIn({ server_id: s.id }, signInAgain);
       li.querySelector('input[type="checkbox"]').onchange = e => {
         if (e.target.checked) enabledMcpServers.add(s.id); else enabledMcpServers.delete(s.id);
         saveEnabledMcpServers();
@@ -295,6 +299,81 @@ async function addMcpPreset(preset, resultEl, path, env) {
     resultEl.className = 'settings-hint error';
   }
 }
+
+async function refreshMcpSignInServices() {
+  try {
+    const r = await fetch('/api/mcp/sign-in-services');
+    const { services = [] } = await r.json();
+    settingsEls.mcpServiceGrid.innerHTML = '';
+    for (const service of services) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'mcp-service';
+      const name = document.createElement('span');
+      name.className = 'mcp-service-name';
+      name.textContent = service.name;
+      const host = document.createElement('span');
+      host.className = 'mcp-service-host';
+      host.textContent = service.host;
+      button.append(name, host);
+      button.onclick = () => startMcpSignIn({ service: service.id }, button);
+      settingsEls.mcpServiceGrid.appendChild(button);
+    }
+  } catch (_) {
+    settingsEls.mcpServiceGrid.innerHTML = '<p class="settings-hint error">failed to load the services</p>';
+  }
+}
+
+async function startMcpSignIn(body, button) {
+  const resultEl = settingsEls.mcpSignInResult;
+  button.disabled = true;
+  resultEl.textContent = 'Signing in: opening the sign-in page…';
+  resultEl.className = 'settings-hint';
+  try {
+    const r = await fetch('/api/mcp/servers/sign-in', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const answer = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(answer.detail || 'could not start the sign-in');
+    window.location.assign(answer.authorize_url);
+  } catch (e) {
+    button.disabled = false;
+    resultEl.textContent = e.message;
+    resultEl.className = 'settings-hint error';
+    showToast(e.message, 'error');
+  }
+}
+
+settingsEls.mcpSignInUrlBtn.onclick = () => {
+  const url = settingsEls.mcpSignInUrl.value.trim();
+  if (url) startMcpSignIn({ url }, settingsEls.mcpSignInUrlBtn);
+};
+
+async function serverNamed(serverId) {
+  if (!serverId) return '';
+  try {
+    const r = await fetch('/api/mcp/servers');
+    const { servers = [] } = await r.json();
+    return (servers.find(s => s.id === serverId) || {}).name || '';
+  } catch (_) {
+    return '';
+  }
+}
+
+async function showMcpSignInResult() {
+  const result = signInResultFromSearch(window.location.search);
+  if (!result) return;
+  history.replaceState(null, '', window.location.pathname + searchWithoutSignInResult(window.location.search) + window.location.hash);
+  if (result.connected && result.serverId) {
+    enabledMcpServers.add(result.serverId);
+    saveEnabledMcpServers();
+  }
+  showToast(signInResultMessage(result, await serverNamed(result.serverId)), result.connected ? 'info' : 'error');
+  openSettings('tools');
+}
+document.addEventListener('DOMContentLoaded', showMcpSignInResult);
 
 settingsEls.addFilesystemBtn.onclick = () =>
   addMcpPreset('filesystem', settingsEls.mcpQuickAddResult, settingsEls.filesystemPath.value.trim());

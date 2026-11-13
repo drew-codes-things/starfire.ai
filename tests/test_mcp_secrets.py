@@ -121,7 +121,7 @@ def test_the_encryption_key_is_the_one_api_keys_use(tmp_path):
 
 
 def test_the_api_never_returns_env_or_header_values(tmp_path, monkeypatch):
-    async def fake_connect(server):
+    async def fake_connect(server, auth=None):
         assert server.env == {"GITHUB_PERSONAL_ACCESS_TOKEN": TOKEN}
         return []
 

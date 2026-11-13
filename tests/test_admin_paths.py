@@ -292,7 +292,7 @@ def mcp_connections(monkeypatch):
     disconnected = []
     failing = set()
 
-    async def connect(server):
+    async def connect(server, auth=None):
         if server.command in failing:
             raise routes.McpConnectionError(f"{server.command} would not start")
         connected.append(server)

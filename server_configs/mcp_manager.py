@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 CONNECT_TIMEOUT_S = 45
 REMOTE_TRANSPORTS = ("http", "sse")
+SIGNED_IN_TRANSPORT = "http"
 
 
 class McpConnectionError(Exception):
@@ -42,20 +43,22 @@ class McpManager:
         self._tools_cache: dict[str, list[dict]] = {}
         self._lock = asyncio.Lock()
 
-    async def connect_server(self, server) -> list[dict]:
+    async def connect_server(self, server, auth: httpx.Auth | None = None) -> list[dict]:
         return await self.connect(server.id, server.command, server.args, server.env or None,
                                   transport=getattr(server, "transport", "stdio") or "stdio",
                                   url=getattr(server, "url", "") or "",
-                                  headers=getattr(server, "headers", None) or None)
+                                  headers=getattr(server, "headers", None) or None, auth=auth)
 
     async def connect(self, server_id: str, command: str, args: list[str],
                        env: dict[str, str] | None = None, transport: str = "stdio", url: str = "",
-                       headers: dict[str, str] | None = None) -> list[dict]:
+                       headers: dict[str, str] | None = None, auth: httpx.Auth | None = None) -> list[dict]:
         async with self._lock:
             if server_id in self._sessions:
                 return self._tools_cache.get(server_id, [])
+            if auth is not None and transport != SIGNED_IN_TRANSPORT:
+                raise McpConnectionError("browser sign-in works with streamable HTTP MCP servers only")
             if transport in REMOTE_TRANSPORTS:
-                session, tools = await self._connect_remote(server_id, transport, url, headers)
+                session, tools = await self._connect_remote(server_id, transport, url, headers, auth)
             else:
                 session, tools = await self._connect_stdio(server_id, command, args, env)
             self._sessions[server_id] = session
@@ -80,13 +83,13 @@ class McpManager:
         self._exit_stacks[server_id] = stack
         return session, tools
 
-    async def _connect_remote(self, server_id: str, transport: str, url: str,
-                              headers: dict[str, str] | None) -> tuple[ClientSession, list[dict]]:
+    async def _connect_remote(self, server_id: str, transport: str, url: str, headers: dict[str, str] | None,
+                              auth: httpx.Auth | None) -> tuple[ClientSession, list[dict]]:
         if not url:
             raise McpConnectionError(f"an {transport.upper()} MCP server needs a URL")
         ready: asyncio.Future = asyncio.get_running_loop().create_future()
         stop = asyncio.Event()
-        task = asyncio.create_task(self._serve_remote(transport, url, headers, ready, stop))
+        task = asyncio.create_task(self._serve_remote(transport, url, headers, auth, ready, stop))
         try:
             session, tools = await asyncio.wait_for(ready, timeout=CONNECT_TIMEOUT_S + 5)
         except asyncio.TimeoutError as e:
@@ -100,12 +103,12 @@ class McpManager:
         self._remote_tasks[server_id] = (task, stop)
         return session, tools
 
-    async def _serve_remote(self, transport: str, url: str, headers: dict[str, str] | None,
+    async def _serve_remote(self, transport: str, url: str, headers: dict[str, str] | None, auth: httpx.Auth | None,
                             ready: asyncio.Future, stop: asyncio.Event) -> None:
         try:
             async with AsyncExitStack() as stack:
                 if transport == "http":
-                    client = httpx.AsyncClient(headers=headers or {}, follow_redirects=True,
+                    client = httpx.AsyncClient(headers=headers or {}, auth=auth, follow_redirects=True,
                                                timeout=httpx.Timeout(30.0, read=300.0))
                     await stack.enter_async_context(client)
                     streams = await stack.enter_async_context(streamable_http_client(url, http_client=client))

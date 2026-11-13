@@ -88,7 +88,7 @@ async def lifespan(app: FastAPI):
         if not server.enabled:
             continue
         try:
-            await mcp_manager.connect_server(server)
+            await routes.connect_mcp_server(server)
         except McpConnectionError as e:
             print(f"  starfire.ai  ->  could not start MCP server '{server.name}': {e}")
 
