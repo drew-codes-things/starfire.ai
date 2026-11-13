@@ -45,8 +45,14 @@ class Attachment:
         return {"id": self.id, "name": self.name, "mime": self.mime, "kind": self.kind, "size": self.size}
 
 
+IMAGE_TYPES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
+
+
 def kind_of(mime: str) -> str | None:
-    family = (mime or "").split("/", 1)[0].lower()
+    mime = (mime or "").lower()
+    family = mime.split("/", 1)[0]
+    if family == "image" and mime not in IMAGE_TYPES:
+        return None
     return family if family in KINDS else None
 
 
@@ -73,7 +79,8 @@ class AttachmentStore:
     async def save(self, name: str, mime: str, chunks, room_bytes: int | None = None) -> Attachment:
         kind = kind_of(mime)
         if not kind:
-            raise AttachmentError(f"{mime or 'this file type'} can't be attached - use images, audio or video")
+            raise AttachmentError(f"{mime or 'this file type'} can't be attached - use PNG, JPEG, GIF or WebP "
+                                  "images, audio or video")
         attachment = Attachment(id=uuid.uuid4().hex, name=safe_name(name), mime=mime.lower(), kind=kind,
                                 size=0, created=time.time())
         data_path, meta_path = self._paths(attachment.id)

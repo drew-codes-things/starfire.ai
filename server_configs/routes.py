@@ -454,6 +454,14 @@ async def add_attachment(file: UploadFile):
         raise HTTPException(400, str(e))
     return attachment.public()
 
+VIEWER_TYPES_THAT_BREAK_IN_A_SANDBOX = frozenset({"application/pdf"})
+
+def _stored_file_headers(content_type: str) -> dict:
+    headers = {"X-Content-Type-Options": "nosniff"}
+    if content_type.lower() not in VIEWER_TYPES_THAT_BREAK_IN_A_SANDBOX:
+        headers["Content-Security-Policy"] = "sandbox"
+    return headers
+
 @router.get("/attachments/{attachment_id}")
 async def get_attachment(attachment_id: str):
     try:
@@ -461,7 +469,8 @@ async def get_attachment(attachment_id: str):
     except AttachmentError as e:
         raise HTTPException(404, str(e))
     return FileResponse(attachment_store.data_path(attachment.id), media_type=attachment.mime,
-                        filename=attachment.name, content_disposition_type="inline")
+                        filename=attachment.name, content_disposition_type="inline",
+                        headers=_stored_file_headers(attachment.mime))
 
 MAX_DOCUMENT_CONTEXT_CHARS = 60_000
 
@@ -1539,7 +1548,7 @@ async def get_generated_file(file_id: str):
     if not os.path.exists(path):
         raise HTTPException(404, "file data missing on disk")
     return FileResponse(path, media_type=entry.content_type, filename=entry.filename,
-                        content_disposition_type="inline")
+                        content_disposition_type="inline", headers=_stored_file_headers(entry.content_type))
 
 @router.delete("/generated/{file_id}")
 async def delete_generated_file(file_id: str):

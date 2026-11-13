@@ -68,3 +68,30 @@ def test_generated_document_names_lose_quotes_slashes_and_control_characters(tmp
     result = json.loads(builtin_tools._generate_document(
         {"content": "hi", "format": "txt", "filename": 'a"/b\\c\x07d'}, ctx))
     assert result["filename"] == "a__b_c_d.txt"
+
+
+def test_generated_files_and_attachments_cannot_run_scripts_in_this_site(admin):
+    entry = generated(admin, "page.txt", "text/html", b"<script>alert(1)</script>")
+    attachment = admin.post("/api/attachments", files={"file": ("cat.png", PNG, "image/png")}).json()
+    for path in (f"/api/generated/{entry.id}", f"/api/attachments/{attachment['id']}"):
+        response = admin.get(path)
+        assert response.headers["x-content-type-options"] == "nosniff", path
+        assert response.headers["content-security-policy"] == "sandbox", path
+
+
+@pytest.mark.parametrize("mime", ["image/svg+xml", "image/x-icon", "image/bmp"])
+def test_only_plain_raster_images_can_be_attached(admin, mime):
+    response = admin.post("/api/attachments", files={"file": ("x.img", b"<svg/>", mime)})
+    assert response.status_code == 400
+
+
+@pytest.mark.parametrize("mime", ["image/png", "image/jpeg", "image/gif", "image/webp"])
+def test_common_images_can_still_be_attached(admin, mime):
+    assert admin.post("/api/attachments", files={"file": ("x.img", PNG, mime)}).status_code == 200
+
+
+def test_generated_pdfs_keep_working_in_the_browser_pdf_viewer(admin):
+    entry = generated(admin, "report.pdf", "application/pdf", b"%PDF-1.4")
+    response = admin.get(f"/api/generated/{entry.id}")
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert "content-security-policy" not in response.headers
