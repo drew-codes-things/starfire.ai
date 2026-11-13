@@ -720,6 +720,7 @@ function renderDiffCard(resultJson) {
 
   if (data.staged && data.pending_id) {
     trackApproval(data.pending_id, card);
+    const guard = answerGuard();
     const actionsRow = document.createElement('div');
     actionsRow.className = 'diff-card-actions';
     const approveBtn = document.createElement('button');
@@ -727,6 +728,7 @@ function renderDiffCard(resultJson) {
     const rejectBtn = document.createElement('button');
     rejectBtn.type = 'button'; rejectBtn.className = 'btn ghost'; rejectBtn.textContent = 'reject';
     approveBtn.onclick = async () => {
+      if (!guard.isReady()) return;
       approveBtn.disabled = true; rejectBtn.disabled = true;
       openApprovals.delete(data.pending_id);
       try {
@@ -735,6 +737,7 @@ function renderDiffCard(resultJson) {
       } catch (_) { actionsRow.textContent = 'failed to approve'; }
     };
     rejectBtn.onclick = async () => {
+      if (!guard.isReady()) return;
       approveBtn.disabled = true; rejectBtn.disabled = true;
       openApprovals.delete(data.pending_id);
       try {
@@ -745,6 +748,7 @@ function renderDiffCard(resultJson) {
     actionsRow.appendChild(approveBtn);
     actionsRow.appendChild(rejectBtn);
     card.appendChild(actionsRow);
+    flashNewQuestion(card, [approveBtn, rejectBtn], guard);
   }
 
   els.output.appendChild(card);
@@ -767,7 +771,9 @@ function renderShellApprovalCard(data) {
   const rejectBtn = document.createElement('button');
   rejectBtn.type = 'button'; rejectBtn.className = 'btn ghost'; rejectBtn.textContent = 'reject';
   trackApproval(data.pending_id, card);
+  const guard = answerGuard();
   const decide = async (approved) => {
+    if (!guard.isReady()) return;
     approveBtn.disabled = true; rejectBtn.disabled = true;
     openApprovals.delete(data.pending_id);
     try {
@@ -781,6 +787,7 @@ function renderShellApprovalCard(data) {
   rejectBtn.onclick = () => decide(false);
   actionsRow.append(approveBtn, rejectBtn);
   card.appendChild(actionsRow);
+  flashNewQuestion(card, [approveBtn, rejectBtn], guard);
   els.output.appendChild(card);
   els.output.scrollTop = els.output.scrollHeight;
 }

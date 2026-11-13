@@ -8,6 +8,7 @@ const vm = require('node:vm');
 
 const STATIC = path.join(__dirname, '..', '..', 'static');
 const SESSION = '0123456789abcdef';
+const QUESTION_PAUSE_MS = 1000;
 
 class FakeElement {
   constructor(tag) {
@@ -99,8 +100,8 @@ function openPage(routes) {
     timers.add(timer);
     return timer;
   };
-  const context = vm.createContext({ document, window, fetch, Node: FakeElement, URL, URLSearchParams, setTimeout: later, clearTimeout, console });
-  for (const script of ['artyPage.js', 'artyCliLogic.js', 'artyCli.js']) {
+  const context = vm.createContext({ document, window, fetch, Node: FakeElement, URL, URLSearchParams, Date, setTimeout: later, clearTimeout, console });
+  for (const script of ['artyPage.js', 'answerGuard.js', 'artyCliLogic.js', 'artyCli.js']) {
     vm.runInContext(fs.readFileSync(path.join(STATIC, script), 'utf8'), context, { filename: script });
   }
   const close = () => timers.forEach((timer) => clearTimeout(timer));
@@ -148,6 +149,7 @@ test('a session reads like a chat and untrusted event text never becomes markup'
 });
 
 test('an answer is sent once and its card goes, and after the end the composer stays switched off with the reason', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
   let finish;
   const events = [{ seq: 1, type: 'permission', request_id: 'r1', text: 'Run command: pytest' }];
   const { root, calls, close } = openPage([
@@ -162,6 +164,7 @@ test('an answer is sent once and its card goes, and after the end the composer s
   const allow = button(root, 'Allow');
   assert.ok(allow, 'the waiting request has an Allow button');
   assert.equal(button(root, 'Stop').hidden, false);
+  t.mock.timers.tick(QUESTION_PAUSE_MS);
   allow.listeners.click();
   allow.listeners.click();
   for (let round = 0; round < 5; round += 1) await settle();
@@ -175,6 +178,32 @@ test('an answer is sent once and its card goes, and after the end the composer s
   assert.equal(button(root, 'Stop').hidden, true);
   assert.match(allText(root), /can't take messages/);
   assert.match(allText(root), /Session ended/);
+});
+
+test('a new request ignores Allow and Deny until it has been on screen for a second, and says it is new', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
+  const events = [{ seq: 1, type: 'permission', request_id: 'r1', text: 'Run command: rm -rf build' }];
+  const { root, calls, close } = openPage([
+    ['/sessions/' + SESSION + '/events', 'GET', sequence(() => reply(200, { events, next: 1, ended: false, missed: false, session: SESSION_INFO }))],
+    ['/answers', 'POST', () => reply(200, { ok: true })],
+    ['/api/arty-cli/sessions', 'GET', () => reply(200, { sessions: [SESSION_INFO] })],
+  ]);
+  t.after(close);
+  for (let round = 0; round < 5; round += 1) await settle();
+  const answers = () => calls.filter((call) => call.url.endsWith('/answers')).map((call) => call.body);
+  const allow = button(root, 'Allow');
+  assert.match(allText(byClass(root, 'arty-cli-permission')[0]), /New question/);
+  assert.equal(allow.getAttribute('aria-disabled'), 'true');
+  allow.listeners.click();
+  button(root, 'Deny').listeners.click();
+  t.mock.timers.tick(QUESTION_PAUSE_MS - 1);
+  allow.listeners.click();
+  for (let round = 0; round < 5; round += 1) await settle();
+  assert.deepEqual(answers(), []);
+  t.mock.timers.tick(1);
+  allow.listeners.click();
+  for (let round = 0; round < 5; round += 1) await settle();
+  assert.deepEqual(answers(), [{ request_id: 'r1', allow: true }]);
 });
 
 test('a shared terminal shows its title, the earlier conversation and the compacted summary without markup', async (t) => {

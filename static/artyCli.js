@@ -175,8 +175,9 @@ function permissionCard(sessionId, request, answered, readUpTo) {
     card.className = 'arty-cli-answered';
     card.replaceChildren(text);
   };
+  const guard = answerGuard();
   const answer = async (allow) => {
-    if (sending || answered.has(request.request_id)) return;
+    if (!guard.isReady() || sending || answered.has(request.request_id)) return;
     sending = true;
     buttons.forEach((button) => { button.disabled = true; });
     problem.replaceChildren();
@@ -201,7 +202,7 @@ function permissionCard(sessionId, request, answered, readUpTo) {
   const card = el('section', { class: 'arty-cli-permission' }, el('p', { class: 'arty-cli-question' }, heading),
     preview ? el('pre', { class: 'arty-cli-preview' }, previewNodes(preview)) : null,
     el('div', { class: 'settings-row' }, ...buttons), problem);
-  return card;
+  return flashNewQuestion(card, buttons, guard);
 }
 
 function shownCards(sessionId, open, cards, answered, readUpTo) {
