@@ -29,6 +29,7 @@ class FakeOAuthState:
     access_lifetime: int = 3600
     refuse_refresh: bool = False
     offer_registration: bool = True
+    advertise_iss: bool = False
     pkce_methods: list = field(default_factory=lambda: ["S256"])
     published_issuer: str = ""
     clients: dict = field(default_factory=dict)
@@ -71,6 +72,8 @@ def build_app(state: FakeOAuthState) -> Starlette:
                     "token_endpoint_auth_methods_supported": ["none"]}
         if state.offer_registration:
             metadata["registration_endpoint"] = f"{state.base_url}/register"
+        if state.advertise_iss:
+            metadata["authorization_response_iss_parameter_supported"] = True
         return JSONResponse(metadata)
 
     async def register(request: Request):
@@ -97,6 +100,8 @@ def build_app(state: FakeOAuthState) -> Starlette:
     async def token(request: Request):
         form = dict(await request.form())
         state.token_requests.append(form)
+        if form.get("client_id") not in state.clients:
+            return JSONResponse({"error": "invalid_client"}, status_code=401)
         if form.get("grant_type") == "authorization_code":
             issued = state.codes.pop(form.get("code", ""), None)
             if not issued or s256(form.get("code_verifier", "")) != issued["code_challenge"]:

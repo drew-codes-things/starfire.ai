@@ -22,6 +22,7 @@ SECRET_FIELDS = ("env", "headers")
 OAUTH_FIELD = "oauth"
 OAUTH_SECRET_KEYS = ("access_token", "refresh_token", "client_secret")
 NEEDS_SIGN_IN = "needs_sign_in"
+REREGISTER = "reregister"
 SECRETS_ENCRYPTED = "secrets_encrypted"
 FERNET_VERSION_BYTE = 0x80
 FERNET_FIXED_BYTES = 57
@@ -300,10 +301,18 @@ class McpServerStore:
         self._write_items(items)
         return server
 
+    def _shown_url(self, item: dict) -> str:
+        label = item.get("name") or item.get("command") or item.get("id", "")
+        return without_url_credentials(self._plain_or_removed(label, "URL", item.get("url") or ""))
+
+    def _merged_with_live(self, restored: dict, live: dict) -> dict:
+        same_url = self._shown_url(restored) == self._shown_url(live)
+        return _with_live_secrets(restored, live, keeps_live_sign_in=same_url)
+
     @holds_file_lock()
     def restore(self, restored_items: list) -> None:
         live_by_id = {item["id"]: item for item in self._read_items() if _is_usable(item)}
-        merged = [_with_live_secrets(item, live_by_id[item["id"]]) if _is_usable(item) and item["id"] in live_by_id
+        merged = [self._merged_with_live(item, live_by_id[item["id"]]) if _is_usable(item) and item["id"] in live_by_id
                   else item for item in restored_items]
         self._write_items([self._with_encrypted_secrets(item) if isinstance(item, dict) else item for item in merged])
 
@@ -383,7 +392,7 @@ def _holds_removed_secret(value) -> bool:
     return isinstance(value, str) and SECRET_REMOVED in value
 
 
-def _with_live_secrets(restored: dict, live: dict) -> dict:
+def _with_live_secrets(restored: dict, live: dict, keeps_live_sign_in: bool) -> dict:
     merged = dict(restored)
     for secret_field in SECRET_FIELDS:
         restored_values, live_values = restored.get(secret_field), live.get(secret_field)
@@ -394,7 +403,8 @@ def _with_live_secrets(restored: dict, live: dict) -> dict:
         if _holds_removed_secret(restored.get(removable_field)) and removable_field in live:
             merged[removable_field] = live[removable_field]
     restored_oauth, live_oauth = restored.get(OAUTH_FIELD), live.get(OAUTH_FIELD)
-    if isinstance(restored_oauth, dict) and isinstance(live_oauth, dict) and not restored_oauth.get("access_token"):
+    blank_sign_in = isinstance(restored_oauth, dict) and not restored_oauth.get("access_token")
+    if keeps_live_sign_in and blank_sign_in and isinstance(live_oauth, dict):
         merged[OAUTH_FIELD] = live_oauth
     return merged
 

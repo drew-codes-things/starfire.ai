@@ -337,6 +337,13 @@ async function startMcpSignIn(body, button) {
     });
     const answer = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(answer.detail || 'could not start the sign-in');
+    const notice = signInHostNotice(answer);
+    if (notice && !await showDialog({ title: 'Sign in through another site?', text: notice, okLabel: 'Continue' })) {
+      button.disabled = false;
+      resultEl.textContent = 'Sign-in cancelled';
+      return;
+    }
+    try { sessionStorage.setItem(MCP_SIGN_IN_MARKER, '1'); } catch (_) {}
     window.location.assign(answer.authorize_url);
   } catch (e) {
     button.disabled = false;
@@ -351,26 +358,38 @@ settingsEls.mcpSignInUrlBtn.onclick = () => {
   if (url) startMcpSignIn({ url }, settingsEls.mcpSignInUrlBtn);
 };
 
-async function serverNamed(serverId) {
-  if (!serverId) return '';
+async function listedMcpServers() {
   try {
     const r = await fetch('/api/mcp/servers');
     const { servers = [] } = await r.json();
-    return (servers.find(s => s.id === serverId) || {}).name || '';
+    return servers;
   } catch (_) {
-    return '';
+    return [];
+  }
+}
+
+function takeMcpSignInMarker() {
+  try {
+    const started = sessionStorage.getItem(MCP_SIGN_IN_MARKER) !== null;
+    sessionStorage.removeItem(MCP_SIGN_IN_MARKER);
+    return started;
+  } catch (_) {
+    return false;
   }
 }
 
 async function showMcpSignInResult() {
-  const result = signInResultFromSearch(window.location.search);
+  const search = window.location.search;
+  if (!signInResultFromSearch(search, true)) return;
+  history.replaceState(null, '', window.location.pathname + searchWithoutSignInResult(search) + window.location.hash);
+  const result = signInResultFromSearch(search, takeMcpSignInMarker());
   if (!result) return;
-  history.replaceState(null, '', window.location.pathname + searchWithoutSignInResult(window.location.search) + window.location.hash);
-  if (result.connected && result.serverId) {
-    enabledMcpServers.add(result.serverId);
+  const server = listedServer(result, await listedMcpServers());
+  if (result.connected && server) {
+    enabledMcpServers.add(server.id);
     saveEnabledMcpServers();
   }
-  showToast(signInResultMessage(result, await serverNamed(result.serverId)), result.connected ? 'info' : 'error');
+  showToast(signInResultMessage(result, server ? server.name : ''), result.connected ? 'info' : 'error');
   openSettings('tools');
 }
 document.addEventListener('DOMContentLoaded', showMcpSignInResult);

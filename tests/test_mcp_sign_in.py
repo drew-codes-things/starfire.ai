@@ -1,8 +1,11 @@
+import asyncio
 import io
 import json
 import logging
 import os
 import sys
+import threading
+import time
 import zipfile
 from urllib.parse import parse_qs, urlencode, urlsplit
 
@@ -13,6 +16,7 @@ sys.path.insert(0, os.path.join(ROOT, "tests"))
 import bcrypt
 import httpx
 import pytest
+import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from starlette.requests import Request
@@ -27,7 +31,7 @@ from auth import SessionStore, UserStore
 from config import config
 from mcp_manager import McpManager
 from mcp_servers_store import McpServerStore, needs_sign_in
-from oauth_fake_server import RunningFakeServer
+from oauth_fake_server import FakeOAuthState, RunningFakeServer, _free_port, build_app
 
 PASSWORD = "correct horse battery staple"
 HEADERS = {"X-Starfire-Client": "1"}
@@ -357,3 +361,173 @@ def test_the_callback_address_needs_a_plain_host_and_takes_the_scheme_the_browse
     with pytest.raises(HTTPException) as raised:
         routes.sign_in_callback_uri(request_with("192.168.1.16"))
     assert raised.value.status_code == 500
+
+
+def test_a_token_endpoint_blip_fails_one_call_and_the_next_call_works(admin, fake, data_dir, monkeypatch):
+    server_id = sign_in(admin)
+    fake.state.revoke_access_tokens()
+    real_refresh = mcp_oauth.refresh_tokens
+    attempts = []
+
+    async def blip_once(client, grant, clock=None):
+        attempts.append(grant.tokens.refresh_token)
+        if len(attempts) == 1:
+            raise mcp_oauth.McpSignInError("could not reach the token address: ConnectTimeout")
+        return await real_refresh(client, grant)
+
+    monkeypatch.setattr(mcp_oauth, "refresh_tokens", blip_once)
+    with pytest.raises(Exception):
+        echo(admin, server_id)
+    server = listed(admin, server_id)
+    assert server["connected"] is True and server["needs_sign_in"] is False
+    assert echo(admin, server_id) == "echo: hi"
+    assert len(attempts) == 2 and routes.mcp_manager.is_connected(server_id)
+
+
+def test_a_refused_refresh_drops_the_session_so_it_is_not_shown_as_connected(admin, fake, data_dir):
+    server_id = sign_in(admin)
+    fake.state.revoke_access_tokens()
+    fake.state.refuse_refresh = True
+    with pytest.raises(Exception):
+        echo(admin, server_id)
+    assert not routes.mcp_manager.is_connected(server_id)
+    assert routes.mcp_manager.get_all_openai_schemas({server_id}) == []
+    assert listed(admin, server_id)["needs_sign_in"] is True
+
+
+def test_a_plain_url_server_that_went_away_is_dropped_and_reconnects_at_chat_time(admin):
+    def serve(state, port):
+        server = uvicorn.Server(uvicorn.Config(build_app(state), host="127.0.0.1", port=port, log_level="warning",
+                                               lifespan="off"))
+        thread = threading.Thread(target=server.run, daemon=True)
+        thread.start()
+        while not server.started:
+            time.sleep(0.02)
+        return server, thread
+
+    port = _free_port()
+    state = FakeOAuthState(base_url=f"http://127.0.0.1:{port}")
+    state.access_tokens["static-token"] = time.time() + 3600
+    running, thread = serve(state, port)
+    server = routes.mcp_servers.add(name="Plain", command="", args=[], transport="http", url=f"{state.base_url}/mcp",
+                                    headers={"Authorization": "Bearer static-token"})
+    try:
+        admin.portal.call(routes.connect_mcp_server, server)
+        assert echo(admin, server.id) == "echo: hi"
+        running.should_exit = True
+        thread.join(timeout=10)
+        with pytest.raises(Exception):
+            echo(admin, server.id)
+        assert not routes.mcp_manager.is_connected(server.id)
+        running, thread = serve(state, port)
+        admin.portal.call(routes.connect_mcp_server, routes.mcp_servers.get(server.id))
+        assert echo(admin, server.id) == "echo: hi"
+    finally:
+        admin.portal.call(routes.mcp_manager.disconnect, server.id)
+        running.should_exit = True
+        thread.join(timeout=10)
+
+
+def test_sign_in_again_registers_afresh_when_the_service_rejects_the_client(admin, fake, data_dir):
+    server_id = sign_in(admin)
+    old_client = McpServerStore(data_dir).get(server_id).oauth["client_id"]
+    fake.state.clients.clear()
+    fake.state.revoke_access_tokens()
+    with pytest.raises(Exception):
+        echo(admin, server_id)
+    server = listed(admin, server_id)
+    assert server["needs_sign_in"] is True and "invalid_client" in server["problem"]
+    authorize_url = start(admin, server_id=server_id)
+    assert query_of(authorize_url)["client_id"] != old_client
+    assert finish(admin, approve(authorize_url)) == {"mcp_sign_in": "connected", "server": server_id}
+    assert echo(admin, server_id) == "echo: hi"
+
+
+def test_a_sign_in_again_that_never_came_back_registers_afresh_next_time(admin, fake, data_dir):
+    server_id = sign_in(admin)
+    McpServerStore(data_dir).update_oauth(server_id, {"needs_sign_in": True})
+    old_client = McpServerStore(data_dir).get(server_id).oauth["client_id"]
+    fake.state.clients.clear()
+    abandoned = start(admin, server_id=server_id)
+    assert query_of(abandoned)["client_id"] == old_client
+    assert httpx.get(abandoned, follow_redirects=False).status_code == 400
+    retried = start(admin, server_id=server_id)
+    assert query_of(retried)["client_id"] != old_client
+    assert finish(admin, approve(retried))["mcp_sign_in"] == "connected"
+    assert McpServerStore(data_dir).get(server_id).oauth["reregister"] is False
+    assert query_of(start(admin, server_id=server_id))["client_id"] == query_of(retried)["client_id"]
+
+
+def test_a_registration_that_needs_a_secret_it_no_longer_has_is_not_reused(admin, fake, data_dir):
+    server_id = sign_in(admin)
+    store = McpServerStore(data_dir)
+    store.update_oauth(server_id, {"auth_method": "client_secret_post", "client_secret": ""})
+    existing = store.get(server_id)
+    discovered = mcp_oauth.OAuthGrant.from_record(existing.oauth).server
+    assert routes._reusable_registration(existing, discovered, CALLBACK) is None
+    store.update_oauth(server_id, {"client_secret": "PLACEHOLDER-secret"})
+    assert routes._reusable_registration(store.get(server_id), discovered, CALLBACK).client_id == \
+        existing.oauth["client_id"]
+
+
+def test_people_who_are_not_admins_see_a_generic_problem_without_addresses(app, admin, fake, data_dir):
+    server_id = sign_in(admin)
+    detail = "failed to connect to 'http://10.0.0.5:8080/tenant-4711/private-path/mcp': Not Found"
+    McpServerStore(data_dir).update_oauth(server_id, {"problem": detail})
+    assert listed(admin, server_id)["problem"] == detail
+    sam = signed_in_client(app, "sam@example.com")
+    try:
+        [view] = sam.get("/api/mcp/servers").json()["servers"]
+    finally:
+        close(sam)
+    assert view["problem"] == routes.HIDDEN_PROBLEM and "tenant-4711" not in json.dumps(view)
+
+
+def test_a_damaged_saved_sign_in_is_a_connection_error_that_asks_for_a_new_sign_in(admin, data_dir):
+    store = McpServerStore(data_dir)
+    server = store.add(name="Broken", command="", args=[], transport="http", url="https://mcp.example.test/mcp",
+                       oauth={"access_token": "x"})
+    with pytest.raises(routes.McpConnectionError, match="saved sign-in"):
+        admin.portal.call(routes.connect_mcp_server, store.get(server.id))
+    view = listed(admin, server.id)
+    assert view["needs_sign_in"] is True and "saved sign-in" in view["problem"]
+
+
+def test_a_saved_sign_in_is_never_sent_to_an_address_it_was_not_issued_for(admin, fake, data_dir):
+    server_id = sign_in(admin)
+    admin.portal.call(routes.mcp_manager.disconnect, server_id)
+    fake.state.mcp_authorizations.clear()
+    moved = McpServerStore(data_dir).get(server_id)
+    moved.url = moved.url.replace("/mcp", "/elsewhere/mcp")
+    with pytest.raises(routes.McpConnectionError, match="new address"):
+        admin.portal.call(routes.connect_mcp_server, moved)
+    assert fake.state.mcp_authorizations == []
+    assert listed(admin, server_id)["needs_sign_in"] is True
+
+
+def test_a_sign_in_server_that_promises_iss_must_send_it(admin, fake):
+    fake.state.advertise_iss = True
+    params = query_of(approve(start(admin)))
+    without_iss = f"{mcp_oauth.CALLBACK_PATH}?{urlencode({'code': params['code'], 'state': params['state']})}"
+    result = finish(admin, without_iss)
+    assert result["mcp_sign_in"] == "failed" and "did not say" in result["reason"]
+    assert fake.state.grant_count("authorization_code") == 0
+    assert sign_in(admin)
+
+
+def test_starting_a_sign_in_names_the_host_the_browser_will_be_sent_to(admin, fake):
+    answer = admin.post("/api/mcp/servers/sign-in", json={"service": "fake"}, headers={"Origin": ORIGIN}).json()
+    assert answer["server_host"] == "127.0.0.1" and answer["sign_in_host"] == "127.0.0.1"
+
+
+def test_a_sign_in_flow_that_runs_past_the_deadline_is_refused(admin, fake, monkeypatch):
+    monkeypatch.setattr(mcp_oauth, "FLOW_DEADLINE_S", 0.3, raising=False)
+    real_discover = mcp_oauth.discover
+
+    async def slow_discover(client, url):
+        await asyncio.sleep(2)
+        return await real_discover(client, url)
+
+    monkeypatch.setattr(mcp_oauth, "discover", slow_discover)
+    refused = admin.post("/api/mcp/servers/sign-in", json={"service": "fake"}, headers={"Origin": ORIGIN})
+    assert refused.status_code == 502 and "took longer than 0.3 seconds" in refused.json()["detail"]

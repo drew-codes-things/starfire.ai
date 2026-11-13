@@ -8,6 +8,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "server_configs"))
 
 import pytest
+from mcp import MCPError
 
 import mcp_manager
 from mcp_manager import McpConnectionError, McpManager
@@ -65,3 +66,56 @@ def test_a_dropped_connection_is_logged_without_its_url_credentials(monkeypatch,
         asyncio.run(connect_then_drop())
     assert "mcp.example.test/sse" in caplog.text
     assert QUERY_KEY not in caplog.text and URL_PASSWORD not in caplog.text
+
+
+SDK_CONNECTION_CLOSED = -32000
+
+
+class ClosedSession:
+    async def call_tool(self, name, arguments):
+        raise MCPError(code=SDK_CONNECTION_CLOSED, message="Connection closed")
+
+
+class RemoteToolError(Exception):
+    code = SDK_CONNECTION_CLOSED
+
+
+class FailingToolSession:
+    async def call_tool(self, name, arguments):
+        raise RemoteToolError("the tool itself failed")
+
+
+def test_a_call_that_hits_a_closed_connection_drops_the_session_so_it_can_reconnect():
+    async def scenario():
+        manager = McpManager()
+        manager._sessions["gone"] = ClosedSession()
+        manager._tools_cache["gone"] = [{"name": "echo", "description": "", "input_schema": None}]
+        with pytest.raises(McpConnectionError, match="closed its connection"):
+            await manager.call_tool("mcp__gone__echo", {})
+        return manager.is_connected("gone"), manager.get_all_openai_schemas({"gone"})
+
+    assert asyncio.run(scenario()) == (False, [])
+
+
+def test_a_tool_error_that_is_not_a_closed_connection_keeps_the_session():
+    async def scenario():
+        manager = McpManager()
+        manager._sessions["busy"] = FailingToolSession()
+        with pytest.raises(RemoteToolError):
+            await manager.call_tool("mcp__busy__echo", {})
+        return manager.is_connected("busy")
+
+    assert asyncio.run(scenario()) is True
+
+
+def test_a_remote_session_whose_transport_ended_is_no_longer_connected():
+    async def scenario():
+        manager = McpManager()
+        ended = asyncio.create_task(asyncio.sleep(0))
+        await ended
+        manager._sessions["remote"] = object()
+        manager._tools_cache["remote"] = [{"name": "echo", "description": "", "input_schema": None}]
+        manager._remote_tasks["remote"] = (ended, asyncio.Event())
+        return manager.is_connected("remote"), manager.list_tools("remote")
+
+    assert asyncio.run(scenario()) == (False, [])
