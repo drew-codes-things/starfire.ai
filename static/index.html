@@ -530,6 +530,17 @@
             </div>
 
             <div class="settings-card admin-only">
+              <h3>Sign in to an online service</h3>
+              <p class="settings-hint">Pick a service and starfire takes you to its own sign-in page. Approve there and you come back here with its tools connected. Nothing to paste.</p>
+              <div class="mcp-service-grid" id="mcpServiceGrid"></div>
+              <div class="settings-row">
+                <input id="mcpSignInUrl" type="text" aria-label="Any MCP server URL that signs in through the browser" placeholder="Or any MCP server URL, e.g. https://mcp.example.com/mcp" autocomplete="off" spellcheck="false" />
+                <button type="button" class="btn ghost" id="mcpSignInUrlBtn">Sign in</button>
+              </div>
+              <p class="settings-hint" id="mcpSignInResult"></p>
+            </div>
+
+            <div class="settings-card admin-only">
               <h3>Quick add (official MCP reference servers)</h3>
               <p class="settings-hint">Fetch and Memory are already installed and connected below - enable their checkbox to use them. Filesystem needs a directory choice, so it stays a manual add. Requires Node.js (npx) installed locally.</p>
               <div class="settings-row">
@@ -1135,6 +1146,7 @@
   <script src="streamingRenderer.js"></script>
   <script src="providers.js"></script>
   <script src="uiLogic.js"></script>
+  <script src="mcpSignInLogic.js"></script>
   <script src="answerGuard.js"></script>
   <script src="sideChat.js"></script>
   <script src="appState.js"></script>

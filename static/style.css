@@ -1507,6 +1507,29 @@ button.chip:hover { background: var(--hover); }
 .endpoint-row .btn { height: 32px; padding: 0 var(--s-3); line-height: 30px; }
 .endpoint-row .theme-toggle { min-height: 0; }
 .endpoint-row.pinned { border-color: var(--line-control); }
+.endpoint-row .mcp-state-connected { color: var(--ok); }
+.endpoint-row .mcp-state-signed-out { color: var(--warn); }
+.endpoint-row .mcp-state-failed { color: var(--danger); }
+.mcp-service-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--s-2); margin-bottom: var(--s-3); }
+.mcp-service {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-height: var(--touch);
+  padding: var(--s-2) var(--s-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--bg);
+  color: var(--text);
+  text-align: left;
+  transition: var(--motion);
+}
+.mcp-service:hover:not(:disabled) { border-color: var(--line-control); background: var(--hover); }
+.mcp-service:active:not(:disabled) { transform: scale(var(--press-scale)); }
+.mcp-service:disabled { opacity: .45; cursor: progress; }
+.mcp-service-name { font-size: var(--fs-md); font-weight: 500; }
+.mcp-service-host { color: var(--faint); font-size: var(--fs-xs); overflow-wrap: anywhere; }
 .endpoint-row.active-session { border-color: var(--ok); }
 .account-role { max-width: 112px; height: 32px; }
 

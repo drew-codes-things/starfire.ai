@@ -23,6 +23,7 @@ class AppConfig(BaseSettings):
     trusted_proxies: str = "127.0.0.1,::1"
     client_ip_header: str = "CF-Connecting-IP"
     session_check_hosts: str = ""
+    public_base_url: str = ""
     max_document_mb: int = 20
     max_attachments_mb: int = 1024
     max_restore_mb: int = 1024

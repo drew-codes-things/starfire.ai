@@ -274,6 +274,38 @@ three official reference servers) are installed and connected automatically on f
 enable their checkbox to use them in a chat. **Filesystem** (read/write within a directory you
 choose) stays a manual "Quick add" since it needs that directory choice first.
 
+### Signing in to online services
+
+**Sign in to an online service** at the top of the Tools tab lists hosted MCP servers that let
+starfire sign in through the browser, with nothing to paste: Notion, Linear, Atlassian, Sentry,
+Cloudflare, Stripe, PayPal, Canva and Webflow. Click one and starfire sends you to that
+service's own sign-in page; approve there and you come back to starfire with the server
+connected and its tools listed. The URL box under the list does the same for any other MCP
+server address that supports browser sign-in.
+
+How it works (the [MCP authorization spec](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization)):
+starfire asks the server, reads its protected resource metadata and its sign-in server's
+metadata, registers itself as an app there (dynamic client registration), and sends you to the
+authorization page with PKCE (S256) and a one-time `state` tied to your starfire session. The
+sign-in must come back to the same session within 10 minutes and can be used once. The access
+and refresh tokens are encrypted like the other MCP secrets, never logged, and left out of
+backups. starfire renews the access token shortly before it runs out and again whenever the
+server answers 401; when the service refuses a renewal, the server shows **Needs sign-in
+again** with a button that runs the sign-in once more. Only admins can sign in to services,
+the same rule as adding any MCP server.
+
+The address the service sends you back to is
+`<the address you opened starfire at>/api/mcp/servers/sign-in/callback`, taken from your
+browser's own origin (it must match the host the request came to). If everyone opens starfire
+at one public address, set `PUBLIC_BASE_URL` to it and that address is used instead.
+
+Not in the list, with the reason found when they were checked on 13 Nov 2026: GitHub's hosted
+server and Asana's v2 server need an OAuth app registered by hand (no dynamic registration, so
+GitHub keeps the token form in the repository list); Asana's older server and Vercel only
+register apps whose return address is on the same computer (`localhost`), which a starfire
+on another machine is not; Hugging Face's server answers without a sign-in, so add it as a
+plain URL.
+
 An MCP server that is already running at a URL - the newer **streamable HTTP** transport or
 the older **SSE** one - is added from the same **Custom MCP server** form: pick the transport,
 paste the URL (for example `http://localhost:3001/mcp`) and, if the server wants one, an
@@ -556,6 +588,7 @@ rather use that instead)
 | `MAX_ATTACHMENTS_MB` | `1024` | Total size of one account's chat attachments (each kept 30 days) |
 | `MAX_RESTORE_MB` | `1024` | Largest backup zip Settings → Data will restore |
 | `MIN_FREE_DISK_MB` | `512` | Uploads, restores and backups are refused when they would leave less free disk than this next to `DATA_DIR` |
+| `PUBLIC_BASE_URL` | _(unset)_ | The one address everyone opens starfire at (for example `https://starfire.example.com`). When set, MCP browser sign-ins return there; when unset they return to the address the browser used. Leave it unset if people use more than one address, since a sign-in must finish on the host it started on |
 | `SESSION_CHECK_HOSTS` | _(none)_ | Extra `host:port` names, comma-separated, on which `GET /api/auth/me` answers for a session made on any host. `127.0.0.1:<PORT>`, `localhost:<PORT>` and `[::1]:<PORT>` are always included, so a service on the same machine can ask who a browser's cookie belongs to. Every other request only accepts a session on the host it was signed in on |
 
 Hosted-provider API keys are **not** set via environment variables - add them through the
@@ -567,8 +600,8 @@ Settings UI so they're encrypted at rest rather than sitting in plaintext in `.e
 - `data/api_keys.json` - API keys, encrypted with [Fernet](https://cryptography.io/en/latest/fernet/),
   `chmod 600` (owner-only).
 - `data/.key` - the per-install encryption key, `chmod 600` (owner-only).
-- `data/mcp_servers.json` - configured MCP servers; env and header values (tokens), arguments
-  and URLs are encrypted with the same key as `api_keys.json`.
+- `data/mcp_servers.json` - configured MCP servers; env and header values (tokens), arguments,
+  URLs and browser sign-in tokens are encrypted with the same key as `api_keys.json`.
 - `data/users.json` / `data/sessions.json` - accounts (bcrypt hashes) and login sessions.
 - `data/users/<id>/` - one folder per account holding that person's `memory.json`,
   `documents.json`, `tasks.json` / `task_runs.json`, `email_accounts.json` / `email_rules.json`

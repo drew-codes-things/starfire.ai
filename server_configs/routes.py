@@ -6,14 +6,16 @@ import os
 import re
 import tempfile
 import zipfile
+from dataclasses import asdict
 from typing import Annotated
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 import httpx
-from fastapi import APIRouter, HTTPException, UploadFile
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi import APIRouter, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
+import auth
 import auth_routes
 import builtin_tools
 import code_check
@@ -22,6 +24,7 @@ import email_client
 import file_edit_tool
 import hardware_probe
 import helper_tasks
+import mcp_oauth
 import model_capabilities
 import model_voices
 import ollama_manager
@@ -37,7 +40,8 @@ import piper_tts
 from local_gen_store import ComfyUIConfigStore, CustomWorkflowStore, PiperConfigStore
 from email_rule_checker import EmailRuleChecker
 from mcp_manager import McpConnectionError, mcp_manager
-from mcp_servers_store import MCP_SERVER_REPOSITORY, REFERENCE_SERVERS, McpServerStore, has_missing_secrets
+from mcp_servers_store import (MCP_SERVER_REPOSITORY, NEEDS_SIGN_IN, REFERENCE_SERVERS, SIGN_IN_SERVICES, McpServerStore,
+                               has_missing_secrets, needs_sign_in)
 from model_endpoints import ModelEndpointStore, detect_ollama, discover_servers
 from ollama_runner import for_runner
 from providers import build_models_url, is_embedding_model
@@ -54,6 +58,7 @@ router = APIRouter(prefix="/api")
 api_keys = APIKeyManager(config.data_dir)
 endpoints = ModelEndpointStore(config.data_dir)
 mcp_servers = McpServerStore(config.data_dir)
+pending_sign_ins = mcp_oauth.PendingSignIns()
 comfyui_config = ComfyUIConfigStore(config.data_dir)
 piper_config = PiperConfigStore(config.data_dir)
 custom_workflows = CustomWorkflowStore(config.data_dir)
@@ -307,11 +312,37 @@ def _site_of(url: str) -> str:
     return f"{parts.scheme}://{parts.hostname}" if parts.scheme and parts.hostname else ""
 
 def _mcp_server_view(server, full: bool) -> dict:
+    signed_out = needs_sign_in(server)
     return {"id": server.id, "name": server.name, "enabled": server.enabled, "transport": server.transport,
             "command": server.command if full else "", "args": server.args if full else [],
             "url": server.url if full else _site_of(server.url),
-            "connected": mcp_manager.is_connected(server.id), "tool_count": len(mcp_manager.list_tools(server.id)),
-            "secrets_missing": has_missing_secrets(server)}
+            "connected": mcp_manager.is_connected(server.id) and not signed_out,
+            "tool_count": len(mcp_manager.list_tools(server.id)),
+            "secrets_missing": has_missing_secrets(server), "signs_in": bool(server.oauth),
+            "needs_sign_in": signed_out, "problem": server.oauth.get("problem", "") if server.oauth else ""}
+
+def _oauth_auth_for(server) -> mcp_oauth.RefreshingBearerAuth | None:
+    if not server.oauth:
+        return None
+    if needs_sign_in(server):
+        raise McpConnectionError(f"{server.name} needs signing in again")
+    return mcp_oauth.RefreshingBearerAuth(
+        mcp_oauth.OAuthGrant.from_record(server.oauth),
+        on_refreshed=lambda tokens: mcp_servers.update_oauth(server.id, asdict(tokens)),
+        on_sign_in_needed=lambda reason: mcp_servers.update_oauth(server.id, {NEEDS_SIGN_IN: True, "problem": reason}))
+
+async def connect_mcp_server(server) -> list[dict]:
+    auth = _oauth_auth_for(server)
+    try:
+        tools = await mcp_manager.connect_server(server, auth=auth)
+    except McpConnectionError as e:
+        current = mcp_servers.get(server.id)
+        if current and current.oauth and not needs_sign_in(current):
+            mcp_servers.update_oauth(server.id, {"problem": str(e)})
+        raise
+    if server.oauth and server.oauth.get("problem"):
+        mcp_servers.update_oauth(server.id, {"problem": ""})
+    return tools
 
 @router.get("/mcp/servers")
 async def list_mcp_servers():
@@ -350,7 +381,7 @@ async def add_mcp_server(body: AddMcpServerBody):
                              url="" if body.preset else body.url.strip(),
                              headers=None if body.preset else (body.headers or None))
     try:
-        tools = await mcp_manager.connect_server(server)
+        tools = await connect_mcp_server(server)
     except McpConnectionError as e:
         mcp_servers.delete(server.id)
         raise HTTPException(502, str(e))
@@ -372,6 +403,136 @@ async def delete_mcp_server(server_id: str):
         raise HTTPException(404, "server not found")
     await mcp_manager.disconnect(server_id)
     return {"ok": True}
+
+SIGN_IN_RESULT_PAGE = "/"
+HOST_WITH_PORT = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*"
+                            r"|\[[0-9a-f:.]+\])(?::[0-9]{1,5})?")
+WEB_SCHEMES = ("http", "https")
+
+class StartSignInBody(BaseModel):
+    service: str = ""
+    url: str = ""
+    name: str = ""
+    server_id: str = ""
+
+@router.get("/mcp/sign-in-services")
+async def list_sign_in_services():
+    return {"services": [{"id": service_id, "name": service["name"], "host": urlsplit(service["url"]).hostname}
+                         for service_id, service in SIGN_IN_SERVICES.items()]}
+
+def _configured_callback_uri() -> str:
+    parts = urlsplit(config.public_base_url.strip())
+    if parts.scheme not in WEB_SCHEMES or not parts.hostname or parts.query or parts.fragment:
+        raise HTTPException(500, "PUBLIC_BASE_URL must be a plain address such as https://starfire.example.com")
+    return f"{parts.scheme}://{parts.netloc}{parts.path.rstrip('/')}{mcp_oauth.CALLBACK_PATH}"
+
+def sign_in_callback_uri(request: Request) -> str:
+    if config.public_base_url.strip():
+        return _configured_callback_uri()
+    host = auth.request_host(request)
+    if not HOST_WITH_PORT.fullmatch(host):
+        raise HTTPException(400, "this request's Host header is not a plain host name")
+    scheme = request.url.scheme
+    origin = request.headers.get("origin", "")
+    if origin:
+        origin_parts = urlsplit(origin)
+        if origin_parts.scheme not in WEB_SCHEMES or auth.normalise_host(origin_parts.netloc) != host:
+            raise HTTPException(400, "the sign-in was started from a different site than this one")
+        scheme = origin_parts.scheme
+    if scheme not in WEB_SCHEMES:
+        raise HTTPException(400, "the sign-in needs an http or https address")
+    return f"{scheme}://{host}{mcp_oauth.CALLBACK_PATH}"
+
+def _host_label(url: str) -> str:
+    parts = urlsplit(url)
+    return f"{parts.hostname}:{parts.port}" if parts.port else parts.hostname or url
+
+def _sign_in_target(body: StartSignInBody) -> tuple[str, str, str, object]:
+    if body.server_id:
+        server = mcp_servers.get(body.server_id)
+        if not server or not server.oauth:
+            raise HTTPException(404, "no signed-in MCP server with that id")
+        return server.url, server.name, server.oauth.get("service", ""), server
+    if body.service:
+        service = SIGN_IN_SERVICES.get(body.service)
+        if not service:
+            raise HTTPException(400, f"unknown service '{body.service}'")
+        return service["url"], service["name"], body.service, None
+    url = body.url.strip()
+    if not mcp_oauth.is_allowed_endpoint(url):
+        raise HTTPException(400, "the server URL must start with https:// (http:// only for this computer)")
+    return url, body.name.strip() or _host_label(url), "custom", None
+
+def _reusable_registration(existing, discovered: mcp_oauth.AuthorizationServer,
+                           callback_uri: str) -> mcp_oauth.ClientRegistration | None:
+    if existing is None:
+        return None
+    previous = mcp_oauth.OAuthGrant.from_record(existing.oauth)
+    same_server = previous.server.issuer == discovered.issuer and previous.registration.redirect_uri == callback_uri
+    return previous.registration if same_server and previous.registration.client_id else None
+
+def _session_digest(request: Request) -> str:
+    return mcp_oauth.session_digest(request.cookies.get(auth.SESSION_COOKIE, ""))
+
+@router.post("/mcp/servers/sign-in")
+async def start_mcp_sign_in(body: StartSignInBody, request: Request):
+    url, name, service, existing = _sign_in_target(body)
+    callback_uri = sign_in_callback_uri(request)
+    try:
+        async with httpx.AsyncClient(timeout=mcp_oauth.HTTP_TIMEOUT_S) as client:
+            discovered = (await mcp_oauth.discover(client, url)).server
+            registration = _reusable_registration(existing, discovered, callback_uri) or \
+                await mcp_oauth.register_client(client, discovered, callback_uri)
+    except mcp_oauth.McpSignInError as e:
+        raise HTTPException(502, f"could not start the sign-in for {name}: {e}")
+    verifier, challenge = mcp_oauth.new_pkce_pair()
+    grant = mcp_oauth.OAuthGrant(discovered, registration, mcp_oauth.TokenSet(access_token=""))
+    state = pending_sign_ins.add(mcp_oauth.PendingSignIn(
+        user_id=user_data.current_user_id.get() or "", session_digest=_session_digest(request), verifier=verifier,
+        server_url=url, name=name, service=service, replaces_server_id=existing.id if existing else "",
+        grant=grant))
+    return {"authorize_url": mcp_oauth.authorization_url(discovered, registration, state, challenge)}
+
+def _sign_in_result(outcome: str, **details: str) -> RedirectResponse:
+    query = urlencode({"mcp_sign_in": outcome, **details})
+    return RedirectResponse(f"{SIGN_IN_RESULT_PAGE}?{query}", status_code=303)
+
+def _save_signed_in_server(pending: mcp_oauth.PendingSignIn):
+    record = {**pending.grant.to_record(), "service": pending.service, NEEDS_SIGN_IN: False, "problem": ""}
+    if pending.replaces_server_id and mcp_servers.update_oauth(pending.replaces_server_id, record):
+        return mcp_servers.get(pending.replaces_server_id)
+    return mcp_servers.add(name=pending.name, command="", args=[], transport="http", url=pending.server_url,
+                           oauth=record)
+
+@router.get("/mcp/servers/sign-in/callback")
+async def finish_mcp_sign_in(request: Request, state: str = "", code: str = "", error: str = "", iss: str = ""):
+    if not _current_user_is_active_admin():
+        return _sign_in_result("failed", reason="only an admin can add MCP servers")
+    try:
+        pending = pending_sign_ins.take(state, user_data.current_user_id.get() or "", _session_digest(request))
+    except mcp_oauth.SignInRejected as e:
+        return _sign_in_result("failed", reason=str(e))
+    if error:
+        said = error if mcp_oauth.OAUTH_ERROR_CODE.fullmatch(error) else "an error"
+        return _sign_in_result("failed", reason=f"{pending.name} did not allow the sign-in ({said})")
+    if iss and iss.rstrip("/") != pending.grant.server.issuer:
+        return _sign_in_result("failed", reason=f"the answer did not come from {pending.name}'s sign-in server")
+    if not code:
+        return _sign_in_result("failed", reason=f"{pending.name} sent no sign-in code")
+    try:
+        async with httpx.AsyncClient(timeout=mcp_oauth.HTTP_TIMEOUT_S) as client:
+            pending.grant.tokens = await mcp_oauth.exchange_code(client, pending.grant, code, pending.verifier)
+    except mcp_oauth.McpSignInError as e:
+        return _sign_in_result("failed", reason=f"{pending.name}: {e}")
+    if pending.replaces_server_id:
+        await mcp_manager.disconnect(pending.replaces_server_id)
+    server = _save_signed_in_server(pending)
+    try:
+        await connect_mcp_server(server)
+    except McpConnectionError as e:
+        logger.warning("signed in to MCP server %s but could not connect: %s", server.name, e)
+        return _sign_in_result("failed", server=server.id, reason=f"signed in, but connecting failed: {e}")
+    return _sign_in_result("connected", server=server.id)
 
 class AddMemoryBody(BaseModel):
     text: str
@@ -1037,7 +1198,7 @@ async def chat_stream_endpoint(body: ChatBody):
             if not server or not server.enabled:
                 continue
             try:
-                await mcp_manager.connect_server(server)
+                await connect_mcp_server(server)
             except McpConnectionError as e:
                 logger.warning("could not reconnect MCP server %s: %s", server_id, e)
         ctx = _tool_context(base_url=endpoint.base_url, api_key=api_key, model=body.model, endpoint_id=endpoint.id,

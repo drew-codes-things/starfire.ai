@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 
 TRANSPORTS = ("stdio", "http", "sse")
 SECRET_FIELDS = ("env", "headers")
+OAUTH_FIELD = "oauth"
+OAUTH_SECRET_KEYS = ("access_token", "refresh_token", "client_secret")
+NEEDS_SIGN_IN = "needs_sign_in"
 SECRETS_ENCRYPTED = "secrets_encrypted"
 FERNET_VERSION_BYTE = 0x80
 FERNET_FIXED_BYTES = 57
@@ -44,6 +47,7 @@ class McpServerConfig:
     transport: str = "stdio"
     url: str = ""
     headers: dict[str, str] = field(default_factory=dict)
+    oauth: dict = field(default_factory=dict)
 
 REFERENCE_SERVERS = {
     "filesystem": {
@@ -121,6 +125,18 @@ MCP_SERVER_REPOSITORY = {
     },
 }
 
+SIGN_IN_SERVICES = {
+    "notion": {"name": "Notion", "url": "https://mcp.notion.com/mcp"},
+    "linear": {"name": "Linear", "url": "https://mcp.linear.app/mcp"},
+    "atlassian": {"name": "Atlassian", "url": "https://mcp.atlassian.com/v1/mcp"},
+    "sentry": {"name": "Sentry", "url": "https://mcp.sentry.dev/mcp"},
+    "cloudflare": {"name": "Cloudflare", "url": "https://mcp.cloudflare.com/mcp"},
+    "stripe": {"name": "Stripe", "url": "https://mcp.stripe.com"},
+    "paypal": {"name": "PayPal", "url": "https://mcp.paypal.com/mcp"},
+    "canva": {"name": "Canva", "url": "https://mcp.canva.com/mcp"},
+    "webflow": {"name": "Webflow", "url": "https://mcp.webflow.com/mcp"},
+}
+
 class McpServerStore:
     def __init__(self, data_dir: str):
         self.path = os.path.join(data_dir, "mcp_servers.json")
@@ -165,6 +181,9 @@ class McpServerStore:
         if isinstance(item.get("args"), list):
             encrypted["args"] = [self._encrypted_if_plain(arg) for arg in item["args"]]
         encrypted["url"] = self._encrypted_if_plain(item.get("url", ""))
+        if isinstance(item.get(OAUTH_FIELD), dict):
+            encrypted[OAUTH_FIELD] = {key: self._encrypted_if_plain(value) if key in OAUTH_SECRET_KEYS else value
+                                      for key, value in item[OAUTH_FIELD].items()}
         if isinstance(item.get("name"), str):
             encrypted["name"] = without_text_credentials(item["name"])
         return encrypted
@@ -206,6 +225,19 @@ class McpServerStore:
         return [self._plain_or_removed(server_name, f"argument {position}", arg)
                 for position, arg in enumerate(args, start=1)]
 
+    def _plain_oauth(self, server_name: str, oauth) -> dict:
+        if not isinstance(oauth, dict) or not oauth:
+            return {}
+        plain = dict(oauth)
+        for key in OAUTH_SECRET_KEYS:
+            decrypted = self._decrypted_or_none(oauth.get(key, ""))
+            if decrypted is None:
+                logger.warning("could not decrypt the sign-in %s of MCP server %s (saved by another install?), "
+                               "it needs signing in again", key, server_name)
+                decrypted = ""
+            plain[key] = decrypted
+        return plain
+
     def _to_config(self, item: dict) -> McpServerConfig:
         label = item.get("name") or item.get("command") or item["id"]
         url = self._plain_or_removed(label, "URL", item.get("url") or "")
@@ -220,6 +252,7 @@ class McpServerStore:
             transport=item.get("transport", "stdio") if item.get("transport") in TRANSPORTS else "stdio",
             url=url,
             headers=self._decrypted(name, "header", item.get("headers", {})),
+            oauth=self._plain_oauth(name, item.get(OAUTH_FIELD)),
         )
 
     def _backup_copy(self, item: dict) -> dict:
@@ -231,6 +264,8 @@ class McpServerStore:
         if isinstance(item.get("args"), list):
             copy["args"] = without_arg_credentials(self._plain_args(label, item["args"]))
         copy["url"] = without_url_credentials(self._plain_or_removed(label, "URL", item.get("url") or ""))
+        if isinstance(item.get(OAUTH_FIELD), dict) and item[OAUTH_FIELD]:
+            copy[OAUTH_FIELD] = dict(item[OAUTH_FIELD], **{key: "" for key in OAUTH_SECRET_KEYS})
         if isinstance(item.get("name"), str):
             copy["name"] = without_text_credentials(item["name"])
         return copy
@@ -255,10 +290,12 @@ class McpServerStore:
 
     @holds_file_lock()
     def add(self, name: str, command: str, args: list[str], env: dict[str, str] | None = None,
-            transport: str = "stdio", url: str = "", headers: dict[str, str] | None = None) -> McpServerConfig:
+            transport: str = "stdio", url: str = "", headers: dict[str, str] | None = None,
+            oauth: dict | None = None) -> McpServerConfig:
         items = self._read_items()
         server = McpServerConfig(id=uuid.uuid4().hex[:12], name=name, command=command,
-                                  args=args, env=env or {}, transport=transport, url=url, headers=headers or {})
+                                  args=args, env=env or {}, transport=transport, url=url, headers=headers or {},
+                                  oauth=oauth or {})
         items.append(self._with_encrypted_secrets(asdict(server)))
         self._write_items(items)
         return server
@@ -277,6 +314,19 @@ class McpServerStore:
         for item in items:
             if _is_usable(item) and item["id"] == server_id:
                 item["enabled"] = enabled
+                found = True
+        if found:
+            self._write_items(items)
+        return found
+
+    @holds_file_lock()
+    def update_oauth(self, server_id: str, changes: dict) -> bool:
+        items = self._read_items()
+        found = False
+        for position, item in enumerate(items):
+            if _is_usable(item) and item["id"] == server_id and isinstance(item.get(OAUTH_FIELD), dict):
+                items[position] = self._with_encrypted_secrets(dict(item, **{OAUTH_FIELD: {**item[OAUTH_FIELD],
+                                                                                           **changes}}))
                 found = True
         if found:
             self._write_items(items)
@@ -318,6 +368,8 @@ def _secret_values(item: dict) -> list:
             values.extend(item[secret_field].values())
     if isinstance(item.get("args"), list):
         values.extend(item["args"])
+    if isinstance(item.get(OAUTH_FIELD), dict):
+        values.extend(item[OAUTH_FIELD].get(key) for key in OAUTH_SECRET_KEYS)
     return values
 
 
@@ -341,6 +393,9 @@ def _with_live_secrets(restored: dict, live: dict) -> dict:
     for removable_field in ("args", "url"):
         if _holds_removed_secret(restored.get(removable_field)) and removable_field in live:
             merged[removable_field] = live[removable_field]
+    restored_oauth, live_oauth = restored.get(OAUTH_FIELD), live.get(OAUTH_FIELD)
+    if isinstance(restored_oauth, dict) and isinstance(live_oauth, dict) and not restored_oauth.get("access_token"):
+        merged[OAUTH_FIELD] = live_oauth
     return merged
 
 
@@ -411,6 +466,10 @@ def without_arg_credentials(args: list) -> list:
         else:
             cleaned.append(without_text_credentials(arg))
     return cleaned
+
+
+def needs_sign_in(server: McpServerConfig) -> bool:
+    return bool(server.oauth) and (bool(server.oauth.get(NEEDS_SIGN_IN)) or not server.oauth.get("access_token"))
 
 
 def has_missing_secrets(server: McpServerConfig) -> bool:
