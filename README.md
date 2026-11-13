@@ -480,8 +480,9 @@ Settings → Data can download a zip of the whole `data/` directory, or restore 
 thing the manual "copy the data folder" step below does, through the UI. Restoring **overwrites
 your current data** and can't be undone; back up first if you're not sure.
 
-The zip carries no credentials: it leaves out `.key`, `api_keys.json`, `sessions.json` and any
-`.env`, and blanks MCP server tokens and header values. Credentials inside MCP server arguments
+The zip carries no credentials: it leaves out `.key`, `api_keys.json`, `sessions.json`, any
+`.env` and any temp or backup copy of these files or of `mcp_servers.json` (such as
+`.sessions.json.*.tmp` or `mcp_servers.json.bak`), and blanks MCP server tokens and header values. Credentials inside MCP server arguments
 and URLs are replaced with `__secret_removed__`: a password in a URL, a query value whose name
 looks like a key, token, secret, password or auth, the value after a flag such as `--api-key`,
 `--token` or `--password`, and `NAME=value` or `Name: value` arguments with such names. A secret
