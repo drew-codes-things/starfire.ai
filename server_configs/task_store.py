@@ -5,7 +5,7 @@ import os
 import uuid
 from dataclasses import asdict, dataclass, field
 
-from atomic_io import atomic_write_json
+from atomic_io import atomic_write_json, report_unreadable_store
 
 VALID_SCHEDULES = {"once", "daily", "weekly", "cron"}
 
@@ -46,7 +46,8 @@ class TaskStore:
         try:
             with open(self.path, "r", encoding="utf-8") as f:
                 raw = json.load(f)
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as error:
+            report_unreadable_store(self.path, error)
             return []
         if not isinstance(raw, list):
             return []
@@ -120,7 +121,8 @@ class TaskRunStore:
         try:
             with open(self.path, "r", encoding="utf-8") as f:
                 raw = json.load(f)
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as error:
+            report_unreadable_store(self.path, error)
             return []
         if not isinstance(raw, list):
             return []

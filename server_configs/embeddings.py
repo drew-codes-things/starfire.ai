@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 import math
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_EMBED_MODEL = "nomic-embed-text"
 _TIMEOUT = 5.0
@@ -18,7 +21,8 @@ async def embed(text: str, ollama_base_url: str, model: str = DEFAULT_EMBED_MODE
             return None
         vector = r.json().get("embedding")
         return vector if isinstance(vector, list) and vector else None
-    except httpx.HTTPError:
+    except httpx.HTTPError as error:
+        logger.warning("could not get an embedding from %s: %s", ollama_base_url, error)
         return None
 
 def cosine_similarity(a: list[float], b: list[float]) -> float:

@@ -5,7 +5,7 @@ import os
 import uuid
 from dataclasses import asdict, dataclass
 
-from atomic_io import atomic_write_json
+from atomic_io import atomic_write_json, report_unreadable_store
 
 @dataclass
 class EmailAccount:
@@ -28,7 +28,8 @@ class EmailAccountStore:
         try:
             with open(self.path, "r", encoding="utf-8") as f:
                 raw = json.load(f)
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as error:
+            report_unreadable_store(self.path, error)
             return []
         if not isinstance(raw, list):
             return []
@@ -103,7 +104,8 @@ class EmailRuleStore:
         try:
             with open(self.path, "r", encoding="utf-8") as f:
                 raw = json.load(f)
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, OSError) as error:
+            report_unreadable_store(self.path, error)
             return []
         if not isinstance(raw, list):
             return []
