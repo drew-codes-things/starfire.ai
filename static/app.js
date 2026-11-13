@@ -2656,6 +2656,7 @@ async function refreshEmailAccountList() {
         await fetch('/api/email/accounts/' + a.id, { method: 'DELETE' });
         if (currentEmailAccountId === a.id) { currentEmailAccountId = null; settingsEls.emailInboxCard.hidden = true; }
         await refreshEmailAccountList();
+        await refreshEmailRules();
       };
       settingsEls.emailAccountList.appendChild(li);
     }
@@ -2829,13 +2830,16 @@ async function refreshEmailRules() {
   try {
     const accountsRes = await fetch('/api/email/accounts');
     const { accounts = [] } = await accountsRes.json();
+    const choices = ruleAccountChoices(accounts);
     settingsEls.ruleAccountSelect.innerHTML = '';
-    for (const a of accounts) {
+    for (const choice of choices.options) {
       const opt = document.createElement('option');
-      opt.value = a.id;
-      opt.textContent = a.label;
+      opt.value = choice.value;
+      opt.textContent = choice.label;
       settingsEls.ruleAccountSelect.appendChild(opt);
     }
+    settingsEls.ruleAccountSelect.disabled = !choices.usable;
+    settingsEls.createRuleBtn.disabled = !choices.usable;
 
     settingsEls.ruleModelSelect.innerHTML = '';
     for (const m of models) {

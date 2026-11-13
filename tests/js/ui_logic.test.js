@@ -344,3 +344,15 @@ test('a failed request is explained with the server detail, or the fallback when
   assert.equal(await logic.failureMessage(answer({}), 'could not add'), 'could not add');
   assert.equal(await logic.failureMessage({ json: async () => { throw new SyntaxError('not json'); } }, 'could not add'), 'could not add');
 });
+
+test('the rule account choices list each account, or say there is none yet so the select is never blank', () => {
+  const some = logic.ruleAccountChoices([{ id: 'a1', label: 'Work' }, { id: 'a2', label: 'Home' }]);
+  assert.equal(some.usable, true);
+  assert.deepEqual(some.options, [{ value: 'a1', label: 'Work' }, { value: 'a2', label: 'Home' }]);
+  for (const nothing of [[], undefined, null]) {
+    const none = logic.ruleAccountChoices(nothing);
+    assert.equal(none.usable, false);
+    assert.deepEqual(none.options, [{ value: '', label: logic.NO_EMAIL_ACCOUNTS }]);
+  }
+  assert.match(logic.NO_EMAIL_ACCOUNTS, /add one above/);
+});

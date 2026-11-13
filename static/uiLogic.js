@@ -189,6 +189,14 @@ async function failureMessage(response, fallback) {
   return body && typeof body.detail === 'string' && body.detail ? body.detail : fallback;
 }
 
+const NO_EMAIL_ACCOUNTS = 'No email accounts yet, add one above';
+
+function ruleAccountChoices(accounts) {
+  const list = Array.isArray(accounts) ? accounts : [];
+  if (!list.length) return { usable: false, options: [{ value: '', label: NO_EMAIL_ACCOUNTS }] };
+  return { usable: true, options: list.map(account => ({ value: account.id, label: account.label })) };
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     DAY_MS, TOAST_MS, TOAST_ERROR_MS, TOAST_FADE_MS,
@@ -200,5 +208,6 @@ if (typeof module !== 'undefined' && module.exports) {
     menuFocusIndex, menuKeyHandler,
     showListLoading,
     failureMessage,
+    NO_EMAIL_ACCOUNTS, ruleAccountChoices,
   };
 }

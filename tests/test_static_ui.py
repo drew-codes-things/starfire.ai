@@ -260,3 +260,11 @@ def test_adding_a_memory_reports_a_failure_under_the_field():
     body = handler.group(1)
     assert "if (!r.ok) throw new Error(await failureMessage(r, " in body
     assert "settingsEls.memoryAddResult.className = 'settings-hint error';" in body
+
+
+
+def test_the_rule_account_select_is_filled_from_the_accounts_or_says_there_are_none():
+    app = read("app.js")
+    assert "const choices = ruleAccountChoices(accounts);" in app
+    assert "settingsEls.ruleAccountSelect.disabled = !choices.usable;" in app
+    assert "settingsEls.createRuleBtn.disabled = !choices.usable;" in app
