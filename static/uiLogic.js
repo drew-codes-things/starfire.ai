@@ -200,9 +200,15 @@ function ruleAccountChoices(accounts) {
 const BACKEND_RUNS_ON_ITS_OWN = 'It runs on its own: starfire only starts Ollama, and only when Ollama is installed here.';
 const NO_LOCAL_OLLAMA = 'There is no Ollama here to start. ArtyEngine and other Ollama-compatible servers run on their own: '
   + 'start yours and set OLLAMA_BASE_URL to its address.';
+const FOUND_NOT_ADDED = 'starfire only sends work to a model server you have added: add it under Connections '
+  + '(add ollama or scan network) to use it.';
 
 function backendStatusPlan(status) {
   const backend = status.backend || 'Ollama';
+  if (status.running && status.in_use === false) {
+    return { headline: `Found ${backend} at ${status.found_at}, not added.`, note: FOUND_NOT_ADDED,
+      offerStart: false, showInstall: false };
+  }
   if (status.running) {
     return { headline: `✓ ${backend} is running.`, note: status.installed ? '' : BACKEND_RUNS_ON_ITS_OWN,
       offerStart: false, showInstall: false };
@@ -225,6 +231,6 @@ if (typeof module !== 'undefined' && module.exports) {
     showListLoading,
     failureMessage,
     NO_EMAIL_ACCOUNTS, ruleAccountChoices,
-    BACKEND_RUNS_ON_ITS_OWN, NO_LOCAL_OLLAMA, backendStatusPlan,
+    BACKEND_RUNS_ON_ITS_OWN, NO_LOCAL_OLLAMA, FOUND_NOT_ADDED, backendStatusPlan,
   };
 }

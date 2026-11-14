@@ -10,8 +10,7 @@ from dataclasses import asdict, dataclass
 import embeddings as embeddings_module
 import lexical_search
 from atomic_io import atomic_write_json, holds_file_lock, set_aside_unreadable
-from config import config
-from model_endpoints import detect_ollama
+from model_endpoints import local_backend_url
 
 CHUNK_SIZE = 1000
 CHUNK_OVERLAP = 200
@@ -163,7 +162,7 @@ class DocumentStore:
         lexical_ranked = [i for i, s in sorted(lexical_scores.items(), key=lambda p: p[1], reverse=True)
                             if s >= 0.03]
 
-        ollama_url = await detect_ollama(config.ollama_base_url)
+        ollama_url = local_backend_url()
         if not ollama_url or not chunks:
             return lexical_ranked
 

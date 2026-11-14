@@ -2,11 +2,14 @@ import json
 import logging
 import os
 import uuid
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
+from urllib.parse import urlsplit
 
 import httpx
 
 from atomic_io import atomic_write_json, holds_file_lock, report_unreadable_store
+from config import config
 from providers import _detect_provider, _ollama_api_root
 
 logger = logging.getLogger(__name__)
@@ -17,6 +20,10 @@ OLLAMA_PORT = 11434
 AUTO_DETECT_PORTS = [ARTY_ENGINE_PORT, OLLAMA_PORT]
 DISCOVERY_PORTS = [ARTY_ENGINE_PORT, OLLAMA_PORT, 1234, 8080]
 PROBE_TIMEOUT = 1.5
+LOOPBACK_CONNECT_TIMEOUT = 0.5
+AUTO_DETECT_TIMEOUT = httpx.Timeout(PROBE_TIMEOUT, connect=LOOPBACK_CONNECT_TIMEOUT)
+OLLAMA_KIND = "ollama"
+AUTO_DETECTED_SUFFIX = " (auto-detected)"
 ARTY_ENGINE = "ArtyEngine"
 OLLAMA = "Ollama"
 ARTY_ENGINE_SERVER_PREFIX = "arty-engine/"
@@ -27,18 +34,20 @@ API_PATH_SUFFIX = "/api"
 async def detect_ollama(env_override: str | None) -> str | None:
     if env_override:
         return env_override
-    async with httpx.AsyncClient(timeout=PROBE_TIMEOUT) as client:
+    async with httpx.AsyncClient(timeout=AUTO_DETECT_TIMEOUT) as client:
         for port in AUTO_DETECT_PORTS:
             for host in LOCAL_HOSTS:
                 url = f"http://{host}:{port}"
-                try:
-                    r = await client.get(f"{url}/api/tags")
-                    if r.status_code == 200:
-                        return url
-                except httpx.HTTPError as error:
-                    logger.debug("no Ollama API answered at %s: %r", url, error)
-                    continue
+                if await _is_expected_backend_on(client, url, port):
+                    return url
     return None
+
+
+async def _is_expected_backend_on(client: httpx.AsyncClient, url: str, port: int) -> bool:
+    backend = await _ollama_api_backend(client, url)
+    if port == ARTY_ENGINE_PORT:
+        return backend == ARTY_ENGINE
+    return backend is not None
 
 
 def _server_header_names_arty_engine(response: httpx.Response) -> bool:
@@ -175,6 +184,16 @@ class ModelEndpointStore:
         return endpoint
 
     @holds_file_lock()
+    def relabel(self, endpoint_id: str, label: str) -> bool:
+        endpoints = self._load()
+        for endpoint in endpoints:
+            if endpoint.id == endpoint_id:
+                endpoint.label = label
+                self._save(endpoints)
+                return True
+        return False
+
+    @holds_file_lock()
     def delete(self, endpoint_id: str) -> bool:
         endpoints = self._load()
         remaining = [e for e in endpoints if e.id != endpoint_id]
@@ -184,8 +203,71 @@ class ModelEndpointStore:
         return True
 
 
+def _auto_detected_label(backend: str) -> str:
+    return f"{backend}{AUTO_DETECTED_SUFFIX}"
+
+
+AUTO_DETECTED_LABELS = {_auto_detected_label(ARTY_ENGINE), _auto_detected_label(OLLAMA)}
+
+
+def _is_on_this_machine(base_url: str) -> bool:
+    return urlsplit(base_url).hostname in LOCAL_HOSTS
+
+
+def stored_local_backend(store: ModelEndpointStore) -> ModelEndpoint | None:
+    return next((e for e in store.list() if e.kind == OLLAMA_KIND and _is_on_this_machine(e.base_url)), None)
+
+
+def chosen_backend_url(store: ModelEndpointStore, env_override: str | None) -> str | None:
+    if env_override:
+        return env_override
+    endpoint = stored_local_backend(store)
+    return endpoint.base_url if endpoint else None
+
+
+def local_backend_url() -> str | None:
+    return chosen_backend_url(ModelEndpointStore(config.data_dir), config.ollama_base_url)
+
+
+def _relabel_if_auto_detected(store: ModelEndpointStore, endpoint: ModelEndpoint, backend: str | None) -> None:
+    if backend is None or endpoint.label not in AUTO_DETECTED_LABELS:
+        return
+    label = _auto_detected_label(backend)
+    if label != endpoint.label and store.relabel(endpoint.id, label):
+        logger.info("renamed the endpoint at %s to %s", endpoint.base_url, label)
+
+
 async def add_detected_backend(store: ModelEndpointStore, base_url: str) -> ModelEndpoint | None:
-    if store.find_by_url(base_url):
+    backend = await identify_backend(base_url)
+    existing = store.find_by_url(base_url)
+    if existing:
+        _relabel_if_auto_detected(store, existing, backend)
         return None
-    backend = await identify_backend(base_url) or OLLAMA
-    return store.add(base_url, kind="ollama", label=f"{backend} (auto-detected)")
+    return store.add(base_url, kind=OLLAMA_KIND, label=_auto_detected_label(backend or OLLAMA))
+
+
+async def _confirm_stored_backend(store: ModelEndpointStore, stored: ModelEndpoint,
+                                  start_ollama: Callable[[], Awaitable[bool]]) -> None:
+    backend = await identify_backend(stored.base_url)
+    if backend is None and await start_ollama():
+        backend = await identify_backend(stored.base_url)
+    _relabel_if_auto_detected(store, stored, backend)
+
+
+async def _adopt_first_local_backend(store: ModelEndpointStore,
+                                     start_ollama: Callable[[], Awaitable[bool]]) -> ModelEndpoint | None:
+    detected = await detect_ollama(None)
+    if not detected and await start_ollama():
+        detected = await detect_ollama(None)
+    return await add_detected_backend(store, detected) if detected else None
+
+
+async def settle_local_backend(store: ModelEndpointStore, env_override: str | None,
+                               start_ollama: Callable[[], Awaitable[bool]]) -> ModelEndpoint | None:
+    if env_override:
+        return await add_detected_backend(store, env_override)
+    stored = stored_local_backend(store)
+    if stored is None:
+        return await _adopt_first_local_backend(store, start_ollama)
+    await _confirm_stored_backend(store, stored, start_ollama)
+    return None

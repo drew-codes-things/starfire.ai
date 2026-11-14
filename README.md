@@ -99,18 +99,27 @@ Upgrading from a single-user install: on the first start your existing data move
 first admin's folder automatically. The Open WebUI import script now takes `--user EMAIL`
 (default: the first admin).
 
-If Ollama (port 11434) or ArtyEngine (port 11438) is already running on this machine, it's
-detected automatically on startup and appears in the model list with no setup; when both
-answer, ArtyEngine is used. Otherwise, open **Settings → Connections** and either click **add
-ollama** (fills in the default endpoint, then Test/Add) or **scan network** to probe common
-local model-server ports (11438, 11434, 1234 and 8080).
+If Ollama (port 11434) or ArtyEngine (port 11438) is already running on this machine the first
+time starfire starts, it's detected and added as an endpoint, so it appears in the model list
+with no setup; when both answer, ArtyEngine is used. Port 11438 only counts as ArtyEngine when
+the server there names itself as ArtyEngine. Detection runs only while no local Ollama-API
+endpoint is stored: once one is, starfire keeps using it and never adds or switches to a second
+local server by itself (Settings → Hardware shows one it finds but has not added as "found, not
+added"). Memory and document embeddings and model pulls go to that stored endpoint (the first
+local Ollama-API endpoint in **Settings → Connections**) or to `OLLAMA_BASE_URL`, never to
+whatever happens to answer on a port. To add a server later, open **Settings → Connections**
+and either click **add ollama** (fills in the default endpoint, then Test/Add) or **scan
+network** to probe common local model-server ports (11438, 11434, 1234 and 8080).
 
 Any server that speaks Ollama's API can stand in for Ollama. Arty runs on
 [ArtyEngine](https://github.com/drew-codes-things/ArtyEngine), its own Ollama-compatible server
 built on llama.cpp, and starfire talks to it the same way. starfire tells the two apart from
 what the server reports (ArtyEngine's `Server` header, or its "Arty engine is running"
 greeting when a proxy drops that header), names the one it found in the endpoint label and on
-**Settings → Hardware**, and treats anything else that answers Ollama's API as Ollama. On
+**Settings → Hardware**, and treats anything else that answers Ollama's API as Ollama. The name
+is only a label, not a proof of identity: any local program can send the same header. An
+auto-detected endpoint is renamed on startup when the server behind its address now reports the
+other name; an endpoint you named yourself keeps your name. On
 another machine, set `OLLAMA_BASE_URL` in `.env` to its address and reach it through a reverse
 proxy as ArtyEngine's README describes, since it listens on loopback by default. The **Start
 Ollama** button only appears when an Ollama binary is installed here; with ArtyEngine or a

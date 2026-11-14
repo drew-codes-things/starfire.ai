@@ -385,3 +385,15 @@ test('the model server card names the backend that answered and says a server wi
   assert.equal(nothing.note, logic.NO_LOCAL_OLLAMA);
   assert.equal(nothing.showInstall, true);
 });
+
+test('a model server that answers but was never added is shown as found, not in use', () => {
+  const found = logic.backendStatusPlan({
+    installed: true, running: true, backend: 'ArtyEngine', in_use: false, found_at: 'http://127.0.0.1:11438',
+  });
+  assert.equal(found.headline, 'Found ArtyEngine at http://127.0.0.1:11438, not added.');
+  assert.equal(found.note, logic.FOUND_NOT_ADDED);
+  assert.equal(found.offerStart, false);
+  assert.equal(found.showInstall, false);
+  const inUse = logic.backendStatusPlan({ installed: true, running: true, backend: 'Ollama', in_use: true, found_at: null });
+  assert.equal(inUse.headline, '✓ Ollama is running.');
+});

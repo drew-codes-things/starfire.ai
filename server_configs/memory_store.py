@@ -9,8 +9,7 @@ from datetime import datetime, timezone
 import embeddings as embeddings_module
 import lexical_search
 from atomic_io import atomic_write_json, holds_file_lock, report_unreadable_store
-from config import config
-from model_endpoints import detect_ollama
+from model_endpoints import local_backend_url
 
 VALID_CATEGORIES = {"fact", "identity", "preference", "contact", "task"}
 
@@ -164,7 +163,7 @@ class MemoryStore:
 
         keyword_ranked = list(dict.fromkeys(lexical_ranked + [i for i in boosted_ids if i not in lexical_ranked]))
 
-        ollama_url = await detect_ollama(config.ollama_base_url)
+        ollama_url = local_backend_url()
         if not ollama_url or not unpinned:
             return keyword_ranked
 

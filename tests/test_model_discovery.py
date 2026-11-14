@@ -59,21 +59,37 @@ def test_no_ollama_is_reported_when_nothing_healthy_answers(local_ports, reply):
                      "127.0.0.1:11434/api/tags", "localhost:11434/api/tags"]
 
 
+ENGINE_BEHIND_CADDY = (200, [("Server", "Caddy"), ("Server", "arty-engine/0.1.0 Python/3.13.5")], '{"models": []}')
+ENGINE_TAGS = (200, [("Server", "arty-engine/0.1.0 Python/3.13.5")], '{"models": []}')
+OLLAMA_TAGS = (200, [], '{"models": []}')
+
+
 def test_arty_engine_on_this_machine_is_found(local_ports):
     answers, _ = local_ports
-    answers["localhost:11438/api/tags"] = 200
+    answers["localhost:11438/api/tags"] = ENGINE_TAGS
     assert asyncio.run(model_endpoints.detect_ollama(None)) == "http://localhost:11438"
 
 
 def test_arty_engine_is_preferred_when_ollama_answers_too(local_ports):
     answers, _ = local_ports
     answers["127.0.0.1:11434/api/tags"] = 200
-    answers["127.0.0.1:11438/api/tags"] = 200
+    answers["127.0.0.1:11438/api/tags"] = ENGINE_TAGS
     assert asyncio.run(model_endpoints.detect_ollama(None)) == "http://127.0.0.1:11438"
 
 
-ENGINE_BEHIND_CADDY = (200, [("Server", "Caddy"), ("Server", "arty-engine/0.1.0 Python/3.13.5")], '{"models": []}')
-OLLAMA_TAGS = (200, [], '{"models": []}')
+@pytest.mark.parametrize("greeting", ["dead", (200, [], "Ollama is running"), (200, [], "something else")])
+def test_a_server_on_the_engine_port_that_does_not_name_itself_is_passed_over(local_ports, greeting):
+    answers, _ = local_ports
+    answers["127.0.0.1:11438/api/tags"] = OLLAMA_TAGS
+    answers["127.0.0.1:11438/"] = greeting
+    answers["127.0.0.1:11434/api/tags"] = 200
+    assert asyncio.run(model_endpoints.detect_ollama(None)) == "http://127.0.0.1:11434"
+
+
+def test_a_server_on_the_engine_port_that_does_not_name_itself_is_not_detected_alone(local_ports):
+    answers, _ = local_ports
+    answers["127.0.0.1:11438/api/tags"] = OLLAMA_TAGS
+    assert asyncio.run(model_endpoints.detect_ollama(None)) is None
 
 
 def test_arty_engine_is_named_from_its_server_header_even_behind_a_proxy(local_ports):
@@ -119,6 +135,98 @@ def test_an_auto_detected_address_that_does_not_answer_is_still_added_as_ollama(
     store = ModelEndpointStore(str(tmp_path))
     added = asyncio.run(model_endpoints.add_detected_backend(store, "http://gpu-box:11434"))
     assert added.label == "Ollama (auto-detected)"
+
+
+@pytest.mark.parametrize("stored_label, answer, relabelled", [
+    ("Ollama (auto-detected)", ENGINE_TAGS, "ArtyEngine (auto-detected)"),
+    ("ArtyEngine (auto-detected)", OLLAMA_TAGS, "Ollama (auto-detected)"),
+    ("Ollama (auto-detected)", "dead", "Ollama (auto-detected)"),
+    ("My engine", ENGINE_TAGS, "My engine"),
+    ("My box", OLLAMA_TAGS, "My box"),
+])
+def test_a_stored_auto_detected_endpoint_is_renamed_after_the_backend_that_answers(
+        local_ports, tmp_path, stored_label, answer, relabelled):
+    answers, _ = local_ports
+    answers["127.0.0.1:11438/api/tags"] = answer
+    store = ModelEndpointStore(str(tmp_path))
+    stored = store.add("http://127.0.0.1:11438", "ollama", label=stored_label)
+    assert asyncio.run(model_endpoints.add_detected_backend(store, "http://127.0.0.1:11438")) is None
+    [endpoint] = store.list()
+    assert (endpoint.id, endpoint.label) == (stored.id, relabelled)
+
+
+def never_start():
+    async def start():
+        raise AssertionError("Ollama was started although a backend answered")
+    return start
+
+
+def test_startup_keeps_the_stored_backend_and_never_adds_a_second_local_one(local_ports, tmp_path):
+    answers, asked = local_ports
+    answers["127.0.0.1:11434/api/tags"] = OLLAMA_TAGS
+    answers["127.0.0.1:11438/api/tags"] = ENGINE_TAGS
+    answers["localhost:11438/api/tags"] = ENGINE_TAGS
+    store = ModelEndpointStore(str(tmp_path))
+    store.add("http://127.0.0.1:11434", "ollama", label="Ollama (auto-detected)")
+    added = asyncio.run(model_endpoints.settle_local_backend(store, None, never_start()))
+    assert added is None
+    assert [(e.base_url, e.label) for e in store.list()] == [("http://127.0.0.1:11434", "Ollama (auto-detected)")]
+    assert not [address for address in asked if ":11438" in address]
+
+
+def test_startup_starts_ollama_when_the_stored_backend_is_down_and_still_adds_nothing_else(local_ports, tmp_path):
+    answers, asked = local_ports
+    answers["127.0.0.1:11438/api/tags"] = ENGINE_TAGS
+    store = ModelEndpointStore(str(tmp_path))
+    store.add("http://127.0.0.1:11434", "ollama", label="Ollama (auto-detected)")
+    starts = []
+
+    async def start():
+        starts.append(True)
+        answers["127.0.0.1:11434/api/tags"] = OLLAMA_TAGS
+        return True
+
+    assert asyncio.run(model_endpoints.settle_local_backend(store, None, start)) is None
+    assert starts == [True]
+    assert [e.base_url for e in store.list()] == ["http://127.0.0.1:11434"]
+    assert not [address for address in asked if ":11438" in address]
+
+
+def test_startup_adds_the_backend_it_finds_when_none_is_stored(local_ports, tmp_path):
+    answers, _ = local_ports
+    answers["127.0.0.1:11438/api/tags"] = ENGINE_TAGS
+    answers["127.0.0.1:11434/api/tags"] = OLLAMA_TAGS
+    store = ModelEndpointStore(str(tmp_path))
+    added = asyncio.run(model_endpoints.settle_local_backend(store, None, never_start()))
+    assert (added.base_url, added.label) == ("http://127.0.0.1:11438", "ArtyEngine (auto-detected)")
+    assert len(store.list()) == 1
+
+
+def test_startup_adds_a_configured_address_without_probing_this_machine(local_ports, tmp_path):
+    _, asked = local_ports
+    store = ModelEndpointStore(str(tmp_path))
+    store.add("http://127.0.0.1:11434", "ollama", label="Ollama (auto-detected)")
+    added = asyncio.run(model_endpoints.settle_local_backend(store, "http://gpu-box:11434", never_start()))
+    assert added.base_url == "http://gpu-box:11434"
+    assert not [address for address in asked if address.startswith(("127.0.0.1", "localhost"))]
+
+
+@pytest.mark.parametrize("stored, configured, chosen", [
+    ([], None, None),
+    ([("http://gpu-box:11434", "ollama")], None, None),
+    ([("http://127.0.0.1:1234", "openai-compatible")], None, None),
+    ([("http://gpu-box:11434", "ollama"), ("http://localhost:11438", "ollama"), ("http://127.0.0.1:11434", "ollama")],
+     None, "http://localhost:11438"),
+    ([("http://127.0.0.1:11434", "ollama")], "http://gpu-box:11434", "http://gpu-box:11434"),
+])
+def test_the_chosen_backend_is_the_configured_one_or_the_first_stored_on_this_machine(
+        local_ports, tmp_path, stored, configured, chosen):
+    _, asked = local_ports
+    store = ModelEndpointStore(str(tmp_path))
+    for base_url, kind in stored:
+        store.add(base_url, kind)
+    assert model_endpoints.chosen_backend_url(store, configured) == chosen
+    assert asked == []
 
 
 def test_discovery_lists_each_running_server_once_and_skips_dead_and_hanging_ports(local_ports):
