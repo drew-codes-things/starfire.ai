@@ -19,6 +19,8 @@ def _is_configured_ollama(parsed) -> bool:
     configured = urlparse(config.ollama_base_url or "")
     return bool(configured.netloc) and parsed.netloc.lower() == configured.netloc.lower()
 
+THIS_MACHINE_HOSTS = frozenset({"localhost", "127.0.0.1", "0.0.0.0", "::1"})
+
 def _is_ollama_native_url(url: str) -> bool:
     try:
         parsed = urlparse(url or "")
@@ -31,7 +33,7 @@ def _is_ollama_native_url(url: str) -> bool:
         return True
     if path.startswith("/v1"):
         return False
-    local_ollama_host = (host in {"localhost", "127.0.0.1", "0.0.0.0", "::1"} or parsed.port == 11434
+    local_ollama_host = (host in THIS_MACHINE_HOSTS or parsed.port == 11434
                          or _is_configured_ollama(parsed))
     return local_ollama_host and (path == "" or path == "/api" or path.startswith("/api/"))
 

@@ -397,3 +397,9 @@ test('a model server that answers but was never added is shown as found, not in 
   const inUse = logic.backendStatusPlan({ installed: true, running: true, backend: 'Ollama', in_use: true, found_at: null });
   assert.equal(inUse.headline, '✓ Ollama is running.');
 });
+
+test('a scanned server is stored with the kind the scan found, not always as Ollama', () => {
+  const body = logic.scanEndpointBody({ base_url: 'http://127.0.0.1:8080', kind: 'openai-compatible', label: 'Local server (127.0.0.1:8080)' });
+  assert.deepEqual(body, { base_url: 'http://127.0.0.1:8080', kind: 'openai-compatible', label: 'Local server (127.0.0.1:8080)' });
+  assert.equal(logic.scanEndpointBody({ base_url: 'http://127.0.0.1:11434', label: 'Ollama' }).kind, 'ollama');
+});

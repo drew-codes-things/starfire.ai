@@ -203,6 +203,10 @@ const NO_LOCAL_OLLAMA = 'There is no Ollama here to start. ArtyEngine and other 
 const FOUND_NOT_ADDED = 'starfire only sends work to a model server you have added: add it under Connections '
   + '(add ollama or scan network) to use it.';
 
+function scanEndpointBody(item) {
+  return { base_url: item.base_url, kind: item.kind || 'ollama', label: item.label };
+}
+
 function backendStatusPlan(status) {
   const backend = status.backend || 'Ollama';
   if (status.running && status.in_use === false) {
@@ -231,6 +235,6 @@ if (typeof module !== 'undefined' && module.exports) {
     showListLoading,
     failureMessage,
     NO_EMAIL_ACCOUNTS, ruleAccountChoices,
-    BACKEND_RUNS_ON_ITS_OWN, NO_LOCAL_OLLAMA, FOUND_NOT_ADDED, backendStatusPlan,
+    BACKEND_RUNS_ON_ITS_OWN, NO_LOCAL_OLLAMA, FOUND_NOT_ADDED, backendStatusPlan, scanEndpointBody,
   };
 }

@@ -43,7 +43,8 @@ from email_rule_checker import EmailRuleChecker
 from mcp_manager import McpConnectionError, mcp_manager
 from mcp_servers_store import (MCP_SERVER_REPOSITORY, NEEDS_SIGN_IN, REFERENCE_SERVERS, REREGISTER, SIGN_IN_SERVICES,
                                McpServerStore, has_missing_secrets, needs_sign_in)
-from model_endpoints import ModelEndpointStore, chosen_backend_url, detect_ollama, discover_servers, identify_backend
+from model_endpoints import (ModelEndpointStore, adopt_started_ollama, chosen_backend_url, detect_ollama, discover_servers,
+                             identify_backend)
 from ollama_runner import for_runner
 from providers import build_models_url, is_embedding_model
 from task_scheduler import TaskScheduler, compute_next_run
@@ -1580,7 +1581,8 @@ async def start_ollama():
     ok, message = await ollama_manager.start(config.ollama_base_url)
     if not ok:
         raise HTTPException(502, message)
-    return {"started": True, "message": message}
+    added = await adopt_started_ollama(endpoints, config.ollama_base_url)
+    return {"started": True, "message": message, "added": added.label if added else None}
 
 @router.post("/hardware/pull")
 async def pull_model(body: dict):
