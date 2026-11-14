@@ -123,7 +123,7 @@ settingsEls.discoverBtn.onclick = async () => {
         body: JSON.stringify({ base_url: item.base_url, kind: 'ollama', label: item.label }),
       }).catch(() => {});
     }
-    settingsEls.localTestResult.textContent = `found and added ${found.length} server(s)`;
+    settingsEls.localTestResult.textContent = `found and added ${found.map(item => item.label).join(', ')}`;
     settingsEls.localTestResult.className = 'settings-hint ok';
     await refreshEndpointList();
     await loadModels();

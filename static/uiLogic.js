@@ -197,6 +197,22 @@ function ruleAccountChoices(accounts) {
   return { usable: true, options: list.map(account => ({ value: account.id, label: account.label })) };
 }
 
+const BACKEND_RUNS_ON_ITS_OWN = 'It runs on its own: starfire only starts Ollama, and only when Ollama is installed here.';
+const NO_LOCAL_OLLAMA = 'There is no Ollama here to start. ArtyEngine and other Ollama-compatible servers run on their own: '
+  + 'start yours and set OLLAMA_BASE_URL to its address.';
+
+function backendStatusPlan(status) {
+  const backend = status.backend || 'Ollama';
+  if (status.running) {
+    return { headline: `✓ ${backend} is running.`, note: status.installed ? '' : BACKEND_RUNS_ON_ITS_OWN,
+      offerStart: false, showInstall: false };
+  }
+  if (status.installed) {
+    return { headline: 'Installed, but not running.', note: '', offerStart: true, showInstall: false };
+  }
+  return { headline: 'Ollama is not installed.', note: NO_LOCAL_OLLAMA, offerStart: false, showInstall: true };
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     DAY_MS, TOAST_MS, TOAST_ERROR_MS, TOAST_FADE_MS,
@@ -209,5 +225,6 @@ if (typeof module !== 'undefined' && module.exports) {
     showListLoading,
     failureMessage,
     NO_EMAIL_ACCOUNTS, ruleAccountChoices,
+    BACKEND_RUNS_ON_ITS_OWN, NO_LOCAL_OLLAMA, backendStatusPlan,
   };
 }

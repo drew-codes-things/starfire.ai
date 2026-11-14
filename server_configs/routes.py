@@ -43,7 +43,7 @@ from email_rule_checker import EmailRuleChecker
 from mcp_manager import McpConnectionError, mcp_manager
 from mcp_servers_store import (MCP_SERVER_REPOSITORY, NEEDS_SIGN_IN, REFERENCE_SERVERS, REREGISTER, SIGN_IN_SERVICES,
                                McpServerStore, has_missing_secrets, needs_sign_in)
-from model_endpoints import ModelEndpointStore, detect_ollama, discover_servers
+from model_endpoints import ModelEndpointStore, detect_ollama, discover_servers, identify_backend
 from ollama_runner import for_runner
 from providers import build_models_url, is_embedding_model
 from task_scheduler import TaskScheduler, compute_next_run
@@ -1560,10 +1560,12 @@ async def get_hardware():
 @router.get("/hardware/ollama")
 async def get_ollama_status():
     installed = ollama_manager.is_installed()
-    running = bool(await detect_ollama(config.ollama_base_url)) if installed else False
+    detected = await detect_ollama(config.ollama_base_url)
+    backend = await identify_backend(detected) if detected else None
     return {
         "installed": installed,
-        "running": running,
+        "running": backend is not None,
+        "backend": backend,
         "install": None if installed else ollama_manager.install_info(),
     }
 

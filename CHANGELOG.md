@@ -53,6 +53,11 @@
   WCAG AA contrast for every text colour on every surface in both themes.
 
 ### Changed
+- ArtyEngine-aware model server detection: startup auto-detection tries ArtyEngine's port 11438
+  before Ollama's 11434 and prefers it when both answer, **scan network** probes 11438 too, and
+  endpoints, the scan result and Settings → Hardware name the backend that answered (ArtyEngine
+  from its `Server` header or greeting, Ollama otherwise). The **Start Ollama** button only
+  appears when Ollama is installed; otherwise the Hardware tab says the backend runs on its own.
 - The licence is now Apache-2.0, with a NOTICE file that credits the author.
 - Toasts show at the top centre, so they no longer cover the message box.
 - On phones the chat controls dim the chat behind them and close with a tap outside, and the

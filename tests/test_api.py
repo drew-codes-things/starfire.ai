@@ -4,6 +4,7 @@ import tempfile
 
 os.environ.setdefault("DATA_DIR", tempfile.mkdtemp(prefix="starfire-test-"))
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -11,6 +12,7 @@ from fastapi.testclient import TestClient
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "server_configs"))
 
+import model_endpoints
 import routes
 import shell_tool
 from chat_session_store import ChatSessionStore
@@ -156,6 +158,48 @@ def test_config_reports_version_and_model_patterns(client):
     assert data["version"] == VERSION
     assert data["own_tools_models"] == ["Arty", "assistant-core", "arty/*"]
     assert data["inline_media_prefixes"] == ["/arty-files/"]
+
+
+def model_server_replies(monkeypatch, replies):
+    def handle(request):
+        reply = replies.get(f"{request.url.host}:{request.url.port}{request.url.path}")
+        if reply is None:
+            raise httpx.ConnectError("connection refused", request=request)
+        return httpx.Response(200, headers=reply[0], text=reply[1])
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(model_endpoints.httpx, "AsyncClient",
+                        lambda *args, **kwargs: real_client(*args, transport=httpx.MockTransport(handle), **kwargs))
+
+
+def test_backend_status_names_an_arty_engine_that_runs_without_ollama_installed(client, monkeypatch):
+    monkeypatch.setattr(routes.config, "ollama_base_url", "http://engine.test:11435")
+    monkeypatch.setattr(routes.ollama_manager, "is_installed", lambda: False)
+    model_server_replies(monkeypatch, {
+        "engine.test:11435/api/tags": ([("Server", "Caddy"), ("Server", "arty-engine/0.1.0 Python/3.13.5")], "{}"),
+    })
+    status = client.get("/api/hardware/ollama").json()
+    assert (status["installed"], status["running"], status["backend"]) == (False, True, "ArtyEngine")
+
+
+def test_backend_status_names_a_running_ollama(client, monkeypatch):
+    monkeypatch.setattr(routes.config, "ollama_base_url", None)
+    monkeypatch.setattr(routes.ollama_manager, "is_installed", lambda: True)
+    model_server_replies(monkeypatch, {
+        "127.0.0.1:11434/api/tags": ([], "{}"),
+        "127.0.0.1:11434/": ([], "Ollama is running"),
+    })
+    status = client.get("/api/hardware/ollama").json()
+    assert status == {"installed": True, "running": True, "backend": "Ollama", "install": None}
+
+
+def test_backend_status_reports_nothing_running_when_the_configured_server_is_down(client, monkeypatch):
+    monkeypatch.setattr(routes.config, "ollama_base_url", "http://engine.test:11435")
+    monkeypatch.setattr(routes.ollama_manager, "is_installed", lambda: False)
+    model_server_replies(monkeypatch, {})
+    status = client.get("/api/hardware/ollama").json()
+    assert (status["installed"], status["running"], status["backend"]) == (False, False, None)
+    assert status["install"]
 
 
 def test_config_lists_only_the_patterns_of_models_with_a_server_voice(client, monkeypatch):

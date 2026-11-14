@@ -56,7 +56,7 @@ from config import config
 from mcp_manager import McpConnectionError, mcp_manager
 from mcp_servers_store import REFERENCE_SERVERS
 import ollama_manager
-from model_endpoints import detect_ollama
+from model_endpoints import add_detected_backend, detect_ollama
 from version import VERSION
 
 logger = logging.getLogger(__name__)
@@ -71,9 +71,9 @@ async def lifespan(app: FastAPI):
         print(f"  starfire.ai  ->  Ollama installed but not running, tried to start it: {message}")
         if started:
             detected = await detect_ollama(config.ollama_base_url)
-    if detected and not routes.endpoints.find_by_url(detected):
-        endpoint = routes.endpoints.add(detected, kind="ollama", label="Ollama (auto-detected)")
-        print(f"  starfire.ai  ->  detected Ollama at {endpoint.base_url}, added automatically")
+    endpoint = await add_detected_backend(routes.endpoints, detected) if detected else None
+    if endpoint:
+        print(f"  starfire.ai  ->  added {endpoint.label} at {endpoint.base_url}")
 
     existing = {(s.command, tuple(s.args)) for s in routes.mcp_servers.list()}
     for preset_id in DEFAULT_MCP_PRESETS:

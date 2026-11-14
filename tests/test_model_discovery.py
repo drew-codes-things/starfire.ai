@@ -26,6 +26,9 @@ def local_ports(monkeypatch):
             raise httpx.ConnectError("connection refused", request=request)
         if reply == "hangs":
             raise httpx.ReadTimeout("timed out", request=request)
+        if isinstance(reply, tuple):
+            status, headers, text = reply
+            return httpx.Response(status, headers=headers, text=text)
         return httpx.Response(reply)
 
     real_client = httpx.AsyncClient
@@ -49,10 +52,73 @@ def test_ollama_on_this_machine_is_found(local_ports):
 @pytest.mark.parametrize("reply", ["dead", "hangs", 500])
 def test_no_ollama_is_reported_when_nothing_healthy_answers(local_ports, reply):
     answers, asked = local_ports
-    answers["127.0.0.1:11434"] = reply
-    answers["localhost:11434"] = reply
+    for address in ("127.0.0.1:11438", "localhost:11438", "127.0.0.1:11434", "localhost:11434"):
+        answers[address] = reply
     assert asyncio.run(model_endpoints.detect_ollama(None)) is None
-    assert asked == ["127.0.0.1:11434/api/tags", "localhost:11434/api/tags"]
+    assert asked == ["127.0.0.1:11438/api/tags", "localhost:11438/api/tags",
+                     "127.0.0.1:11434/api/tags", "localhost:11434/api/tags"]
+
+
+def test_arty_engine_on_this_machine_is_found(local_ports):
+    answers, _ = local_ports
+    answers["localhost:11438/api/tags"] = 200
+    assert asyncio.run(model_endpoints.detect_ollama(None)) == "http://localhost:11438"
+
+
+def test_arty_engine_is_preferred_when_ollama_answers_too(local_ports):
+    answers, _ = local_ports
+    answers["127.0.0.1:11434/api/tags"] = 200
+    answers["127.0.0.1:11438/api/tags"] = 200
+    assert asyncio.run(model_endpoints.detect_ollama(None)) == "http://127.0.0.1:11438"
+
+
+ENGINE_BEHIND_CADDY = (200, [("Server", "Caddy"), ("Server", "arty-engine/0.1.0 Python/3.13.5")], '{"models": []}')
+OLLAMA_TAGS = (200, [], '{"models": []}')
+
+
+def test_arty_engine_is_named_from_its_server_header_even_behind_a_proxy(local_ports):
+    answers, asked = local_ports
+    answers["engine.test:11435/api/tags"] = ENGINE_BEHIND_CADDY
+    assert asyncio.run(model_endpoints.identify_backend("http://engine.test:11435")) == "ArtyEngine"
+    assert asked == ["engine.test:11435/api/tags"]
+
+
+def test_arty_engine_is_named_from_its_greeting_when_a_proxy_drops_the_server_header(local_ports):
+    answers, _ = local_ports
+    answers["engine.test:11435/api/tags"] = OLLAMA_TAGS
+    answers["engine.test:11435/"] = (200, [], "Arty engine is running")
+    assert asyncio.run(model_endpoints.identify_backend("http://engine.test:11435/")) == "ArtyEngine"
+
+
+@pytest.mark.parametrize("greeting", [(200, [], "Ollama is running"), "dead", 404])
+def test_any_other_server_that_speaks_the_ollama_api_is_named_ollama(local_ports, greeting):
+    answers, _ = local_ports
+    answers["gpu-box:11434/api/tags"] = OLLAMA_TAGS
+    answers["gpu-box:11434/"] = greeting
+    assert asyncio.run(model_endpoints.identify_backend("http://gpu-box:11434/api")) == "Ollama"
+
+
+@pytest.mark.parametrize("reply", ["dead", "hangs", 500])
+def test_no_backend_is_named_when_nothing_healthy_answers(local_ports, reply):
+    answers, _ = local_ports
+    answers["gpu-box:11434"] = reply
+    assert asyncio.run(model_endpoints.identify_backend("http://gpu-box:11434")) is None
+
+
+def test_an_auto_detected_engine_is_added_once_with_its_name(local_ports, tmp_path):
+    answers, _ = local_ports
+    answers["127.0.0.1:11438/api/tags"] = ENGINE_BEHIND_CADDY
+    store = ModelEndpointStore(str(tmp_path))
+    added = asyncio.run(model_endpoints.add_detected_backend(store, "http://127.0.0.1:11438"))
+    assert (added.base_url, added.kind, added.label) == ("http://127.0.0.1:11438", "ollama", "ArtyEngine (auto-detected)")
+    assert asyncio.run(model_endpoints.add_detected_backend(store, "http://127.0.0.1:11438/")) is None
+    assert len(store.list()) == 1
+
+
+def test_an_auto_detected_address_that_does_not_answer_is_still_added_as_ollama(local_ports, tmp_path):
+    store = ModelEndpointStore(str(tmp_path))
+    added = asyncio.run(model_endpoints.add_detected_backend(store, "http://gpu-box:11434"))
+    assert added.label == "Ollama (auto-detected)"
 
 
 def test_discovery_lists_each_running_server_once_and_skips_dead_and_hanging_ports(local_ports):
@@ -66,6 +132,18 @@ def test_discovery_lists_each_running_server_once_and_skips_dead_and_hanging_por
     assert found == [
         {"base_url": "http://127.0.0.1:11434", "kind": "ollama", "label": "Ollama (127.0.0.1:11434)"},
         {"base_url": "http://127.0.0.1:1234", "kind": "openai-compatible", "label": "Local server (127.0.0.1:1234)"},
+    ]
+
+
+def test_discovery_finds_arty_engine_first_and_names_each_backend(local_ports):
+    answers, _ = local_ports
+    answers["127.0.0.1:11434/api/tags"] = OLLAMA_TAGS
+    answers["127.0.0.1:11434/"] = (200, [], "Ollama is running")
+    answers["127.0.0.1:11438/api/tags"] = (200, [("Server", "arty-engine/0.1.0 Python/3.13.5")], '{"models": []}')
+    found = asyncio.run(model_endpoints.discover_servers())
+    assert found == [
+        {"base_url": "http://127.0.0.1:11438", "kind": "ollama", "label": "ArtyEngine (127.0.0.1:11438)"},
+        {"base_url": "http://127.0.0.1:11434", "kind": "ollama", "label": "Ollama (127.0.0.1:11434)"},
     ]
 
 

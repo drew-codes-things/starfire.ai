@@ -113,13 +113,16 @@ async function refreshOllamaStatus() {
   try {
     const r = await fetch('/api/hardware/ollama');
     const data = await r.json();
-    if (data.running) {
-      settingsEls.ollamaStatus.innerHTML = '<p class="settings-hint">✓ installed and running.</p>';
+    const plan = backendStatusPlan(data);
+    const headline = `<p class="settings-hint">${escapeHtml(plan.headline)}</p>`;
+    const note = plan.note ? `<p class="settings-hint">${escapeHtml(plan.note)}</p>` : '';
+    if (!plan.offerStart && !plan.showInstall) {
+      settingsEls.ollamaStatus.innerHTML = headline + note;
       return;
     }
-    if (data.installed) {
+    if (plan.offerStart) {
       settingsEls.ollamaStatus.innerHTML =
-        '<p class="settings-hint">Installed, but not running.</p>' +
+        headline +
         '<button class="btn ghost" id="ollamaStartBtn" type="button">start Ollama</button>' +
         '<p class="settings-hint" id="ollamaStartMsg"></p>';
       $('ollamaStartBtn').onclick = async (e) => {
@@ -145,7 +148,7 @@ async function refreshOllamaStatus() {
     }
 
     const install = data.install || {};
-    let html = '<p class="settings-hint">Not installed.</p>';
+    let html = headline + note;
     if (install.method === 'command' && install.command) {
       html += `<p class="settings-hint"><code>${escapeHtml(install.command)}</code></p>`;
     } else if (install.url) {
@@ -156,7 +159,7 @@ async function refreshOllamaStatus() {
     }
     settingsEls.ollamaStatus.innerHTML = html;
   } catch (_) {
-    settingsEls.ollamaStatus.innerHTML = '<p class="settings-hint error">failed to check Ollama status</p>';
+    settingsEls.ollamaStatus.innerHTML = '<p class="settings-hint error">failed to check the model server</p>';
   }
 }
 

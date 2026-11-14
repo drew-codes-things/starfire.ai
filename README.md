@@ -99,19 +99,23 @@ Upgrading from a single-user install: on the first start your existing data move
 first admin's folder automatically. The Open WebUI import script now takes `--user EMAIL`
 (default: the first admin).
 
-If Ollama is already running on its default port, it's detected automatically on startup
-and appears in the model list with no setup. Otherwise, open **Settings → Connections** and
-either click **add ollama** (fills in the default endpoint, then Test/Add) or **scan
-network** to probe common local model-server ports.
+If Ollama (port 11434) or ArtyEngine (port 11438) is already running on this machine, it's
+detected automatically on startup and appears in the model list with no setup; when both
+answer, ArtyEngine is used. Otherwise, open **Settings → Connections** and either click **add
+ollama** (fills in the default endpoint, then Test/Add) or **scan network** to probe common
+local model-server ports (11438, 11434, 1234 and 8080).
 
 Any server that speaks Ollama's API can stand in for Ollama. Arty runs on
 [ArtyEngine](https://github.com/drew-codes-things/ArtyEngine), its own Ollama-compatible server
-built on llama.cpp, and starfire talks to it the same way: set `OLLAMA_BASE_URL` in `.env` to
-its address (`http://127.0.0.1:11438` on the same machine; auto-detection only tries port 11434,
-and **scan network** 11434, 1234 and 8080). From another machine, reach it through a reverse
+built on llama.cpp, and starfire talks to it the same way. starfire tells the two apart from
+what the server reports (ArtyEngine's `Server` header, or its "Arty engine is running"
+greeting when a proxy drops that header), names the one it found in the endpoint label and on
+**Settings → Hardware**, and treats anything else that answers Ollama's API as Ollama. On
+another machine, set `OLLAMA_BASE_URL` in `.env` to its address and reach it through a reverse
 proxy as ArtyEngine's README describes, since it listens on loopback by default. The **Start
-Ollama** button and the install checks are for Ollama itself. ArtyEngine is a separate project
-under its own licence, PolyForm Strict 1.0.0, not starfire's Apache 2.0.
+Ollama** button only appears when an Ollama binary is installed here; with ArtyEngine or a
+remote server, the Hardware tab says the backend runs on its own. ArtyEngine is a separate
+project under its own licence, PolyForm Strict 1.0.0, not starfire's Apache 2.0.
 
 ## Arty, Arty CLI and starfire.ai
 
@@ -500,7 +504,8 @@ out-of-memory error or a model that swaps to disk and crawls. Detection works on
 and Windows; GPU VRAM/name needs `nvidia-smi` (NVIDIA only), and RAM speed/type needs
 `dmidecode` **and root** on Linux specifically (macOS/Windows can read it as a normal user).
 
-**Ollama status** is also shown here: if it's installed but not running, a **Start Ollama**
+**Model server status** is also shown here, naming the backend that answered (Ollama or
+ArtyEngine). If Ollama is installed but nothing is running, a **Start Ollama**
 button launches it (no elevated privileges needed - same as running `ollama serve` yourself);
 starfire also tries this automatically on its own startup. If Ollama isn't installed at all,
 the tab shows the right install step for your OS (the official installer command on Linux,

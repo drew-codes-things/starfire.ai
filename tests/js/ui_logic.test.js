@@ -358,3 +358,30 @@ test('the rule account choices list each account, or say there is none yet so th
   }
   assert.match(logic.NO_EMAIL_ACCOUNTS, /add one above/);
 });
+
+test('the model server card offers to start Ollama only when Ollama is installed and nothing answers', () => {
+  const stopped = logic.backendStatusPlan({ installed: true, running: false, backend: null });
+  assert.equal(stopped.offerStart, true);
+  assert.equal(stopped.showInstall, false);
+  for (const status of [
+    { installed: false, running: false, backend: null },
+    { installed: false, running: true, backend: 'ArtyEngine' },
+    { installed: true, running: true, backend: 'Ollama' },
+    { installed: true, running: true, backend: 'ArtyEngine' },
+  ]) {
+    assert.equal(logic.backendStatusPlan(status).offerStart, false);
+  }
+});
+
+test('the model server card names the backend that answered and says a server without Ollama runs on its own', () => {
+  const engine = logic.backendStatusPlan({ installed: false, running: true, backend: 'ArtyEngine' });
+  assert.equal(engine.headline, '✓ ArtyEngine is running.');
+  assert.equal(engine.note, logic.BACKEND_RUNS_ON_ITS_OWN);
+  assert.equal(engine.showInstall, false);
+  const ollama = logic.backendStatusPlan({ installed: true, running: true, backend: 'Ollama' });
+  assert.equal(ollama.headline, '✓ Ollama is running.');
+  assert.equal(ollama.note, '');
+  const nothing = logic.backendStatusPlan({ installed: false, running: false, backend: null });
+  assert.equal(nothing.note, logic.NO_LOCAL_OLLAMA);
+  assert.equal(nothing.showInstall, true);
+});
