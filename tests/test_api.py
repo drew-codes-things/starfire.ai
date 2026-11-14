@@ -161,8 +161,12 @@ def test_config_reports_version_and_model_patterns(client):
 
 
 def model_server_replies(monkeypatch, replies):
+    asked = []
+
     def handle(request):
-        reply = replies.get(f"{request.url.host}:{request.url.port}{request.url.path}")
+        address = f"{request.url.host}:{request.url.port}{request.url.path}"
+        asked.append(address)
+        reply = replies.get(address)
         if reply is None:
             raise httpx.ConnectError("connection refused", request=request)
         return httpx.Response(200, headers=reply[0], text=reply[1])
@@ -170,6 +174,19 @@ def model_server_replies(monkeypatch, replies):
     real_client = httpx.AsyncClient
     monkeypatch.setattr(model_endpoints.httpx, "AsyncClient",
                         lambda *args, **kwargs: real_client(*args, transport=httpx.MockTransport(handle), **kwargs))
+    return asked
+
+
+ENGINE_STAND_IN = {"127.0.0.1:11438/api/tags": ([("Server", "arty-engine/9.9")], "{}"),
+                   "127.0.0.1:11438/api/pull": ([], '{"status": "success"}')}
+
+
+def stored_endpoints(monkeypatch, tmp_path, *base_urls):
+    store = model_endpoints.ModelEndpointStore(str(tmp_path))
+    for base_url in base_urls:
+        store.add(base_url, "ollama", label="Ollama (auto-detected)")
+    monkeypatch.setattr(routes, "endpoints", store)
+    return store
 
 
 def test_backend_status_names_an_arty_engine_that_runs_without_ollama_installed(client, monkeypatch):
@@ -180,17 +197,68 @@ def test_backend_status_names_an_arty_engine_that_runs_without_ollama_installed(
     })
     status = client.get("/api/hardware/ollama").json()
     assert (status["installed"], status["running"], status["backend"]) == (False, True, "ArtyEngine")
+    assert (status["in_use"], status["found_at"]) == (True, None)
 
 
-def test_backend_status_names_a_running_ollama(client, monkeypatch):
+def test_backend_status_names_a_running_ollama_that_is_not_added_yet(client, monkeypatch, tmp_path):
     monkeypatch.setattr(routes.config, "ollama_base_url", None)
     monkeypatch.setattr(routes.ollama_manager, "is_installed", lambda: True)
+    stored_endpoints(monkeypatch, tmp_path)
     model_server_replies(monkeypatch, {
         "127.0.0.1:11434/api/tags": ([], "{}"),
         "127.0.0.1:11434/": ([], "Ollama is running"),
     })
     status = client.get("/api/hardware/ollama").json()
-    assert status == {"installed": True, "running": True, "backend": "Ollama", "install": None}
+    assert status == {"installed": True, "running": True, "backend": "Ollama", "install": None,
+                      "in_use": False, "found_at": "http://127.0.0.1:11434"}
+    assert routes.endpoints.list() == []
+
+
+def test_backend_status_reports_the_stored_backend_and_ignores_another_on_the_engine_port(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(routes.config, "ollama_base_url", None)
+    monkeypatch.setattr(routes.ollama_manager, "is_installed", lambda: True)
+    stored_endpoints(monkeypatch, tmp_path, "http://127.0.0.1:11434")
+    asked = model_server_replies(monkeypatch, {"127.0.0.1:11434/api/tags": ([], "{}"), **ENGINE_STAND_IN})
+    status = client.get("/api/hardware/ollama").json()
+    assert (status["running"], status["backend"], status["in_use"], status["found_at"]) == (True, "Ollama", True, None)
+    assert not [address for address in asked if ":11438" in address]
+
+
+def test_config_names_the_stored_backend_without_probing(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(routes.config, "ollama_base_url", None)
+    stored_endpoints(monkeypatch, tmp_path, "http://localhost:11434")
+    asked = model_server_replies(monkeypatch, ENGINE_STAND_IN)
+    assert client.get("/api/config").json()["ollama_base_url"] == "http://localhost:11434"
+    assert asked == []
+
+
+def test_config_offers_the_default_address_when_no_backend_is_stored(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(routes.config, "ollama_base_url", None)
+    stored_endpoints(monkeypatch, tmp_path)
+    asked = model_server_replies(monkeypatch, ENGINE_STAND_IN)
+    assert client.get("/api/config").json()["ollama_base_url"] == "http://localhost:11434"
+    assert asked == []
+
+
+def test_a_pull_is_refused_rather_than_sent_to_a_backend_nobody_chose(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(routes.config, "ollama_base_url", None)
+    stored_endpoints(monkeypatch, tmp_path)
+    asked = model_server_replies(monkeypatch, ENGINE_STAND_IN)
+    response = client.post("/api/hardware/pull", json={"model": "nomic-embed-text"})
+    assert response.status_code == 502
+    assert "Settings" in response.json()["detail"]
+    assert asked == []
+
+
+def test_a_pull_goes_to_the_stored_backend(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(routes.config, "ollama_base_url", None)
+    stored_endpoints(monkeypatch, tmp_path, "http://127.0.0.1:11434")
+    asked = model_server_replies(monkeypatch, {"127.0.0.1:11434/api/pull": ([], '{"status": "success"}'),
+                                               **ENGINE_STAND_IN})
+    response = client.post("/api/hardware/pull", json={"model": "nomic-embed-text"})
+    assert response.status_code == 200
+    assert "success" in response.text
+    assert asked == ["127.0.0.1:11434/api/pull"]
 
 
 def test_backend_status_reports_nothing_running_when_the_configured_server_is_down(client, monkeypatch):

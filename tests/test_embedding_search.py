@@ -14,6 +14,7 @@ import builtin_tools
 import documents_store
 import embeddings
 import memory_store
+import model_endpoints
 from documents_store import DocumentStore
 from memory_store import MemoryStore
 
@@ -42,7 +43,7 @@ def topic_vector(text):
 def ollama(monkeypatch):
     state = {"reachable": True, "embedding_model": True, "embedded": [], "asked": 0}
 
-    async def detect(_override):
+    def chosen_backend():
         return OLLAMA if state["reachable"] else None
 
     def handle(request):
@@ -59,8 +60,8 @@ def ollama(monkeypatch):
         return real_client(*args, transport=httpx.MockTransport(handle), **kwargs)
 
     monkeypatch.setattr(embeddings.httpx, "AsyncClient", client)
-    monkeypatch.setattr(memory_store, "detect_ollama", detect)
-    monkeypatch.setattr(documents_store, "detect_ollama", detect)
+    monkeypatch.setattr(memory_store, "local_backend_url", chosen_backend)
+    monkeypatch.setattr(documents_store, "local_backend_url", chosen_backend)
     return state
 
 
@@ -188,3 +189,52 @@ def test_a_search_without_an_embedding_model_asks_ollama_once(tmp_path, ollama):
         documents.add(name, f"Notes kept in {name} about the harbour.".encode())
     asyncio.run(documents.search("harbour"))
     assert ollama["asked"] == 2
+
+
+@pytest.fixture
+def this_machine(monkeypatch, tmp_path):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    asked = []
+    vectors = {"127.0.0.1:11434": [1.0, 0.0, 0.0], "127.0.0.1:11438": [0.0, 1.0, 0.0]}
+
+    def handle(request):
+        address = f"{request.url.host}:{request.url.port}"
+        asked.append(f"{address}{request.url.path}")
+        if request.url.path == "/api/embeddings" and address in vectors:
+            return httpx.Response(200, json={"embedding": vectors[address]})
+        if request.url.path == "/api/tags" and address in vectors:
+            return httpx.Response(200, headers={"Server": "arty-engine/9.9"}, json={"models": []})
+        raise httpx.ConnectError("connection refused", request=request)
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(embeddings.httpx, "AsyncClient",
+                        lambda *args, **kwargs: real_client(*args, transport=httpx.MockTransport(handle), **kwargs))
+    monkeypatch.setattr(model_endpoints.config, "data_dir", str(config_dir))
+    monkeypatch.setattr(model_endpoints.config, "ollama_base_url", None)
+    return {"asked": asked, "config_dir": str(config_dir)}
+
+
+def store_backend(config_dir, base_url):
+    model_endpoints.ModelEndpointStore(config_dir).add(base_url, "ollama", label="Ollama (auto-detected)")
+
+
+def test_memory_text_goes_only_to_the_stored_backend_and_nothing_is_probed(tmp_path, this_machine):
+    store_backend(this_machine["config_dir"], "http://127.0.0.1:11434")
+    asyncio.run(memories(tmp_path).relevant("which animal lives with us"))
+    asked = this_machine["asked"]
+    assert asked and set(asked) == {"127.0.0.1:11434/api/embeddings"}
+
+
+def test_document_text_goes_only_to_the_stored_backend_and_nothing_is_probed(tmp_path, this_machine):
+    store_backend(this_machine["config_dir"], "http://127.0.0.1:11434")
+    asyncio.run(knowledge(tmp_path).search("which animal lives with us"))
+    asked = this_machine["asked"]
+    assert asked and set(asked) == {"127.0.0.1:11434/api/embeddings"}
+
+
+def test_no_text_leaves_for_embedding_when_no_backend_is_stored(tmp_path, this_machine):
+    found = asyncio.run(memories(tmp_path).relevant("bakery"))
+    asyncio.run(knowledge(tmp_path).search("bakery"))
+    assert texts(found) == ["Works shifts at the bakery on Elm Street"]
+    assert this_machine["asked"] == []

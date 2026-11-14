@@ -43,7 +43,7 @@ from email_rule_checker import EmailRuleChecker
 from mcp_manager import McpConnectionError, mcp_manager
 from mcp_servers_store import (MCP_SERVER_REPOSITORY, NEEDS_SIGN_IN, REFERENCE_SERVERS, REREGISTER, SIGN_IN_SERVICES,
                                McpServerStore, has_missing_secrets, needs_sign_in)
-from model_endpoints import ModelEndpointStore, detect_ollama, discover_servers, identify_backend
+from model_endpoints import ModelEndpointStore, chosen_backend_url, detect_ollama, discover_servers, identify_backend
 from ollama_runner import for_runner
 from providers import build_models_url, is_embedding_model
 from task_scheduler import TaskScheduler, compute_next_run
@@ -55,6 +55,10 @@ from version import VERSION
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
+
+DEFAULT_OLLAMA_URL = "http://localhost:11434"
+NO_CHOSEN_BACKEND = ("no local model server is set up: add one under Settings, Connections, "
+                     "or set OLLAMA_BASE_URL")
 
 api_keys = APIKeyManager(config.data_dir)
 endpoints = ModelEndpointStore(config.data_dir)
@@ -235,9 +239,8 @@ async def warm(body: dict):
 
 @router.get("/config")
 async def get_config():
-    detected = await detect_ollama(config.ollama_base_url)
     return {
-        "ollama_base_url": detected or "http://localhost:11434",
+        "ollama_base_url": chosen_backend_url(endpoints, config.ollama_base_url) or DEFAULT_OLLAMA_URL,
         "version": VERSION,
         "own_tools_models": config.own_tools_patterns(),
         "inline_media_prefixes": config.media_prefixes(),
@@ -1560,12 +1563,15 @@ async def get_hardware():
 @router.get("/hardware/ollama")
 async def get_ollama_status():
     installed = ollama_manager.is_installed()
-    detected = await detect_ollama(config.ollama_base_url)
-    backend = await identify_backend(detected) if detected else None
+    chosen = chosen_backend_url(endpoints, config.ollama_base_url)
+    answering = chosen or await detect_ollama(None)
+    backend = await identify_backend(answering) if answering else None
     return {
         "installed": installed,
         "running": backend is not None,
         "backend": backend,
+        "in_use": chosen is not None,
+        "found_at": answering if backend and not chosen else None,
         "install": None if installed else ollama_manager.install_info(),
     }
 
@@ -1581,9 +1587,9 @@ async def pull_model(body: dict):
     model = body.get("model")
     if not model:
         raise HTTPException(400, "model is required")
-    ollama_url = await detect_ollama(config.ollama_base_url)
+    ollama_url = chosen_backend_url(endpoints, config.ollama_base_url)
     if not ollama_url:
-        raise HTTPException(502, "Ollama not detected - is it running?")
+        raise HTTPException(502, NO_CHOSEN_BACKEND)
 
     async def stream():
         try:

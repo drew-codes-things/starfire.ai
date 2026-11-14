@@ -139,14 +139,14 @@ def test_two_store_objects_for_the_same_file_share_one_lock(tmp_path):
 
 
 def fake_ollama(monkeypatch, module, while_embedding):
-    async def detect(_url):
+    def chosen_backend():
         return "http://ollama.example.test:11434"
 
     async def embed(text, _url):
         await while_embedding()
         return [1.0, float(len(text))]
 
-    monkeypatch.setattr(module, "detect_ollama", detect)
+    monkeypatch.setattr(module, "local_backend_url", chosen_backend)
     monkeypatch.setattr(module.embeddings_module, "embed", embed)
 
 

@@ -157,10 +157,7 @@ def test_bad_note_requests_from_the_model_are_errors(ctx, arguments):
 
 
 def test_the_model_manages_memory(ctx, monkeypatch):
-    async def no_ollama(url):
-        return None
-
-    monkeypatch.setattr(memory_store, "detect_ollama", no_ollama)
+    monkeypatch.setattr(memory_store, "local_backend_url", lambda: None)
     added = json.loads(call("manage_memory", {"action": "add", "text": "Drew's dog is called Pixel"}, ctx))
     assert call("manage_memory", {"action": "edit", "memory_id": added["id"], "text": "The dog is Pixel"}, ctx) == "updated"
     found = json.loads(call("manage_memory", {"action": "search", "query": "dog Pixel"}, ctx))
