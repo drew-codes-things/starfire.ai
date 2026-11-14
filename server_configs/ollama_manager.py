@@ -4,7 +4,7 @@ import asyncio
 import platform
 import shutil
 
-from model_endpoints import detect_ollama
+from model_endpoints import answering_ollama_address
 
 _SYSTEM = platform.system()
 
@@ -36,7 +36,7 @@ async def start(ollama_base_url_override: str | None) -> tuple[bool, str]:
     if not is_installed():
         return False, "Ollama isn't installed - see the install instructions above."
 
-    if await detect_ollama(ollama_base_url_override):
+    if await answering_ollama_address(ollama_base_url_override):
         return True, "Already running."
 
     try:
@@ -49,6 +49,6 @@ async def start(ollama_base_url_override: str | None) -> tuple[bool, str]:
 
     for _ in range(10):
         await asyncio.sleep(0.5)
-        if await detect_ollama(ollama_base_url_override):
+        if await answering_ollama_address(ollama_base_url_override):
             return True, "Started."
     return False, "Launched `ollama serve`, but it hasn't come up yet - check back in a moment."

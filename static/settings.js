@@ -120,7 +120,7 @@ settingsEls.discoverBtn.onclick = async () => {
       await fetch('/api/model-endpoints', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ base_url: item.base_url, kind: 'ollama', label: item.label }),
+        body: JSON.stringify(scanEndpointBody(item)),
       }).catch(() => {});
     }
     settingsEls.localTestResult.textContent = `found and added ${found.map(item => item.label).join(', ')}`;

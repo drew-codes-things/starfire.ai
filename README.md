@@ -102,14 +102,22 @@ first admin's folder automatically. The Open WebUI import script now takes `--us
 If Ollama (port 11434) or ArtyEngine (port 11438) is already running on this machine the first
 time starfire starts, it's detected and added as an endpoint, so it appears in the model list
 with no setup; when both answer, ArtyEngine is used. Port 11438 only counts as ArtyEngine when
-the server there names itself as ArtyEngine. Detection runs only while no local Ollama-API
-endpoint is stored: once one is, starfire keeps using it and never adds or switches to a second
-local server by itself (Settings → Hardware shows one it finds but has not added as "found, not
-added"). Memory and document embeddings and model pulls go to that stored endpoint (the first
-local Ollama-API endpoint in **Settings → Connections**) or to `OLLAMA_BASE_URL`, never to
-whatever happens to answer on a port. To add a server later, open **Settings → Connections**
-and either click **add ollama** (fills in the default endpoint, then Test/Add) or **scan
-network** to probe common local model-server ports (11438, 11434, 1234 and 8080).
+the server there names itself as ArtyEngine (port 11434 has no such check: anything that
+answers Ollama's API there on the first start is taken for Ollama). Detection runs only while no
+Ollama-API endpoint is stored at all, on this machine or another: once one is, starfire keeps
+using it and never adds or switches to another server by itself (Settings → Hardware shows one
+it finds but has not added as "found, not added"). Memory and document embeddings and model
+pulls go to `OLLAMA_BASE_URL` or else to the first Ollama-API endpoint on this machine in
+**Settings → Connections** (its server root, even when it was stored with an `/api` path),
+never to whatever happens to answer on a port. When the only model server set up is on another
+machine and `OLLAMA_BASE_URL` is not set, embeddings stay off and search uses keywords; set
+`OLLAMA_BASE_URL` to that server to turn them on. A server that **scan network** finds without
+the Ollama API is stored as OpenAI-compatible, and one stored earlier as Ollama by mistake is
+filed again on the next start. Clicking **start Ollama** on Settings → Hardware adds the Ollama
+it started when no model server on this machine is set up yet. To add a server later, open
+**Settings → Connections** and either click **add ollama** (fills in the default endpoint, then
+Test/Add) or **scan network** to probe common local model-server ports (11438, 11434, 1234 and
+8080).
 
 Any server that speaks Ollama's API can stand in for Ollama. Arty runs on
 [ArtyEngine](https://github.com/drew-codes-things/ArtyEngine), its own Ollama-compatible server

@@ -58,14 +58,22 @@
   endpoints, the scan result and Settings → Hardware name the backend that answered (ArtyEngine
   from its `Server` header or greeting, Ollama otherwise). The **Start Ollama** button only
   appears when Ollama is installed; otherwise the Hardware tab says the backend runs on its own.
-- The local model server is chosen once and kept: startup detection runs only while no local
-  Ollama-API endpoint is stored, port 11438 is only taken when the server there names itself as
-  ArtyEngine, and a second local server is never added or switched to by itself (Settings →
-  Hardware shows it as found, not added). Memory and document embeddings, model pulls and the
-  **add ollama** default use the stored endpoint or `OLLAMA_BASE_URL` instead of probing ports
-  on every search, so nothing that merely answers on a port receives memory or document text.
-  Auto-detected endpoints are renamed when the backend behind them changes, and loopback probes
-  give up after 0.5 s to connect.
+- The model server is chosen once and kept: startup detection runs only while no Ollama-API
+  endpoint is stored (on this machine or another), port 11438 is only taken when the server
+  there names itself as ArtyEngine, and another server is never added or switched to by itself
+  (Settings → Hardware shows it as found, not added). Memory and document embeddings, model
+  pulls and the **add ollama** default use `OLLAMA_BASE_URL` or the stored endpoint on this
+  machine (its server root, also when stored with an `/api` path) instead of probing ports on
+  every search, so once a model server is set up nothing else that answers on a port receives
+  memory or document text. `127.0.0.1`, `localhost`, `0.0.0.0` and `::1` all count as this
+  machine, and a damaged stored address no longer stops startup. Auto-detected endpoints are
+  renamed when the backend behind them changes, and the startup detection probes give up after
+  0.5 s to connect.
+- **scan network** stores each server with the kind it found, and a server on this machine stored
+  as Ollama without speaking its API is filed as OpenAI-compatible on the next start.
+- **start Ollama** on Settings → Hardware asks only Ollama's own port whether it already runs (an
+  ArtyEngine on 11438 no longer stops it), and adds the Ollama it started when no model server on
+  this machine is set up yet.
 - The licence is now Apache-2.0, with a NOTICE file that credits the author.
 - Toasts show at the top centre, so they no longer cover the message box.
 - On phones the chat controls dim the chat behind them and close with a tap outside, and the

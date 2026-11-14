@@ -238,3 +238,10 @@ def test_no_text_leaves_for_embedding_when_no_backend_is_stored(tmp_path, this_m
     asyncio.run(knowledge(tmp_path).search("bakery"))
     assert texts(found) == ["Works shifts at the bakery on Elm Street"]
     assert this_machine["asked"] == []
+
+
+def test_memory_text_reaches_an_endpoint_stored_with_an_api_path(tmp_path, this_machine):
+    store_backend(this_machine["config_dir"], "http://127.0.0.1:11434/api")
+    asyncio.run(memories(tmp_path).relevant("which animal lives with us"))
+    asked = this_machine["asked"]
+    assert asked and set(asked) == {"127.0.0.1:11434/api/embeddings"}

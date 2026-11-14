@@ -600,3 +600,40 @@ def test_a_chat_message_whose_content_is_not_text_is_refused_not_a_crash(client,
         "endpoint_id": "ep1", "model": "m", "messages": [{"role": "user", "content": content}]})
     assert response.status_code == 422
     assert model_inbox == []
+
+
+def test_a_pull_goes_to_the_server_root_of_an_endpoint_stored_with_an_api_path(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(routes.config, "ollama_base_url", None)
+    stored_endpoints(monkeypatch, tmp_path, "http://127.0.0.1:11434/api")
+    asked = model_server_replies(monkeypatch, {"127.0.0.1:11434/api/pull": ([], '{"status": "success"}')})
+    response = client.post("/api/hardware/pull", json={"model": "nomic-embed-text"})
+    assert "success" in response.text
+    assert asked == ["127.0.0.1:11434/api/pull"]
+
+
+def ollama_started_by_the_button(monkeypatch):
+    async def start(_override):
+        return True, "Started."
+
+    monkeypatch.setattr(routes.ollama_manager, "start", start)
+
+
+def test_starting_ollama_from_the_hardware_tab_adds_it_when_no_backend_is_set_up(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(routes.config, "ollama_base_url", None)
+    stored_endpoints(monkeypatch, tmp_path)
+    ollama_started_by_the_button(monkeypatch)
+    model_server_replies(monkeypatch, {"127.0.0.1:11434/api/tags": ([], "{}"), **ENGINE_STAND_IN})
+    response = client.post("/api/hardware/ollama/start").json()
+    assert response["added"] == "Ollama (auto-detected)"
+    assert [(e.base_url, e.label) for e in routes.endpoints.list()] == [("http://127.0.0.1:11434", "Ollama (auto-detected)")]
+    status = client.get("/api/hardware/ollama").json()
+    assert (status["in_use"], status["found_at"]) == (True, None)
+
+
+def test_starting_ollama_adds_nothing_when_a_local_backend_is_already_set_up(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(routes.config, "ollama_base_url", None)
+    stored_endpoints(monkeypatch, tmp_path, "http://127.0.0.1:11438")
+    ollama_started_by_the_button(monkeypatch)
+    model_server_replies(monkeypatch, {"127.0.0.1:11434/api/tags": ([], "{}"), **ENGINE_STAND_IN})
+    assert client.post("/api/hardware/ollama/start").json()["added"] is None
+    assert [e.base_url for e in routes.endpoints.list()] == ["http://127.0.0.1:11438"]

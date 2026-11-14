@@ -293,3 +293,82 @@ def test_an_endpoints_file_that_is_not_a_list_reads_as_empty_and_can_be_added_to
     added = store.add("http://127.0.0.1:11434/", "ollama", label="Local")
     assert [e.base_url for e in store.list()] == ["http://127.0.0.1:11434"]
     assert store.find_by_url("http://127.0.0.1:11434/").id == added.id
+
+
+@pytest.mark.parametrize("configured, stored, chosen", [
+    (None, "http://localhost:11434/api", "http://localhost:11434"),
+    (None, "http://127.0.0.1:11438/api/", "http://127.0.0.1:11438"),
+    ("http://gpu-box:11434/api", None, "http://gpu-box:11434"),
+    ("http://gpu-box:11434/api/chat", None, "http://gpu-box:11434"),
+    ("http://gpu-box:11434", None, "http://gpu-box:11434"),
+])
+def test_the_chosen_backend_is_the_server_root_even_when_stored_with_an_api_path(
+        local_ports, tmp_path, configured, stored, chosen):
+    store = ModelEndpointStore(str(tmp_path))
+    if stored:
+        store.add(stored, "ollama")
+    assert model_endpoints.chosen_backend_url(store, configured) == chosen
+
+
+def test_startup_adopts_nothing_local_while_a_remote_backend_is_stored(local_ports, tmp_path):
+    answers, asked = local_ports
+    answers["127.0.0.1:11434/api/tags"] = OLLAMA_TAGS
+    answers["127.0.0.1:11438/api/tags"] = OLLAMA_TAGS
+    answers["127.0.0.1:11438/"] = (200, [], "Arty engine is running")
+    store = ModelEndpointStore(str(tmp_path))
+    store.add("http://gpu-box:11434", "ollama", label="GPU box")
+    assert asyncio.run(model_endpoints.settle_local_backend(store, None, never_start())) is None
+    assert [e.base_url for e in store.list()] == ["http://gpu-box:11434"]
+    assert model_endpoints.chosen_backend_url(store, None) is None
+    assert not [address for address in asked if address.startswith(("127.0.0.1", "localhost"))]
+
+
+def test_a_scanned_server_without_the_ollama_api_is_refiled_and_does_not_block_detection(local_ports, tmp_path):
+    answers, _ = local_ports
+    answers["127.0.0.1:8080/api/tags"] = 404
+    answers["127.0.0.1:8080/v1/models"] = 200
+    answers["127.0.0.1:11434/api/tags"] = OLLAMA_TAGS
+    store = ModelEndpointStore(str(tmp_path))
+    store.add("http://127.0.0.1:8080", "ollama", label="Local server (127.0.0.1:8080)")
+    added = asyncio.run(model_endpoints.settle_local_backend(store, None, never_start()))
+    assert added.base_url == "http://127.0.0.1:11434"
+    assert [(e.base_url, e.kind) for e in store.list()] == [("http://127.0.0.1:8080", "openai-compatible"),
+                                                           ("http://127.0.0.1:11434", "ollama")]
+    assert model_endpoints.chosen_backend_url(store, None) == "http://127.0.0.1:11434"
+
+
+def test_a_stored_backend_that_is_only_down_keeps_its_kind(local_ports, tmp_path):
+    store = ModelEndpointStore(str(tmp_path))
+    store.add("http://127.0.0.1:11434", "ollama", label="Ollama (auto-detected)")
+
+    async def start():
+        return False
+
+    assert asyncio.run(model_endpoints.settle_local_backend(store, None, start)) is None
+    assert [(e.base_url, e.kind) for e in store.list()] == [("http://127.0.0.1:11434", "ollama")]
+
+
+@pytest.mark.parametrize("stored", ["http://[::1]:11434", "http://0.0.0.0:11434", "http://LOCALHOST:11434"])
+def test_every_name_for_this_machine_counts_as_the_stored_local_backend(local_ports, tmp_path, stored):
+    answers, _ = local_ports
+    answers["127.0.0.1:11434/api/tags"] = OLLAMA_TAGS
+    answers["::1:11434/api/tags"] = OLLAMA_TAGS
+    answers["0.0.0.0:11434/api/tags"] = OLLAMA_TAGS
+    answers["localhost:11434/api/tags"] = OLLAMA_TAGS
+    store = ModelEndpointStore(str(tmp_path))
+    store.add(stored, "ollama")
+    assert asyncio.run(model_endpoints.settle_local_backend(store, None, never_start())) is None
+    assert [e.base_url for e in store.list()] == [stored]
+    assert model_endpoints.chosen_backend_url(store, None) == stored
+
+
+@pytest.mark.parametrize("stored", ["http://[::1", "http://[localhost]:11434"])
+def test_a_damaged_stored_address_is_not_a_local_backend_and_does_not_stop_startup(local_ports, tmp_path, stored):
+    answers, _ = local_ports
+    answers["127.0.0.1:11434/api/tags"] = OLLAMA_TAGS
+    (tmp_path / "endpoints.json").write_text(json.dumps([{"id": "bad", "base_url": stored, "kind": "ollama"}]))
+    store = ModelEndpointStore(str(tmp_path))
+    assert model_endpoints.chosen_backend_url(store, None) is None
+    added = asyncio.run(model_endpoints.settle_local_backend(store, None, never_start()))
+    assert added is None
+    assert [e.base_url for e in store.list()] == [stored]
