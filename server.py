@@ -63,10 +63,10 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MCP_PRESETS = ["fetch", "memory"]
 
-async def start_installed_ollama() -> bool:
+async def start_installed_ollama(backend_address: str | None = None) -> bool:
     if not ollama_manager.is_installed():
         return False
-    started, message = await ollama_manager.start(config.ollama_base_url)
+    started, message = await ollama_manager.start(backend_address)
     print(f"  starfire.ai  ->  Ollama installed but not running, tried to start it: {message}")
     return started
 

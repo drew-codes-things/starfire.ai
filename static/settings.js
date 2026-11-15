@@ -106,6 +106,20 @@ settingsEls.addOllamaBtn.onclick = async () => {
   settingsEls.localBaseUrl.focus();
 };
 
+async function addScannedServer(item) {
+  try {
+    const r = await fetch('/api/model-endpoints', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(scanEndpointBody(item)),
+    });
+    const answer = await r.json().catch(() => ({}));
+    return { label: item.label, ok: r.ok, status: r.status, kind: answer.kind, detail: answer.detail };
+  } catch (e) {
+    return { label: item.label, ok: false, detail: e.message };
+  }
+}
+
 settingsEls.discoverBtn.onclick = async () => {
   settingsEls.localTestResult.textContent = 'scanning…';
   settingsEls.localTestResult.className = 'settings-hint';
@@ -116,15 +130,13 @@ settingsEls.discoverBtn.onclick = async () => {
       settingsEls.localTestResult.textContent = 'no local model servers found';
       return;
     }
+    const results = [];
     for (const item of found) {
-      await fetch('/api/model-endpoints', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(scanEndpointBody(item)),
-      }).catch(() => {});
+      results.push(await addScannedServer(item));
     }
-    settingsEls.localTestResult.textContent = `found and added ${found.map(item => item.label).join(', ')}`;
-    settingsEls.localTestResult.className = 'settings-hint ok';
+    const summary = scanSummary(results);
+    settingsEls.localTestResult.textContent = summary.text;
+    settingsEls.localTestResult.className = 'settings-hint ' + (summary.ok ? 'ok' : 'error');
     await refreshEndpointList();
     await loadModels();
   } catch (e) {
@@ -162,11 +174,11 @@ settingsEls.addLocalBtn.onclick = async () => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ base_url, kind: 'ollama' }),
     });
+    const answer = await r.json().catch(() => ({}));
     if (!r.ok) {
-      const { detail } = await r.json().catch(() => ({}));
-      throw new Error(detail || 'add failed');
+      throw new Error(answer.detail || 'add failed');
     }
-    settingsEls.localTestResult.textContent = 'added';
+    settingsEls.localTestResult.textContent = addedLocalMessage(answer);
     settingsEls.localTestResult.className = 'settings-hint ok';
     settingsEls.localBaseUrl.value = '';
     await refreshEndpointList();

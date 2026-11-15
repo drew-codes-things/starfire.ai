@@ -403,3 +403,24 @@ test('a scanned server is stored with the kind the scan found, not always as Oll
   assert.deepEqual(body, { base_url: 'http://127.0.0.1:8080', kind: 'openai-compatible', label: 'Local server (127.0.0.1:8080)' });
   assert.equal(logic.scanEndpointBody({ base_url: 'http://127.0.0.1:11434', label: 'Ollama' }).kind, 'ollama');
 });
+
+test('the scan summary names the servers that were added and the ones that were not', () => {
+  const summary = logic.scanSummary([
+    { label: 'Ollama (127.0.0.1:11434)', ok: true, kind: 'ollama' },
+    { label: 'Local server (127.0.0.1:1234)', ok: true, kind: 'openai-compatible' },
+    { label: 'Local server (127.0.0.1:8080)', ok: false, detail: 'server returned 500' },
+    { label: 'Ollama (127.0.0.1:11438)', ok: false, status: 409, detail: 'that endpoint is already configured' },
+  ]);
+  assert.equal(summary.text,
+    'added Ollama (127.0.0.1:11434), Local server (127.0.0.1:1234) (OpenAI-compatible, not used for memory search or pulls); '
+    + 'already added Ollama (127.0.0.1:11438); not added Local server (127.0.0.1:8080): server returned 500');
+  assert.equal(summary.ok, false);
+  assert.deepEqual(logic.scanSummary([{ label: 'Ollama', ok: true, kind: 'ollama' }]), { text: 'added Ollama', ok: true });
+});
+
+test('adding a local server says when it was stored as OpenAI-compatible', () => {
+  assert.equal(logic.addedLocalMessage({ kind: 'ollama', base_url: 'http://localhost:11434' }), 'added');
+  assert.equal(logic.addedLocalMessage({ kind: 'openai-compatible', base_url: 'http://localhost:1234/v1' }),
+    'added http://localhost:1234/v1 as an OpenAI-compatible server: it has no Ollama API, so it is used for chat '
+    + 'but not for memory search or pulls');
+});

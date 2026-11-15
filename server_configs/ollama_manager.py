@@ -4,7 +4,7 @@ import asyncio
 import platform
 import shutil
 
-from model_endpoints import answering_ollama_address
+from model_endpoints import answering_ollama_address, ollama_serve_would_answer_at
 
 _SYSTEM = platform.system()
 
@@ -32,12 +32,20 @@ def install_info() -> dict:
         }
     return {"method": "download", "url": "https://ollama.com/download", "note": None}
 
-async def start(ollama_base_url_override: str | None) -> tuple[bool, str]:
+def _elsewhere_and_down(address: str) -> str:
+    return (f"starfire uses the model server at {address}, which is not answering. Starting Ollama on this "
+            "machine would not change that; start the server at that address instead.")
+
+
+async def start(backend_address: str | None) -> tuple[bool, str]:
     if not is_installed():
         return False, "Ollama isn't installed - see the install instructions above."
 
-    if await answering_ollama_address(ollama_base_url_override):
+    if await answering_ollama_address(backend_address):
         return True, "Already running."
+
+    if not ollama_serve_would_answer_at(backend_address):
+        return False, _elsewhere_and_down(backend_address)
 
     try:
         subprocess_kwargs = {"stdout": asyncio.subprocess.DEVNULL, "stderr": asyncio.subprocess.DEVNULL}
@@ -49,6 +57,6 @@ async def start(ollama_base_url_override: str | None) -> tuple[bool, str]:
 
     for _ in range(10):
         await asyncio.sleep(0.5)
-        if await answering_ollama_address(ollama_base_url_override):
+        if await answering_ollama_address(backend_address):
             return True, "Started."
     return False, "Launched `ollama serve`, but it hasn't come up yet - check back in a moment."

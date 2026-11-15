@@ -104,17 +104,25 @@ time starfire starts, it's detected and added as an endpoint, so it appears in t
 with no setup; when both answer, ArtyEngine is used. Port 11438 only counts as ArtyEngine when
 the server there names itself as ArtyEngine (port 11434 has no such check: anything that
 answers Ollama's API there on the first start is taken for Ollama). Detection runs only while no
-Ollama-API endpoint is stored at all, on this machine or another: once one is, starfire keeps
-using it and never adds or switches to another server by itself (Settings → Hardware shows one
-it finds but has not added as "found, not added"). Memory and document embeddings and model
-pulls go to `OLLAMA_BASE_URL` or else to the first Ollama-API endpoint on this machine in
-**Settings → Connections** (its server root, even when it was stored with an `/api` path),
-never to whatever happens to answer on a port. When the only model server set up is on another
-machine and `OLLAMA_BASE_URL` is not set, embeddings stay off and search uses keywords; set
-`OLLAMA_BASE_URL` to that server to turn them on. A server that **scan network** finds without
-the Ollama API is stored as OpenAI-compatible, and one stored earlier as Ollama by mistake is
-filed again on the next start. Clicking **start Ollama** on Settings → Hardware adds the Ollama
-it started when no model server on this machine is set up yet. To add a server later, open
+Ollama-API server is set up at all: none added with **add ollama** or **scan network** (on this
+machine or another) and no Ollama server added with an API key (Ollama Cloud does not count, as it
+is not a server of your own). Once one is, starfire keeps using it and never adds or switches to
+another server by itself (Settings → Hardware shows one it finds but has not added as "found, not
+added"). Memory and document embeddings and model pulls go to `OLLAMA_BASE_URL` or else to the
+first Ollama-API endpoint on this machine in **Settings → Connections** (its server root, even
+when it was stored with an `/api` or `/v1` path), never to whatever happens to answer on a port.
+When the only model server set up is on another machine and `OLLAMA_BASE_URL` is not set,
+embeddings stay off and search uses keywords; set `OLLAMA_BASE_URL` to that server to turn them
+on. A server on this machine without the Ollama API, found by **scan network** or typed into
+**add ollama**, is stored as OpenAI-compatible at its `/v1` address: it is used for chat, not for
+embeddings or pulls. At each start a stored server on this machine is filed by the API it speaks:
+as OpenAI-compatible only when its Ollama API answers "not found" and its `/v1/models` answers,
+and back as Ollama once its Ollama API lists models again; a server that is down or answers with
+an error keeps its kind. The scan names every server it could not add and why. Clicking **start
+Ollama** on Settings → Hardware adds the Ollama it started when no model server on this machine
+is set up yet. It only starts Ollama when Ollama's own port here is the server starfire would use:
+when `OLLAMA_BASE_URL` or the stored server points somewhere else and does not answer, it says so
+instead of starting an Ollama starfire would not use. To add a server later, open
 **Settings → Connections** and either click **add ollama** (fills in the default endpoint, then
 Test/Add) or **scan network** to probe common local model-server ports (11438, 11434, 1234 and
 8080).

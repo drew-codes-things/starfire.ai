@@ -43,8 +43,8 @@ from email_rule_checker import EmailRuleChecker
 from mcp_manager import McpConnectionError, mcp_manager
 from mcp_servers_store import (MCP_SERVER_REPOSITORY, NEEDS_SIGN_IN, REFERENCE_SERVERS, REREGISTER, SIGN_IN_SERVICES,
                                McpServerStore, has_missing_secrets, needs_sign_in)
-from model_endpoints import (ModelEndpointStore, adopt_started_ollama, chosen_backend_url, detect_ollama, discover_servers,
-                             identify_backend)
+from model_endpoints import (LOCAL_SERVER_KINDS, ModelEndpointStore, adopt_started_ollama, chosen_backend_url, detect_ollama,
+                             discover_servers, filing_for_local_server, identify_backend)
 from ollama_runner import for_runner
 from providers import build_models_url, is_embedding_model
 from task_scheduler import TaskScheduler, compute_next_run
@@ -150,16 +150,26 @@ async def test_endpoint(body: TestEndpointBody):
     ok, message = await _probe_endpoint(body.base_url, body.api_key)
     return {"ok": ok, "message": message}
 
+async def _address_and_kind_to_store(body: AddEndpointBody) -> tuple[str, str]:
+    if body.kind in LOCAL_SERVER_KINDS:
+        filing = await filing_for_local_server(body.base_url)
+        if filing:
+            return filing
+    ok, message = await _probe_endpoint(body.base_url, body.api_key)
+    if not ok:
+        raise HTTPException(502, message)
+    return body.base_url, body.kind
+
 @router.post("/model-endpoints")
 async def add_endpoint(body: AddEndpointBody):
     if not body.base_url.strip():
         raise HTTPException(400, "base_url is required")
     if endpoints.find_by_url(body.base_url.strip()):
         raise HTTPException(409, "that endpoint is already configured")
-    ok, message = await _probe_endpoint(body.base_url, body.api_key)
-    if not ok:
-        raise HTTPException(502, message)
-    endpoint = endpoints.add(body.base_url, kind=body.kind, label=body.label)
+    base_url, kind = await _address_and_kind_to_store(body)
+    if endpoints.find_by_url(base_url):
+        raise HTTPException(409, "that endpoint is already configured")
+    endpoint = endpoints.add(base_url, kind=kind, label=body.label)
     if body.api_key:
         api_keys.save(endpoint.id, body.api_key)
     return {"id": endpoint.id, "base_url": endpoint.base_url, "kind": endpoint.kind,
@@ -1578,7 +1588,7 @@ async def get_ollama_status():
 
 @router.post("/hardware/ollama/start")
 async def start_ollama():
-    ok, message = await ollama_manager.start(config.ollama_base_url)
+    ok, message = await ollama_manager.start(chosen_backend_url(endpoints, config.ollama_base_url))
     if not ok:
         raise HTTPException(502, message)
     added = await adopt_started_ollama(endpoints, config.ollama_base_url)
