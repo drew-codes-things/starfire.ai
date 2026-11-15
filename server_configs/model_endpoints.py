@@ -34,7 +34,11 @@ OPENAI_PATH_SUFFIX = "/v1"
 OLLAMA_PROVIDER = "ollama"
 OLLAMA_CLOUD_DOMAIN = "ollama.com"
 LOCAL_SERVER_KINDS = (OLLAMA_KIND, OPENAI_COMPATIBLE_KIND)
+OK = 200
 NOT_FOUND = 404
+TAGS_ANSWERS_WITHOUT_THE_OLLAMA_API = (OK, NOT_FOUND)
+OLLAMA_MODELS_KEY = "models"
+OPENAI_MODELS_KEY = "data"
 
 
 async def detect_ollama(env_override: str | None) -> str | None:
@@ -77,7 +81,7 @@ async def _ollama_api_backend(client: httpx.AsyncClient, base_url: str) -> str |
     except httpx.HTTPError as error:
         logger.debug("no Ollama API at %s: %r", base_url, error)
         return None
-    if r.status_code != 200:
+    if not _lists_ollama_models(r):
         return None
     if _server_header_names_arty_engine(r):
         return ARTY_ENGINE
@@ -89,6 +93,10 @@ async def _ollama_api_backend(client: httpx.AsyncClient, base_url: str) -> str |
 async def identify_backend(base_url: str) -> str | None:
     async with httpx.AsyncClient(timeout=PROBE_TIMEOUT) as client:
         return await _ollama_api_backend(client, base_url)
+
+
+async def speaks_the_ollama_api(base_url: str) -> bool:
+    return await identify_backend(_server_root(base_url)) is not None
 
 
 async def discover_servers() -> list[dict]:
@@ -103,7 +111,7 @@ async def discover_servers() -> list[dict]:
                     continue
                 try:
                     r = await client.get(f"{base}/v1/models")
-                    if r.status_code == 200:
+                    if _lists_openai_models(r):
                         found.append({"base_url": f"{base}{OPENAI_PATH_SUFFIX}", "kind": OPENAI_COMPATIBLE_KIND,
                                       "label": f"Local server ({host}:{port})"})
                 except httpx.HTTPError as error:
@@ -245,9 +253,14 @@ def stored_local_backend(store: ModelEndpointStore) -> ModelEndpoint | None:
 def _is_set_up_ollama_api_server(endpoint: ModelEndpoint) -> bool:
     if endpoint.kind == OLLAMA_KIND:
         return True
+    return _is_ollama_server_elsewhere_added_with_a_key(endpoint)
+
+
+def _is_ollama_server_elsewhere_added_with_a_key(endpoint: ModelEndpoint) -> bool:
     added_with_a_key = endpoint.kind not in LOCAL_SERVER_KINDS
-    return added_with_a_key and endpoint.provider == OLLAMA_PROVIDER and not _host_match(endpoint.base_url,
-                                                                                         OLLAMA_CLOUD_DOMAIN)
+    is_ollama_cloud = _host_match(endpoint.base_url, OLLAMA_CLOUD_DOMAIN)
+    return (added_with_a_key and endpoint.provider == OLLAMA_PROVIDER and not is_ollama_cloud
+            and not _is_on_this_machine(endpoint.base_url))
 
 
 def _set_up_ollama_api_servers(store: ModelEndpointStore) -> list[ModelEndpoint]:
@@ -287,8 +300,18 @@ async def add_detected_backend(store: ModelEndpointStore, base_url: str) -> Mode
     return store.add(base_url, kind=OLLAMA_KIND, label=_auto_detected_label(backend or OLLAMA))
 
 
+def _stored_as_an_openai_server(endpoint: ModelEndpoint) -> bool:
+    return endpoint.kind != OLLAMA_KIND and endpoint.base_url.rstrip("/").endswith(OPENAI_PATH_SUFFIX)
+
+
+def _may_be_filed_as(endpoint: ModelEndpoint, kind: str | None) -> bool:
+    if kind is None or kind == endpoint.kind:
+        return False
+    return kind != OLLAMA_KIND or not _stored_as_an_openai_server(endpoint)
+
+
 def _file_back_as_ollama_if_it_answers(store: ModelEndpointStore, endpoint: ModelEndpoint, backend: str | None) -> None:
-    if backend is not None and endpoint.kind != OLLAMA_KIND and store.change_kind(endpoint.id, OLLAMA_KIND):
+    if backend is not None and _may_be_filed_as(endpoint, OLLAMA_KIND) and store.change_kind(endpoint.id, OLLAMA_KIND):
         logger.info("the endpoint at %s speaks the Ollama API; it is filed as %s again", endpoint.base_url, OLLAMA_KIND)
 
 
@@ -309,13 +332,21 @@ async def _adopt_first_local_backend(store: ModelEndpointStore,
     return await add_detected_backend(store, detected) if detected else None
 
 
-def _lists_ollama_models(response: httpx.Response) -> bool:
-    if response.status_code != 200:
+def _lists_models_under(response: httpx.Response, key: str) -> bool:
+    if response.status_code != OK:
         return False
     try:
-        return isinstance(response.json().get("models"), list)
+        return isinstance(response.json().get(key), list)
     except (ValueError, AttributeError):
         return False
+
+
+def _lists_ollama_models(response: httpx.Response) -> bool:
+    return _lists_models_under(response, OLLAMA_MODELS_KEY)
+
+
+def _lists_openai_models(response: httpx.Response) -> bool:
+    return _lists_models_under(response, OPENAI_MODELS_KEY)
 
 
 async def _api_spoken_by(client: httpx.AsyncClient, base_url: str) -> str | None:
@@ -324,13 +355,13 @@ async def _api_spoken_by(client: httpx.AsyncClient, base_url: str) -> str | None
         tags = await client.get(f"{root}{API_PATH_SUFFIX}/tags")
         if _lists_ollama_models(tags):
             return OLLAMA_KIND
-        if tags.status_code != NOT_FOUND:
+        if tags.status_code not in TAGS_ANSWERS_WITHOUT_THE_OLLAMA_API:
             return None
         models = await client.get(f"{root}{OPENAI_PATH_SUFFIX}/models")
     except httpx.HTTPError as error:
         logger.debug("could not tell which API %s speaks: %r", base_url, error)
         return None
-    return OPENAI_COMPATIBLE_KIND if models.status_code == 200 else None
+    return OPENAI_COMPATIBLE_KIND if _lists_openai_models(models) else None
 
 
 async def _file_local_servers_by_the_api_they_speak(store: ModelEndpointStore) -> None:
@@ -340,7 +371,7 @@ async def _file_local_servers_by_the_api_they_speak(store: ModelEndpointStore) -
     async with httpx.AsyncClient(timeout=AUTO_DETECT_TIMEOUT) as client:
         for endpoint in local:
             kind = await _api_spoken_by(client, endpoint.base_url)
-            if kind is not None and kind != endpoint.kind and store.change_kind(endpoint.id, kind):
+            if _may_be_filed_as(endpoint, kind) and store.change_kind(endpoint.id, kind):
                 logger.info("the endpoint at %s is now filed as %s, the API it speaks", endpoint.base_url, kind)
 
 
@@ -376,8 +407,10 @@ async def settle_local_backend(store: ModelEndpointStore, env_override: str | No
     if stored is not None:
         await _confirm_stored_backend(store, stored, start_ollama)
         return None
-    if _set_up_ollama_api_servers(store):
-        logger.info("not looking for a model server on this machine: one on another machine is already set up")
+    set_up = _set_up_ollama_api_servers(store)
+    if set_up:
+        logger.info("not looking for a model server on this machine: the Ollama-API server at %s is set up",
+                    set_up[0].base_url)
         return None
     return await _adopt_first_local_backend(store, start_ollama)
 

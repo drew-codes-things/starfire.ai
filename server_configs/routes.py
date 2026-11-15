@@ -43,8 +43,9 @@ from email_rule_checker import EmailRuleChecker
 from mcp_manager import McpConnectionError, mcp_manager
 from mcp_servers_store import (MCP_SERVER_REPOSITORY, NEEDS_SIGN_IN, REFERENCE_SERVERS, REREGISTER, SIGN_IN_SERVICES,
                                McpServerStore, has_missing_secrets, needs_sign_in)
-from model_endpoints import (LOCAL_SERVER_KINDS, ModelEndpointStore, adopt_started_ollama, chosen_backend_url, detect_ollama,
-                             discover_servers, filing_for_local_server, identify_backend)
+from model_endpoints import (LOCAL_SERVER_KINDS, OLLAMA_KIND, ModelEndpointStore, adopt_started_ollama, chosen_backend_url,
+                             detect_ollama, discover_servers, filing_for_local_server, identify_backend,
+                             speaks_the_ollama_api)
 from ollama_runner import for_runner
 from providers import build_models_url, is_embedding_model
 from task_scheduler import TaskScheduler, compute_next_run
@@ -158,6 +159,9 @@ async def _address_and_kind_to_store(body: AddEndpointBody) -> tuple[str, str]:
     ok, message = await _probe_endpoint(body.base_url, body.api_key)
     if not ok:
         raise HTTPException(502, message)
+    if body.kind == OLLAMA_KIND and not await speaks_the_ollama_api(body.base_url):
+        raise HTTPException(502, f"{body.base_url.strip()} answers, but /api/tags gives no Ollama model list; "
+                                 "add it as an OpenAI-compatible server instead")
     return body.base_url, body.kind
 
 @router.post("/model-endpoints")
