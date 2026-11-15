@@ -62,7 +62,7 @@
   server is set up (added with **add ollama** or **scan network** on this machine or another, or
   an Ollama server on another machine added with an API key; Ollama Cloud and an Ollama on this
   machine added with a key do not count, and the latter is filed as Ollama in place at each start
-  when its server answers Ollama's API, whatever its port and however its address names this
+  without `OLLAMA_BASE_URL` when its server answers Ollama's API, whatever its port and however its address names this
   machine, so it is used without a second endpoint or a launched Ollama), a server only counts as Ollama when its `/api/tags`
   answers with a model list, port 11438 is only taken when the server
   there names itself as ArtyEngine, and another server is never added or switched to by itself
@@ -85,7 +85,7 @@
   At each start a stored server on this machine is filed by the API it speaks: as
   OpenAI-compatible only when its Ollama API answers "not found" or without a model list and
   `/v1/models` lists models, and back as Ollama once its Ollama API lists models again, except a
-  server added at its `/v1` address as anything other than Ollama, which stays OpenAI-compatible
+  server added at its `/v1` address as anything other than Ollama, which is never filed as Ollama
   (each endpoint now remembers what it was added as, so an Ollama added with **add ollama** at its
   `/v1` address is filed back after a start without a model list); one failed answer changes
   nothing.
