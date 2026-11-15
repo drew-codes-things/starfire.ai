@@ -713,6 +713,79 @@ def test_the_add_ollama_box_refuses_a_server_whose_tags_answer_has_no_model_list
     assert store.list() == []
 
 
+OLLAMA_MODEL_LIST = (200, '{"models": []}')
+OPENAI_MODEL_LIST = (200, '{"data": []}')
+SLOW_SECONDS = 2.5
+NEVER_SECONDS = 3600
+NEEDED_KEY = "test-key"
+
+
+def ollama_servers(monkeypatch, replies, slow=None, keyed=False):
+    slow = slow or {}
+
+    def handle(request):
+        address = f"{request.url.scheme}://{request.url.netloc.decode()}{request.url.path}"
+        if address not in replies:
+            raise httpx.ConnectError("connection refused", request=request)
+        if request.extensions["timeout"]["read"] < slow.get(address, 0):
+            raise httpx.ReadTimeout("timed out", request=request)
+        if keyed and request.headers.get("authorization") != f"Bearer {NEEDED_KEY}":
+            return httpx.Response(401, text="unauthorized")
+        status, text = replies[address]
+        return httpx.Response(status, text=text)
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(model_endpoints.httpx, "AsyncClient",
+                        lambda *args, **kwargs: real_client(*args, transport=httpx.MockTransport(handle), **kwargs))
+
+
+@pytest.mark.parametrize("base_url, replies, slow, keyed", [
+    ("http://127.0.0.1:11500", {"http://127.0.0.1:11500/api/tags": OLLAMA_MODEL_LIST,
+                                "http://127.0.0.1:11500/v1/models": OPENAI_MODEL_LIST},
+     {"http://127.0.0.1:11500/api/tags": SLOW_SECONDS}, False),
+    ("http://gpu-box:8000", {"http://gpu-box:8000/api/tags": OLLAMA_MODEL_LIST,
+                             "http://gpu-box:8000/v1/models": OPENAI_MODEL_LIST},
+     {"http://gpu-box:8000/api/tags": SLOW_SECONDS}, False),
+    ("https://box.example/ollama", {"https://box.example/ollama/api/tags": OLLAMA_MODEL_LIST,
+                                    "https://box.example/ollama/v1/models": OPENAI_MODEL_LIST}, None, False),
+    ("http://keyed-box:11434", {"http://keyed-box:11434/api/tags": OLLAMA_MODEL_LIST}, None, True),
+    ("http://keyed-box:8000", {"http://keyed-box:8000/api/tags": OLLAMA_MODEL_LIST,
+                               "http://keyed-box:8000/v1/models": OPENAI_MODEL_LIST}, None, True),
+])
+def test_the_add_ollama_box_takes_a_slow_path_prefixed_or_keyed_ollama(client, monkeypatch, tmp_path,
+                                                                        base_url, replies, slow, keyed):
+    from types import SimpleNamespace
+    store = stored_endpoints(monkeypatch, tmp_path)
+    saved_keys = []
+    monkeypatch.setattr(routes, "api_keys", SimpleNamespace(save=lambda *pair: saved_keys.append(pair)))
+    ollama_servers(monkeypatch, replies, slow, keyed)
+    body = {"base_url": base_url, "kind": "ollama", **({"api_key": NEEDED_KEY} if keyed else {})}
+    response = client.post("/api/model-endpoints", json=body)
+    assert response.status_code == 200, response.json()
+    assert [(e.base_url, e.kind) for e in store.list()] == [(base_url, "ollama")]
+    assert len(saved_keys) == (1 if keyed else 0)
+
+
+@pytest.mark.parametrize("tags_reply, slow, named", [
+    (OLLAMA_MODEL_LIST, NEVER_SECONDS, "did not answer"),
+    ((401, "unauthorized"), 0, "authentication failed"),
+    ((500, "boom"), 0, "returned 500"),
+    ((200, '{"error": "no such path"}'), 0, "no Ollama model list"),
+])
+def test_the_add_ollama_box_names_why_the_ollama_model_list_check_failed(client, monkeypatch, tmp_path,
+                                                                         tags_reply, slow, named):
+    store = stored_endpoints(monkeypatch, tmp_path)
+    tags_url = "http://gpu-box:8000/api/tags"
+    ollama_servers(monkeypatch, {"http://gpu-box:8000/v1/models": OPENAI_MODEL_LIST, tags_url: tags_reply},
+                   {tags_url: slow})
+    response = client.post("/api/model-endpoints", json={"base_url": "http://gpu-box:8000", "kind": "ollama"})
+    assert response.status_code == 502
+    detail = response.json()["detail"]
+    assert named in detail
+    assert tags_url in detail
+    assert store.list() == []
+
+
 def test_adding_a_local_server_that_is_already_stored_under_its_openai_path_is_refused(client, monkeypatch, tmp_path):
     store = stored_endpoints(monkeypatch, tmp_path)
     store.add("http://127.0.0.1:1234/v1", "openai-compatible")

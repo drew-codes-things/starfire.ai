@@ -45,7 +45,7 @@ from mcp_servers_store import (MCP_SERVER_REPOSITORY, NEEDS_SIGN_IN, REFERENCE_S
                                McpServerStore, has_missing_secrets, needs_sign_in)
 from model_endpoints import (LOCAL_SERVER_KINDS, OLLAMA_KIND, ModelEndpointStore, adopt_started_ollama, chosen_backend_url,
                              detect_ollama, discover_servers, filing_for_local_server, identify_backend,
-                             speaks_the_ollama_api)
+                             lists_ollama_models, ollama_tags_url)
 from ollama_runner import for_runner
 from providers import build_models_url, is_embedding_model
 from task_scheduler import TaskScheduler, compute_next_run
@@ -131,37 +131,67 @@ async def list_endpoints():
         for e in endpoints.list()
     ]}
 
-async def _probe_endpoint(base_url: str, api_key: str | None) -> tuple[bool, str]:
+ENDPOINT_PROBE_SECONDS = 5.0
+HTTP_OK = 200
+AUTH_FAILURE_STATUSES = (401, 403)
+ADD_AS_OPENAI_INSTEAD = "add it as an OpenAI-compatible server instead"
+
+async def _get_with_key(url: str, base_url: str, api_key: str | None) -> httpx.Response:
     from providers import build_headers
+    async with httpx.AsyncClient(timeout=ENDPOINT_PROBE_SECONDS) as client:
+        return await client.get(url, headers=build_headers(api_key, base_url))
+
+async def _probe_model_list(base_url: str, api_key: str | None) -> tuple[httpx.Response | None, str]:
     url = build_models_url(base_url)
-    headers = build_headers(api_key, base_url)
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            r = await client.get(url, headers=headers)
-        if r.status_code == 200:
-            return True, "ok"
-        if r.status_code in (401, 403):
-            return False, "authentication failed - check the API key"
-        return False, f"server returned {r.status_code}"
+        r = await _get_with_key(url, base_url, api_key)
     except httpx.HTTPError as e:
-        return False, f"cannot reach {url}: {e}"
+        return None, f"cannot reach {url}: {e}"
+    if r.status_code == HTTP_OK:
+        return r, "ok"
+    if r.status_code in AUTH_FAILURE_STATUSES:
+        return None, "authentication failed - check the API key"
+    return None, f"server returned {r.status_code}"
+
+async def _probe_endpoint(base_url: str, api_key: str | None) -> tuple[bool, str]:
+    answer, message = await _probe_model_list(base_url, api_key)
+    return answer is not None, message
 
 @router.post("/model-endpoints/test")
 async def test_endpoint(body: TestEndpointBody):
     ok, message = await _probe_endpoint(body.base_url, body.api_key)
     return {"ok": ok, "message": message}
 
+async def _ollama_model_list_problem(base_url: str, api_key: str | None, model_list: httpx.Response) -> str | None:
+    tags_url = ollama_tags_url(base_url)
+    tags = model_list if build_models_url(base_url) == tags_url else None
+    if tags is None:
+        try:
+            tags = await _get_with_key(tags_url, base_url, api_key)
+        except httpx.TimeoutException:
+            return f"{tags_url} did not answer within {ENDPOINT_PROBE_SECONDS:g} s"
+        except httpx.HTTPError as e:
+            return f"cannot reach {tags_url}: {e}"
+    if tags.status_code in AUTH_FAILURE_STATUSES:
+        return f"authentication failed at {tags_url} - check the API key"
+    if tags.status_code != HTTP_OK:
+        return f"{tags_url} returned {tags.status_code}; {ADD_AS_OPENAI_INSTEAD}"
+    if not lists_ollama_models(tags):
+        return f"{base_url.strip()} answers, but {tags_url} gives no Ollama model list; {ADD_AS_OPENAI_INSTEAD}"
+    return None
+
 async def _address_and_kind_to_store(body: AddEndpointBody) -> tuple[str, str]:
     if body.kind in LOCAL_SERVER_KINDS:
         filing = await filing_for_local_server(body.base_url)
         if filing:
             return filing
-    ok, message = await _probe_endpoint(body.base_url, body.api_key)
-    if not ok:
+    model_list, message = await _probe_model_list(body.base_url, body.api_key)
+    if model_list is None:
         raise HTTPException(502, message)
-    if body.kind == OLLAMA_KIND and not await speaks_the_ollama_api(body.base_url):
-        raise HTTPException(502, f"{body.base_url.strip()} answers, but /api/tags gives no Ollama model list; "
-                                 "add it as an OpenAI-compatible server instead")
+    if body.kind == OLLAMA_KIND:
+        problem = await _ollama_model_list_problem(body.base_url, body.api_key, model_list)
+        if problem:
+            raise HTTPException(502, problem)
     return body.base_url, body.kind
 
 @router.post("/model-endpoints")
