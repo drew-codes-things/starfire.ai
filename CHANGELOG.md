@@ -59,21 +59,28 @@
   from its `Server` header or greeting, Ollama otherwise). The **Start Ollama** button only
   appears when Ollama is installed; otherwise the Hardware tab says the backend runs on its own.
 - The model server is chosen once and kept: startup detection runs only while no Ollama-API
-  endpoint is stored (on this machine or another), port 11438 is only taken when the server
+  server is set up (added with **add ollama** or **scan network** on this machine or another, or
+  an Ollama server added with an API key; Ollama Cloud does not count), port 11438 is only taken when the server
   there names itself as ArtyEngine, and another server is never added or switched to by itself
   (Settings → Hardware shows it as found, not added). Memory and document embeddings, model
   pulls and the **add ollama** default use `OLLAMA_BASE_URL` or the stored endpoint on this
-  machine (its server root, also when stored with an `/api` path) instead of probing ports on
+  machine (its server root, also when stored with an `/api` or `/v1` path) instead of probing ports on
   every search, so once a model server is set up nothing else that answers on a port receives
   memory or document text. `127.0.0.1`, `localhost`, `0.0.0.0` and `::1` all count as this
   machine, and a damaged stored address no longer stops startup. Auto-detected endpoints are
   renamed when the backend behind them changes, and the startup detection probes give up after
   0.5 s to connect.
-- **scan network** stores each server with the kind it found, and a server on this machine stored
-  as Ollama without speaking its API is filed as OpenAI-compatible on the next start.
+- A server on this machine without the Ollama API, found by **scan network** or typed into **add
+  ollama**, is stored as OpenAI-compatible at its `/v1` address (chat only, no embeddings or
+  pulls) instead of being refused, and the scan names every server it could not add and why. At
+  each start a stored server on this machine is filed by the API it speaks: as OpenAI-compatible
+  only when its Ollama API answers "not found" and `/v1/models` answers, and back as Ollama once
+  its Ollama API lists models again; one failed answer changes nothing.
 - **start Ollama** on Settings → Hardware asks only Ollama's own port whether it already runs (an
   ArtyEngine on 11438 no longer stops it), and adds the Ollama it started when no model server on
-  this machine is set up yet.
+  this machine is set up yet. When `OLLAMA_BASE_URL` or the stored server points somewhere other
+  than Ollama's own port here and does not answer, neither the button nor startup launches a local
+  Ollama that starfire would not use; the button says which server is down instead.
 - The licence is now Apache-2.0, with a NOTICE file that credits the author.
 - Toasts show at the top centre, so they no longer cover the message box.
 - On phones the chat controls dim the chat behind them and close with a tap outside, and the

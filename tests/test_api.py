@@ -637,3 +637,76 @@ def test_starting_ollama_adds_nothing_when_a_local_backend_is_already_set_up(cli
     model_server_replies(monkeypatch, {"127.0.0.1:11434/api/tags": ([], "{}"), **ENGINE_STAND_IN})
     assert client.post("/api/hardware/ollama/start").json()["added"] is None
     assert [e.base_url for e in routes.endpoints.list()] == ["http://127.0.0.1:11438"]
+
+
+def model_server_statuses(monkeypatch, replies):
+    asked = []
+
+    def handle(request):
+        address = f"{request.url.host}:{request.url.port}{request.url.path}"
+        asked.append(address)
+        reply = replies.get(address)
+        if reply is None:
+            raise httpx.ConnectError("connection refused", request=request)
+        status, text = reply
+        return httpx.Response(status, text=text)
+
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(model_endpoints.httpx, "AsyncClient",
+                        lambda *args, **kwargs: real_client(*args, transport=httpx.MockTransport(handle), **kwargs))
+    return asked
+
+
+OPENAI_ONLY_SERVER = {"127.0.0.1:1234/api/tags": (404, "not found"), "127.0.0.1:1234/v1/models": (200, '{"data": []}'),
+                      "localhost:1234/api/tags": (404, "not found"), "localhost:1234/v1/models": (200, '{"data": []}')}
+OLLAMA_SERVER = {"localhost:11434/api/tags": (200, '{"models": []}'), "localhost:11434/v1/models": (200, '{"data": []}')}
+
+
+@pytest.mark.parametrize("base_url, kind", [("http://127.0.0.1:1234", "openai-compatible"),
+                                            ("http://127.0.0.1:1234", "ollama"),
+                                            ("http://localhost:1234/v1", "ollama")])
+def test_a_local_server_without_the_ollama_api_is_added_as_openai_compatible(client, monkeypatch, tmp_path, base_url, kind):
+    store = stored_endpoints(monkeypatch, tmp_path)
+    model_server_statuses(monkeypatch, OPENAI_ONLY_SERVER)
+    response = client.post("/api/model-endpoints", json={"base_url": base_url, "kind": kind, "label": "Local server"})
+    assert response.status_code == 200
+    assert response.json()["kind"] == "openai-compatible"
+    host = base_url.split("//")[1].split(":")[0]
+    assert [(e.base_url, e.kind) for e in store.list()] == [(f"http://{host}:1234/v1", "openai-compatible")]
+    assert model_endpoints.chosen_backend_url(store, None) is None
+
+
+def test_an_ollama_added_with_its_openai_path_is_kept_as_ollama_and_used_at_its_root(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(routes.config, "ollama_base_url", None)
+    store = stored_endpoints(monkeypatch, tmp_path)
+    model_server_statuses(monkeypatch, OLLAMA_SERVER)
+    response = client.post("/api/model-endpoints", json={"base_url": "http://localhost:11434/v1", "kind": "ollama"})
+    assert response.status_code == 200
+    assert [(e.base_url, e.kind) for e in store.list()] == [("http://localhost:11434/v1", "ollama")]
+    assert model_endpoints.chosen_backend_url(store, None) == "http://localhost:11434"
+
+
+def test_adding_a_local_server_that_is_already_stored_under_its_openai_path_is_refused(client, monkeypatch, tmp_path):
+    store = stored_endpoints(monkeypatch, tmp_path)
+    store.add("http://127.0.0.1:1234/v1", "openai-compatible")
+    model_server_statuses(monkeypatch, OPENAI_ONLY_SERVER)
+    response = client.post("/api/model-endpoints", json={"base_url": "http://127.0.0.1:1234", "kind": "openai-compatible"})
+    assert response.status_code == 409
+    assert len(store.list()) == 1
+
+
+def test_start_ollama_does_not_launch_a_server_starfire_would_not_use(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(routes.config, "ollama_base_url", "http://gpu-box:11434")
+    stored_endpoints(monkeypatch, tmp_path)
+    launched = []
+
+    async def launch(*command, **_options):
+        launched.append(command)
+
+    monkeypatch.setattr(routes.ollama_manager, "is_installed", lambda: True)
+    monkeypatch.setattr(routes.ollama_manager.asyncio, "create_subprocess_exec", launch)
+    model_server_statuses(monkeypatch, {})
+    response = client.post("/api/hardware/ollama/start")
+    assert response.status_code == 502
+    assert "http://gpu-box:11434" in response.json()["detail"]
+    assert launched == []

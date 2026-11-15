@@ -207,6 +207,28 @@ function scanEndpointBody(item) {
   return { base_url: item.base_url, kind: item.kind || 'ollama', label: item.label };
 }
 
+const OPENAI_ONLY_NOTE = 'OpenAI-compatible, not used for memory search or pulls';
+const ALREADY_ADDED = 409;
+
+function scanSummary(results) {
+  const added = results.filter(result => result.ok)
+    .map(result => (result.kind === 'openai-compatible' ? `${result.label} (${OPENAI_ONLY_NOTE})` : result.label));
+  const already = results.filter(result => !result.ok && result.status === ALREADY_ADDED).map(result => result.label);
+  const failed = results.filter(result => !result.ok && result.status !== ALREADY_ADDED)
+    .map(result => `${result.label}: ${result.detail || 'add failed'}`);
+  const parts = [];
+  if (added.length) parts.push(`added ${added.join(', ')}`);
+  if (already.length) parts.push(`already added ${already.join(', ')}`);
+  if (failed.length) parts.push(`not added ${failed.join(', ')}`);
+  return { text: parts.join('; '), ok: failed.length === 0 };
+}
+
+function addedLocalMessage(endpoint) {
+  if (endpoint.kind !== 'openai-compatible') return 'added';
+  return `added ${endpoint.base_url} as an OpenAI-compatible server: it has no Ollama API, so it is used for chat `
+    + 'but not for memory search or pulls';
+}
+
 function backendStatusPlan(status) {
   const backend = status.backend || 'Ollama';
   if (status.running && status.in_use === false) {
@@ -235,6 +257,6 @@ if (typeof module !== 'undefined' && module.exports) {
     showListLoading,
     failureMessage,
     NO_EMAIL_ACCOUNTS, ruleAccountChoices,
-    BACKEND_RUNS_ON_ITS_OWN, NO_LOCAL_OLLAMA, FOUND_NOT_ADDED, backendStatusPlan, scanEndpointBody,
+    BACKEND_RUNS_ON_ITS_OWN, NO_LOCAL_OLLAMA, FOUND_NOT_ADDED, backendStatusPlan, scanEndpointBody, scanSummary, addedLocalMessage,
   };
 }
