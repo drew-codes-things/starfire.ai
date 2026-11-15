@@ -177,7 +177,7 @@ def model_server_replies(monkeypatch, replies):
     return asked
 
 
-ENGINE_STAND_IN = {"127.0.0.1:11438/api/tags": ([("Server", "arty-engine/9.9")], "{}"),
+ENGINE_STAND_IN = {"127.0.0.1:11438/api/tags": ([("Server", "arty-engine/9.9")], '{"models": []}'),
                    "127.0.0.1:11438/api/pull": ([], '{"status": "success"}')}
 
 
@@ -193,7 +193,7 @@ def test_backend_status_names_an_arty_engine_that_runs_without_ollama_installed(
     monkeypatch.setattr(routes.config, "ollama_base_url", "http://engine.test:11435")
     monkeypatch.setattr(routes.ollama_manager, "is_installed", lambda: False)
     model_server_replies(monkeypatch, {
-        "engine.test:11435/api/tags": ([("Server", "Caddy"), ("Server", "arty-engine/0.1.0 Python/3.13.5")], "{}"),
+        "engine.test:11435/api/tags": ([("Server", "Caddy"), ("Server", "arty-engine/0.1.0 Python/3.13.5")], '{"models": []}'),
     })
     status = client.get("/api/hardware/ollama").json()
     assert (status["installed"], status["running"], status["backend"]) == (False, True, "ArtyEngine")
@@ -205,7 +205,7 @@ def test_backend_status_names_a_running_ollama_that_is_not_added_yet(client, mon
     monkeypatch.setattr(routes.ollama_manager, "is_installed", lambda: True)
     stored_endpoints(monkeypatch, tmp_path)
     model_server_replies(monkeypatch, {
-        "127.0.0.1:11434/api/tags": ([], "{}"),
+        "127.0.0.1:11434/api/tags": ([], '{"models": []}'),
         "127.0.0.1:11434/": ([], "Ollama is running"),
     })
     status = client.get("/api/hardware/ollama").json()
@@ -218,7 +218,7 @@ def test_backend_status_reports_the_stored_backend_and_ignores_another_on_the_en
     monkeypatch.setattr(routes.config, "ollama_base_url", None)
     monkeypatch.setattr(routes.ollama_manager, "is_installed", lambda: True)
     stored_endpoints(monkeypatch, tmp_path, "http://127.0.0.1:11434")
-    asked = model_server_replies(monkeypatch, {"127.0.0.1:11434/api/tags": ([], "{}"), **ENGINE_STAND_IN})
+    asked = model_server_replies(monkeypatch, {"127.0.0.1:11434/api/tags": ([], '{"models": []}'), **ENGINE_STAND_IN})
     status = client.get("/api/hardware/ollama").json()
     assert (status["running"], status["backend"], status["in_use"], status["found_at"]) == (True, "Ollama", True, None)
     assert not [address for address in asked if ":11438" in address]
@@ -622,7 +622,7 @@ def test_starting_ollama_from_the_hardware_tab_adds_it_when_no_backend_is_set_up
     monkeypatch.setattr(routes.config, "ollama_base_url", None)
     stored_endpoints(monkeypatch, tmp_path)
     ollama_started_by_the_button(monkeypatch)
-    model_server_replies(monkeypatch, {"127.0.0.1:11434/api/tags": ([], "{}"), **ENGINE_STAND_IN})
+    model_server_replies(monkeypatch, {"127.0.0.1:11434/api/tags": ([], '{"models": []}'), **ENGINE_STAND_IN})
     response = client.post("/api/hardware/ollama/start").json()
     assert response["added"] == "Ollama (auto-detected)"
     assert [(e.base_url, e.label) for e in routes.endpoints.list()] == [("http://127.0.0.1:11434", "Ollama (auto-detected)")]
@@ -634,7 +634,7 @@ def test_starting_ollama_adds_nothing_when_a_local_backend_is_already_set_up(cli
     monkeypatch.setattr(routes.config, "ollama_base_url", None)
     stored_endpoints(monkeypatch, tmp_path, "http://127.0.0.1:11438")
     ollama_started_by_the_button(monkeypatch)
-    model_server_replies(monkeypatch, {"127.0.0.1:11434/api/tags": ([], "{}"), **ENGINE_STAND_IN})
+    model_server_replies(monkeypatch, {"127.0.0.1:11434/api/tags": ([], '{"models": []}'), **ENGINE_STAND_IN})
     assert client.post("/api/hardware/ollama/start").json()["added"] is None
     assert [e.base_url for e in routes.endpoints.list()] == ["http://127.0.0.1:11438"]
 
@@ -684,6 +684,33 @@ def test_an_ollama_added_with_its_openai_path_is_kept_as_ollama_and_used_at_its_
     assert response.status_code == 200
     assert [(e.base_url, e.kind) for e in store.list()] == [("http://localhost:11434/v1", "ollama")]
     assert model_endpoints.chosen_backend_url(store, None) == "http://localhost:11434"
+
+
+ANSWERS_EVERY_PATH = (200, '{"error": "Unexpected endpoint or method. Returning 200 anyway"}')
+OPENAI_SERVER_ANSWERING_EVERY_PATH = {"localhost:1234/api/tags": ANSWERS_EVERY_PATH, "localhost:1234/api/version": ANSWERS_EVERY_PATH,
+                                      "localhost:1234/v1/tags": ANSWERS_EVERY_PATH, "localhost:1234/": ANSWERS_EVERY_PATH,
+                                      "localhost:1234/v1/models": (200, '{"data": []}')}
+
+
+def test_the_add_ollama_box_stores_a_server_that_answers_200_everywhere_as_openai_compatible(client, monkeypatch, tmp_path):
+    store = stored_endpoints(monkeypatch, tmp_path)
+    model_server_statuses(monkeypatch, OPENAI_SERVER_ANSWERING_EVERY_PATH)
+    response = client.post("/api/model-endpoints", json={"base_url": "http://localhost:1234/v1", "kind": "ollama"})
+    assert response.status_code == 200
+    assert [(e.base_url, e.kind) for e in store.list()] == [("http://localhost:1234/v1", "openai-compatible")]
+    assert model_endpoints.chosen_backend_url(store, None) is None
+
+
+@pytest.mark.parametrize("base_url", ["http://localhost:1234/v1", "http://gpu-box:1234"])
+def test_the_add_ollama_box_refuses_a_server_whose_tags_answer_has_no_model_list(client, monkeypatch, tmp_path, base_url):
+    store = stored_endpoints(monkeypatch, tmp_path)
+    host = base_url.split("//")[1].split("/")[0]
+    model_server_statuses(monkeypatch, {f"{host}/{path}": ANSWERS_EVERY_PATH
+                                        for path in ("api/tags", "api/version", "v1/tags", "v1/models", "")})
+    response = client.post("/api/model-endpoints", json={"base_url": base_url, "kind": "ollama"})
+    assert response.status_code == 502
+    assert "no Ollama model list" in response.json()["detail"]
+    assert store.list() == []
 
 
 def test_adding_a_local_server_that_is_already_stored_under_its_openai_path_is_refused(client, monkeypatch, tmp_path):
