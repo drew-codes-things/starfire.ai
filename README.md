@@ -109,7 +109,7 @@ every path is not taken for Ollama. Detection runs only while no Ollama-API serv
 all: none added with **add ollama** or **scan network** (on this machine or another) and no Ollama
 server on another machine added with an API key (Ollama Cloud does not count, as it is not a server
 of your own, and an Ollama on this machine added with a key does not stop detection: at each start
-it is filed as Ollama in place when its server answers Ollama's API, whatever its port and however
+without `OLLAMA_BASE_URL` it is filed as Ollama in place when its server answers Ollama's API, whatever its port and however
 the address names this machine, so it is used and no second endpoint is added for it). Detection
 never adds a second endpoint for a server already stored under another name for this machine
 (`localhost` or `127.0.0.1`, with or without `/api`). Once one is, starfire keeps using it and never adds or switches to
@@ -134,8 +134,8 @@ this machine is filed by the API it speaks: as OpenAI-compatible only when its O
 "not found" or answers without a model list and its `/v1/models` lists models, and back as Ollama
 once its Ollama API lists models again; a server that is down or answers with an error keeps its
 kind. Each endpoint remembers what it was added as: one added at its `/v1` address as anything
-other than Ollama (by the scan, the key form, or **add ollama** finding no Ollama API) stays
-OpenAI-compatible even when it starts listing Ollama models, so it never becomes the embeddings
+other than Ollama (by the scan, the key form, or **add ollama** finding no Ollama API) is never
+filed as Ollama, even when it starts listing Ollama models, so it never becomes the embeddings
 server, while one added with **add ollama** as Ollama is filed back as Ollama whatever its address.
 An endpoint stored before this was remembered counts as added as the kind it had then. The scan names every server it could not add and why. Clicking **start
 Ollama** on Settings → Hardware adds the Ollama it started when no model server on this machine
