@@ -406,12 +406,19 @@ def _ollama_added_with_a_key_on_this_machine(store: ModelEndpointStore) -> list[
             if e.kind not in LOCAL_SERVER_KINDS and e.provider == OLLAMA_PROVIDER and _is_on_this_machine(e.base_url)]
 
 
+def _another_server_is_chosen(store: ModelEndpointStore, endpoint: ModelEndpoint) -> bool:
+    chosen = stored_local_backend(store)
+    return chosen is not None and not _same_server_on_this_machine(chosen.base_url, endpoint.base_url)
+
+
 async def _file_key_added_ollama_on_this_machine_that_answers(store: ModelEndpointStore) -> None:
     key_added = _ollama_added_with_a_key_on_this_machine(store)
     if not key_added:
         return
     async with httpx.AsyncClient(timeout=AUTO_DETECT_TIMEOUT) as client:
         for endpoint in key_added:
+            if _another_server_is_chosen(store, endpoint):
+                continue
             answers = await _ollama_api_backend(client, _server_root(endpoint.base_url)) is not None
             if answers and store.change_kind(endpoint.id, OLLAMA_KIND):
                 logger.info("the endpoint at %s was added with a key and speaks the Ollama API on this machine; "

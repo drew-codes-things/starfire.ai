@@ -536,6 +536,33 @@ def test_an_ollama_on_this_machine_on_another_port_added_with_a_key_is_used_with
     assert model_endpoints.chosen_backend_url(store, None) == "http://localhost:11500"
 
 
+@pytest.mark.parametrize("key_added_first", [True, False])
+def test_a_key_added_ollama_on_this_machine_never_takes_over_from_the_chosen_server(local_ports, tmp_path, key_added_first):
+    answers, _ = local_ports
+    answers["localhost:11500/api/tags"] = OLLAMA_TAGS
+    answers["127.0.0.1:11434/api/tags"] = OLLAMA_TAGS
+    store = ModelEndpointStore(str(tmp_path))
+    servers = [("http://localhost:11500", "api-key"), ("http://127.0.0.1:11434", "ollama")]
+    for base_url, kind in (servers if key_added_first else servers[::-1]):
+        store.add(base_url, kind)
+    assert model_endpoints.chosen_backend_url(store, None) == "http://127.0.0.1:11434"
+    assert asyncio.run(model_endpoints.settle_local_backend(store, None, never_start())) is None
+    assert sorted((e.base_url, e.kind) for e in store.list()) == sorted(servers)
+    assert model_endpoints.chosen_backend_url(store, None) == "http://127.0.0.1:11434"
+
+
+def test_a_key_added_spelling_of_the_chosen_server_is_still_filed_in_place(local_ports, tmp_path):
+    answers, _ = local_ports
+    answers["localhost:11434/api/tags"] = OLLAMA_TAGS
+    answers["127.0.0.1:11434/api/tags"] = OLLAMA_TAGS
+    store = ModelEndpointStore(str(tmp_path))
+    store.add("http://localhost:11434", "api-key", label="My Ollama")
+    store.add("http://127.0.0.1:11434", "ollama", label="Ollama (auto-detected)")
+    assert asyncio.run(model_endpoints.settle_local_backend(store, None, never_start())) is None
+    assert [(e.base_url, e.kind) for e in store.list()] == [("http://localhost:11434", "ollama"),
+                                                           ("http://127.0.0.1:11434", "ollama")]
+
+
 @pytest.mark.parametrize("stored", ["http://localhost:11434", "http://127.0.0.1:11434/api"])
 def test_an_ollama_added_with_a_key_that_starts_late_is_filed_in_place_and_not_added_twice(local_ports, tmp_path, stored):
     answers, _ = local_ports

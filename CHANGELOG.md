@@ -62,8 +62,9 @@
   server is set up (added with **add ollama** or **scan network** on this machine or another, or
   an Ollama server on another machine added with an API key; Ollama Cloud and an Ollama on this
   machine added with a key do not count, and the latter is filed as Ollama in place at each start
-  without `OLLAMA_BASE_URL` when its server answers Ollama's API, whatever its port and however its address names this
-  machine, so it is used without a second endpoint or a launched Ollama), a server only counts as Ollama when its `/api/tags`
+  when its server answers Ollama's API, whatever its port and however its address names this
+  machine, so it is used without a second endpoint or a launched Ollama, unless another server on
+  this machine is already the chosen one or `OLLAMA_BASE_URL` names another server), a server only counts as Ollama when its `/api/tags`
   answers with a model list, port 11438 is only taken when the server
   there names itself as ArtyEngine, and another server is never added or switched to by itself
   (Settings → Hardware shows it as found, not added). Memory and document embeddings, model
@@ -79,7 +80,9 @@
   ollama**, is stored as OpenAI-compatible at its `/v1` address when `/v1/models` lists models
   (chat only, no embeddings or pulls) instead of being refused, **add ollama** refuses a server
   whose `/api/tags` gives no model list (asked under the typed address without a `/v1` or `/api`
-  ending, so a proxy path works, with the same 5 s limit and API key as its first check, and the
+  ending, so a proxy path works; an address ending in `/api` only gets that far on this machine, on
+  port 11434 or at the `OLLAMA_BASE_URL` host, as the first check elsewhere asks `<address>/v1/models`;
+  with the same 5 s limit and API key as its first check, and the
   message says whether it timed out, refused the key, answered with an error or gave no list), and
   the scan names every server it could not add and why.
   At each start a stored server on this machine is filed by the API it speaks: as

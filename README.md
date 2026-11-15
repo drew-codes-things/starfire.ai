@@ -109,8 +109,10 @@ every path is not taken for Ollama. Detection runs only while no Ollama-API serv
 all: none added with **add ollama** or **scan network** (on this machine or another) and no Ollama
 server on another machine added with an API key (Ollama Cloud does not count, as it is not a server
 of your own, and an Ollama on this machine added with a key does not stop detection: at each start
-without `OLLAMA_BASE_URL` it is filed as Ollama in place when its server answers Ollama's API, whatever its port and however
-the address names this machine, so it is used and no second endpoint is added for it). Detection
+it is filed as Ollama in place when its server answers Ollama's API, whatever its port and however
+the address names this machine, so it is used and no second endpoint is added for it, unless
+another server on this machine is already the chosen one or `OLLAMA_BASE_URL` names another server;
+then it is left as it is). Detection
 never adds a second endpoint for a server already stored under another name for this machine
 (`localhost` or `127.0.0.1`, with or without `/api`). Once one is, starfire keeps using it and never adds or switches to
 another server by itself (Settings → Hardware shows one it finds but has not added as "found, not
@@ -126,7 +128,9 @@ on. A server on this machine without the Ollama API, found by **scan network** o
 models: it is used for chat, not for embeddings or pulls. **add ollama** refuses a server whose
 `/api/tags` gives no model list and that is not stored that way. It asks `/api/tags` under the
 address as typed (after taking off a `/v1` or `/api` ending, so an Ollama behind a proxy path such
-as `https://box.example/ollama` is asked at `/ollama/api/tags`), with the same 5 s limit and the
+as `https://box.example/ollama` or `https://box.example/ollama/v1` is asked at `/ollama/api/tags`;
+an address ending in `/api` only gets that far on this machine, on port 11434 or at the
+`OLLAMA_BASE_URL` host, because elsewhere the first check asks `<address>/v1/models`), with the same 5 s limit and the
 same API key as its first check, reuses the first answer when that check already asked
 `/api/tags`, and says whether the server did not answer in time, refused the key, answered with an
 error or answered without a model list. At each start a stored server on
