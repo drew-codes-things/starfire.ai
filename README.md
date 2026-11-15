@@ -108,24 +108,36 @@ speaking Ollama's API when its `/api/tags` answers with a model list; a server t
 every path is not taken for Ollama. Detection runs only while no Ollama-API server is set up at
 all: none added with **add ollama** or **scan network** (on this machine or another) and no Ollama
 server on another machine added with an API key (Ollama Cloud does not count, as it is not a server
-of your own, and an Ollama on this machine added with a key does not stop detection, so the Ollama
-answering here is still added and used). Once one is, starfire keeps using it and never adds or switches to
+of your own, and an Ollama on this machine added with a key does not stop detection: at each start
+it is filed as Ollama in place when its server answers Ollama's API, whatever its port and however
+the address names this machine, so it is used and no second endpoint is added for it). Detection
+never adds a second endpoint for a server already stored under another name for this machine
+(`localhost` or `127.0.0.1`, with or without `/api`). Once one is, starfire keeps using it and never adds or switches to
 another server by itself (Settings → Hardware shows one it finds but has not added as "found, not
 added"). Memory and document embeddings and model pulls go to `OLLAMA_BASE_URL` or else to the
 first endpoint on this machine filed as Ollama in **Settings → Connections** (one added with
-**add ollama** or **scan network** or detected at start; its server root, even when it was stored
+**add ollama** or **scan network**, detected at start, or added with a key and filed as Ollama as
+above; its server root, even when it was stored
 with an `/api` or `/v1` path), never to whatever happens to answer on a port.
 When the only model server set up is on another machine and `OLLAMA_BASE_URL` is not set,
 embeddings stay off and search uses keywords; set `OLLAMA_BASE_URL` to that server to turn them
 on. A server on this machine without the Ollama API, found by **scan network** or typed into
 **add ollama**, is stored as OpenAI-compatible at its `/v1` address when its `/v1/models` lists
 models: it is used for chat, not for embeddings or pulls. **add ollama** refuses a server whose
-`/api/tags` gives no model list and that is not stored that way. At each start a stored server on
+`/api/tags` gives no model list and that is not stored that way. It asks `/api/tags` under the
+address as typed (after taking off a `/v1` or `/api` ending, so an Ollama behind a proxy path such
+as `https://box.example/ollama` is asked at `/ollama/api/tags`), with the same 5 s limit and the
+same API key as its first check, reuses the first answer when that check already asked
+`/api/tags`, and says whether the server did not answer in time, refused the key, answered with an
+error or answered without a model list. At each start a stored server on
 this machine is filed by the API it speaks: as OpenAI-compatible only when its Ollama API answers
 "not found" or answers without a model list and its `/v1/models` lists models, and back as Ollama
 once its Ollama API lists models again; a server that is down or answers with an error keeps its
-kind, and a server stored at its `/v1` address as OpenAI-compatible stays OpenAI-compatible even
-when it starts listing Ollama models, so it never becomes the embeddings server. The scan names every server it could not add and why. Clicking **start
+kind. Each endpoint remembers what it was added as: one added at its `/v1` address as anything
+other than Ollama (by the scan, the key form, or **add ollama** finding no Ollama API) stays
+OpenAI-compatible even when it starts listing Ollama models, so it never becomes the embeddings
+server, while one added with **add ollama** as Ollama is filed back as Ollama whatever its address.
+An endpoint stored before this was remembered counts as added as the kind it had then. The scan names every server it could not add and why. Clicking **start
 Ollama** on Settings → Hardware adds the Ollama it started when no model server on this machine
 is set up yet. It only starts Ollama when Ollama's own port here is the server starfire would use:
 when `OLLAMA_BASE_URL` or the stored server points somewhere else and does not answer, it says so

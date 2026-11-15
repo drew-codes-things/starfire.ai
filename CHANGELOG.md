@@ -61,7 +61,9 @@
 - The model server is chosen once and kept: startup detection runs only while no Ollama-API
   server is set up (added with **add ollama** or **scan network** on this machine or another, or
   an Ollama server on another machine added with an API key; Ollama Cloud and an Ollama on this
-  machine added with a key do not count), a server only counts as Ollama when its `/api/tags`
+  machine added with a key do not count, and the latter is filed as Ollama in place at each start
+  when its server answers Ollama's API, whatever its port and however its address names this
+  machine, so it is used without a second endpoint or a launched Ollama), a server only counts as Ollama when its `/api/tags`
   answers with a model list, port 11438 is only taken when the server
   there names itself as ArtyEngine, and another server is never added or switched to by itself
   (Settings → Hardware shows it as found, not added). Memory and document embeddings, model
@@ -69,18 +71,24 @@
   machine (its server root, also when stored with an `/api` or `/v1` path) instead of probing ports on
   every search, so once a model server is set up nothing else that answers on a port receives
   memory or document text. `127.0.0.1`, `localhost`, `0.0.0.0` and `::1` all count as this
-  machine, and a damaged stored address no longer stops startup. Auto-detected endpoints are
+  machine, detection never adds a second endpoint for a server stored under another of these
+  names (with or without `/api`), and a damaged stored address no longer stops startup. Auto-detected endpoints are
   renamed when the backend behind them changes, and the startup detection probes give up after
   0.5 s to connect.
 - A server on this machine without the Ollama API, found by **scan network** or typed into **add
   ollama**, is stored as OpenAI-compatible at its `/v1` address when `/v1/models` lists models
   (chat only, no embeddings or pulls) instead of being refused, **add ollama** refuses a server
-  whose `/api/tags` gives no model list, and the scan names every server it could not add and why.
+  whose `/api/tags` gives no model list (asked under the typed address without a `/v1` or `/api`
+  ending, so a proxy path works, with the same 5 s limit and API key as its first check, and the
+  message says whether it timed out, refused the key, answered with an error or gave no list), and
+  the scan names every server it could not add and why.
   At each start a stored server on this machine is filed by the API it speaks: as
   OpenAI-compatible only when its Ollama API answers "not found" or without a model list and
   `/v1/models` lists models, and back as Ollama once its Ollama API lists models again, except a
-  server stored at its `/v1` address as OpenAI-compatible, which stays so; one failed answer
-  changes nothing.
+  server added at its `/v1` address as anything other than Ollama, which stays OpenAI-compatible
+  (each endpoint now remembers what it was added as, so an Ollama added with **add ollama** at its
+  `/v1` address is filed back after a start without a model list); one failed answer changes
+  nothing.
 - **start Ollama** on Settings → Hardware asks only Ollama's own port whether it already runs (an
   ArtyEngine on 11438 no longer stops it), and adds the Ollama it started when no model server on
   this machine is set up yet. When `OLLAMA_BASE_URL` or the stored server points somewhere other
