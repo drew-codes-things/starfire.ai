@@ -80,14 +80,16 @@
   ollama**, is stored as OpenAI-compatible at its `/v1` address when `/v1/models` lists models
   (chat only, no embeddings or pulls) instead of being refused, **add ollama** refuses a server
   whose `/api/tags` gives no model list (asked under the typed address without a `/v1` or `/api`
-  ending, so a proxy path works; an address ending in `/api` only gets that far on this machine, on
-  port 11434 or at the `OLLAMA_BASE_URL` host, as the first check elsewhere asks `<address>/v1/models`;
+  ending, so a proxy path works; an address ending in `/api` gets that far on this machine; elsewhere
+  only when `/api` is the whole path and the address is on port 11434 or is the `OLLAMA_BASE_URL`
+  address (host and port), as the first check otherwise asks `<address>/v1/models`;
   with the same 5 s limit and API key as its first check, and the
   message says whether it timed out, refused the key, answered with an error or gave no list), and
   the scan names every server it could not add and why.
   At each start a stored server on this machine is filed by the API it speaks: as
   OpenAI-compatible only when its Ollama API answers "not found" or without a model list and
-  `/v1/models` lists models, and back as Ollama once its Ollama API lists models again, except a
+  `/v1/models` lists models, and back as Ollama once its Ollama API lists models again unless another server on this
+  machine is the chosen one by then, except a
   server added at its `/v1` address as anything other than Ollama, which is never filed as Ollama
   (each endpoint now remembers what it was added as, so an Ollama added with **add ollama** at its
   `/v1` address is filed back after a start without a model list); one failed answer changes
