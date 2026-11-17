@@ -397,8 +397,13 @@ async def _file_local_servers_by_the_api_they_speak(store: ModelEndpointStore) -
     async with httpx.AsyncClient(timeout=AUTO_DETECT_TIMEOUT) as client:
         for endpoint in local:
             kind = await _api_spoken_by(client, endpoint.base_url)
-            if _may_be_filed_as(endpoint, kind) and store.change_kind(endpoint.id, kind):
+            if _may_be_filed_by_the_api_it_speaks(store, endpoint, kind) and store.change_kind(endpoint.id, kind):
                 logger.info("the endpoint at %s is now filed as %s, the API it speaks", endpoint.base_url, kind)
+
+
+def _may_be_filed_by_the_api_it_speaks(store: ModelEndpointStore, endpoint: ModelEndpoint, kind: str | None) -> bool:
+    takes_over_from_the_chosen_server = kind == OLLAMA_KIND and _another_server_is_chosen(store, endpoint)
+    return not takes_over_from_the_chosen_server and _may_be_filed_as(endpoint, kind)
 
 
 def _ollama_added_with_a_key_on_this_machine(store: ModelEndpointStore) -> list[ModelEndpoint]:

@@ -563,6 +563,50 @@ def test_a_key_added_spelling_of_the_chosen_server_is_still_filed_in_place(local
                                                            ("http://127.0.0.1:11434", "ollama")]
 
 
+@pytest.mark.parametrize("filed_away_first", [True, False])
+def test_a_server_that_lists_ollama_models_again_never_takes_over_from_the_chosen_server(local_ports, tmp_path, filed_away_first):
+    answers, _ = local_ports
+    answers["127.0.0.1:8080/api/tags"] = OLLAMA_TAGS
+    answers["127.0.0.1:11434/api/tags"] = OLLAMA_TAGS
+    store = ModelEndpointStore(str(tmp_path))
+    servers = [("http://127.0.0.1:8080", "openai-compatible"), ("http://127.0.0.1:11434", "ollama")]
+    for base_url, kind in (servers if filed_away_first else servers[::-1]):
+        store.add(base_url, kind)
+    assert model_endpoints.chosen_backend_url(store, None) == "http://127.0.0.1:11434"
+    assert asyncio.run(model_endpoints.settle_local_backend(store, None, never_start())) is None
+    assert sorted((e.base_url, e.kind) for e in store.list()) == sorted(servers)
+    assert model_endpoints.chosen_backend_url(store, None) == "http://127.0.0.1:11434"
+
+
+def test_an_ollama_added_at_v1_that_was_filed_away_stays_away_once_another_server_is_chosen(local_ports, tmp_path):
+    answers, _ = local_ports
+    store = ModelEndpointStore(str(tmp_path))
+    store.add("http://127.0.0.1:11500/v1", "ollama")
+    answers["127.0.0.1:11500/api/tags"] = (404, [], "")
+    answers["127.0.0.1:11500/v1/models"] = OPENAI_MODELS
+    answers["127.0.0.1:11434/api/tags"] = OLLAMA_TAGS
+    asyncio.run(model_endpoints.settle_local_backend(store, None, never_start()))
+    assert [(e.base_url, e.kind) for e in store.list()] == [("http://127.0.0.1:11500/v1", "openai-compatible"),
+                                                           ("http://127.0.0.1:11434", "ollama")]
+    assert model_endpoints.chosen_backend_url(store, None) == "http://127.0.0.1:11434"
+
+    answers["127.0.0.1:11500/api/tags"] = OLLAMA_TAGS
+    assert asyncio.run(model_endpoints.settle_local_backend(store, None, never_start())) is None
+    assert [(e.base_url, e.kind) for e in store.list()] == [("http://127.0.0.1:11500/v1", "openai-compatible"),
+                                                           ("http://127.0.0.1:11434", "ollama")]
+    assert model_endpoints.chosen_backend_url(store, None) == "http://127.0.0.1:11434"
+
+
+def test_a_server_that_lists_ollama_models_again_is_filed_back_when_no_other_server_is_chosen(local_ports, tmp_path):
+    answers, _ = local_ports
+    answers["127.0.0.1:8080/api/tags"] = OLLAMA_TAGS
+    store = ModelEndpointStore(str(tmp_path))
+    store.add("http://127.0.0.1:8080", "openai-compatible")
+    assert asyncio.run(model_endpoints.settle_local_backend(store, None, never_start())) is None
+    assert [(e.base_url, e.kind) for e in store.list()] == [("http://127.0.0.1:8080", "ollama")]
+    assert model_endpoints.chosen_backend_url(store, None) == "http://127.0.0.1:8080"
+
+
 @pytest.mark.parametrize("stored", ["http://localhost:11434", "http://127.0.0.1:11434/api"])
 def test_an_ollama_added_with_a_key_that_starts_late_is_filed_in_place_and_not_added_twice(local_ports, tmp_path, stored):
     answers, _ = local_ports

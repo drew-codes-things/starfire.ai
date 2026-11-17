@@ -129,14 +129,16 @@ models: it is used for chat, not for embeddings or pulls. **add ollama** refuses
 `/api/tags` gives no model list and that is not stored that way. It asks `/api/tags` under the
 address as typed (after taking off a `/v1` or `/api` ending, so an Ollama behind a proxy path such
 as `https://box.example/ollama` or `https://box.example/ollama/v1` is asked at `/ollama/api/tags`;
-an address ending in `/api` only gets that far on this machine, on port 11434 or at the
-`OLLAMA_BASE_URL` host, because elsewhere the first check asks `<address>/v1/models`), with the same 5 s limit and the
+an address ending in `/api` gets that far on this machine; elsewhere only when `/api` is the
+whole path and the address is on port 11434 or is the `OLLAMA_BASE_URL` address (host and port),
+because otherwise the first check asks `<address>/v1/models`), with the same 5 s limit and the
 same API key as its first check, reuses the first answer when that check already asked
 `/api/tags`, and says whether the server did not answer in time, refused the key, answered with an
 error or answered without a model list. At each start a stored server on
 this machine is filed by the API it speaks: as OpenAI-compatible only when its Ollama API answers
 "not found" or answers without a model list and its `/v1/models` lists models, and back as Ollama
-once its Ollama API lists models again; a server that is down or answers with an error keeps its
+once its Ollama API lists models again, unless another server on this machine is the chosen one
+by then; a server that is down or answers with an error keeps its
 kind. Each endpoint remembers what it was added as: one added at its `/v1` address as anything
 other than Ollama (by the scan, the key form, or **add ollama** finding no Ollama API) is never
 filed as Ollama, even when it starts listing Ollama models, so it never becomes the embeddings
