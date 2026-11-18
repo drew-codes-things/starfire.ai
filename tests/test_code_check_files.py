@@ -14,7 +14,7 @@ import host_sandbox
 needs_cc = pytest.mark.skipif(code_check._c_compiler() is None, reason="no C compiler installed")
 needs_sandbox = pytest.mark.skipif(host_sandbox.working_sandbox_program() is None,
                                    reason="bubblewrap is not installed or cannot start here")
-SECRET = "9gqW9J_SCC-944w8HsfAwjevR-1SCu3cwfYmRvdYJeU="
+SECRET = "not-a-real-key-made-up-for-this-test"
 TRICKS = [
     '#/**/include "{path}"',
     '/**/#include "{path}"',
@@ -81,10 +81,10 @@ def test_the_compiler_cannot_see_the_hidden_folders(server):
 
 
 def test_messages_about_other_files_are_dropped_but_the_snippets_own_are_kept():
-    message = ("In file included from snippet:1:\n/srv/starfire/data/.key:1:1: error: invalid suffix\n"
+    message = ("In file included from snippet:1:\n/opt/app/data/.key:1:1: error: invalid suffix\n"
                f"    1 | {SECRET}\n      | ^~~~\nsnippet:3: error: expected ';'\n    3 | int x\n      |      ^")
     shown = code_check._snippet_messages_only(message)
-    assert SECRET not in shown and "/srv/starfire" not in shown
+    assert SECRET not in shown and "/opt/app" not in shown
     assert "snippet:3: error: expected ';'" in shown and "int x" in shown
     assert shown.endswith(code_check.INCLUDED_FILE_NOTE)
 
