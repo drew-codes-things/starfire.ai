@@ -140,8 +140,7 @@
   file.
 
 ### Added
-- **starfire Desktop** (`desktop/`): an Electron app that opens your own starfire in its own window on Debian (AppImage;
-  the Windows installer is configured but not built yet). The first run asks for the address and only saves one that
+- **starfire Desktop** (`desktop/`): an Electron app that opens your own starfire in its own window on Debian (AppImage). The first run asks for the address and only saves one that
   answers `/api/health` like starfire; `http` is accepted only for localhost and local network addresses with an explicit
   tick box. It stays signed in, has a tray icon (Open, Quick ask, Settings, Quit), an optional start with the PC, a global
   quick-ask shortcut (Ctrl+Shift+Space, changeable in its settings) that sends a question as a new chat, and a notification
@@ -152,6 +151,8 @@
   running, Connected). It pairs once with a 6 digit code Arty Desktop shows (single use, two minutes), talks to
   `127.0.0.1` only, keeps the token in its private config file and can ask Arty Desktop's computer control to take a
   step; Arty Desktop still puts every step to you as its Allow / Not now card. Needs Arty Desktop 1.5.5 or newer.
+- **starfire Desktop for Windows**: an NSIS installer (`npm run installer`, built and tried in a Windows 10 VM: silent install,
+  first run, a local test server, start with the PC, uninstall). The desktop tests now run on Windows too.
 - **Settings > Arty memory** for admins: list and search what Arty remembers, edit a fact in place, remove a
   fact or a whole name after a confirm, and add a fact. starfire relays each change to Arty's memory API with its
   own Arty connection (`GET /api/arty-memory`, `POST /api/arty-memory/add`, `/edit`, `/delete`) and shows Arty's

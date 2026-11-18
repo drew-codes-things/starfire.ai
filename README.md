@@ -842,7 +842,7 @@ stored keys unrecoverable.
 
 ## Desktop app
 
-[starfire Desktop](desktop/README.md) puts your starfire in its own window on Debian (AppImage) and, later, Windows:
+[starfire Desktop](desktop/README.md) puts your starfire in its own window on Debian (AppImage) and Windows (installer):
 it asks for your starfire's address on first run, stays signed in, lives in the tray, opens a quick-ask window from a
 global shortcut (Ctrl+Shift+Space by default) and shows a notification when a reply finishes while the window is hidden.
 It is a small Electron shell in `desktop/`, separate from the server, and it only ever opens the address you give it.

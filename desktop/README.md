@@ -92,8 +92,14 @@ Delete it to see the first-run screen again.
 
 ### Windows
 
-`npm run installer` builds an NSIS installer (`release/starfire-Setup-1.0.0.exe`). It must be built on Windows (or a
-Windows VM) and has not been built or run yet.
+`npm run installer` builds an NSIS installer (`release/starfire-Setup-1.0.0.exe`, about 110 MB, per user, unsigned so
+Windows SmartScreen will warn). It must be built on Windows. It was built in a Windows 10 VM with the same Electron and
+electron-builder versions as Arty Desktop, the tests were run there (all pass, the three that read Unix permission
+bits skip), and the installer was installed silently (`starfire-Setup-1.0.0.exe /S`), launched, driven through the
+first-run screen to a local test server, and uninstalled: the program folder, both shortcuts and the uninstall entry go,
+your settings in `%APPDATA%\starfire` stay. Start with the PC writes and removes the `Run` registry entry. Not tried on
+Windows: the tray menu, the global shortcut (the test session had no interactive desktop, so Windows refused every
+shortcut there), toast notifications, and the Arty Desktop link (Arty Desktop 1.5.5 has not been built for Windows).
 
 ---
 
@@ -128,7 +134,8 @@ was hidden.
 
 ## Next steps
 
-- Windows installer, built and tried in a Windows VM.
+- Try the Windows tray, shortcut and notifications on a signed-in Windows desktop, and the Arty Desktop link once Arty
+  Desktop 1.5.5 has a Windows build.
 - Chats kept in step live between starfire Desktop, the website and ArtyCode.
 - Carry the quick-ask question through a sign-in when the window shows the login page.
 
