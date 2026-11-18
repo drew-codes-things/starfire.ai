@@ -198,6 +198,7 @@ async function send(text, overrideModel, extra = {}) {
   await persistSession();
   const sessionId = isTemporaryChat() ? '' : currentSessionId || '';
   const aiIdx = messages.length;
+  const desktopScreen = await desktopScreenOffered();
 
   await streamReply({
     model, aiIdx, startsNewChat,
@@ -214,6 +215,7 @@ async function send(text, overrideModel, extra = {}) {
         enabled_mcp_servers: modelHasOwnTools(model) ? [] : [...enabledMcpServers],
         enabled_builtin_tools: modelHasOwnTools(model) ? [] : [...enabledBuiltinTools],
         earlier_untrusted_content: sideChatContext(sideChat, messages).some(m => m.untrustedRead === true),
+        ...(desktopScreen ? { desktop_screen: true } : {}),
         memory_commands: !isTemporaryChat(),
         ...(sessionId ? { session_id: sessionId, reply_index: aiIdx } : {}),
       }),
@@ -350,6 +352,8 @@ async function streamReply({ model, aiIdx, startsNewChat, open, giveBack }) {
       showToolResult(obj.tool_result);
     } else if (obj.shell_pending) {
       renderShellApprovalCard(obj.shell_pending);
+    } else if (obj.screen_request) {
+      startScreenLook(obj.screen_request);
     } else if (obj.usage) {
       noteRoundUsage(replyMeter, obj.usage);
       liveChatStats.follow(replyMeter);

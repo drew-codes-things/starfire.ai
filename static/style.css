@@ -1861,6 +1861,11 @@ body.login-page {
 body.own-tools .own-tools-only { display: block; }
 body.own-tools .tools-only, body.own-tools #activeTools { display: none; }
 
+.screen-look { display: flex; flex-direction: column; align-items: flex-start; gap: var(--s-1); }
+.look-thumb { max-width: 240px; max-height: 150px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--media-bg); cursor: zoom-in; object-fit: contain; }
+.look-overlay { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; padding: var(--s-4); background: rgba(0, 0, 0, 0.8); cursor: zoom-out; }
+.look-overlay img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: var(--r-lg); }
+
 .inline-media { display: block; max-width: 100%; max-height: 420px; margin: var(--s-2) 0 var(--s-1); border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--media-bg); }
 img.inline-media { cursor: zoom-in; object-fit: contain; }
 a[data-media] { font-size: var(--fs-sm); }
