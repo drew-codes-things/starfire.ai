@@ -5,6 +5,7 @@ const http = require('node:http');
 const path = require('node:path');
 const { createArtyLink, requestArty, LOOPBACK_HOST } = require('../src/artyLink');
 const { DEFAULT_SETTINGS } = require('../src/settings');
+const { isProofCall, proofAnswer } = require('./fakeProof');
 
 const TOKEN = 'abcdefghijklmnopqrstuvwxyz0123456789_-ABCDE';
 
@@ -16,6 +17,7 @@ function build({ settings = {}, replies = [] } = {}) {
     getSettings: () => current,
     setToken: (token) => { current = { ...current, artyToken: token }; return { ok: true }; },
     request: async (call) => {
+      if (isProofCall(call)) return proofAnswer(call, current);
       calls.push(call);
       const next = queue.shift();
       if (next instanceof Error) throw next;
@@ -35,14 +37,14 @@ test('off means no conversation with Arty at all', async () => {
   const { link, calls } = build({ settings: { artyLink: false, artyToken: TOKEN } });
   assert.deepEqual(await link.status(), { state: 'off', paired: true });
   assert.equal((await link.pair('123456')).ok, false);
-  assert.equal((await link.runComputer('computer_apps', {})).ok, false);
+  assert.equal((await link.tryLink()).ok, false);
   assert.equal(calls.length, 0);
 });
 
 test('on but never paired is not connected and asks for nothing', async () => {
   const { link, calls } = build({ settings: { artyLink: true } });
   assert.deepEqual(await link.status(), { state: 'unpaired', paired: false });
-  assert.equal((await link.runComputer('computer_apps', {})).ok, false);
+  assert.equal((await link.tryLink()).ok, false);
   assert.equal(calls.length, 0);
 });
 
@@ -58,10 +60,10 @@ test('Arty Desktop not running is shown as unreachable, not as an error', async 
   assert.deepEqual(await link.status(), { state: 'unreachable', paired: true });
 });
 
-test('a refused token means the pairing is gone: forget it and ask for a new one', async () => {
+test('a refused token after a good proof is shown, and the pairing is kept for the user to decide', async () => {
   const { link, settings } = build({ settings: { artyLink: true, artyToken: TOKEN }, replies: [{ status: 403, body: { error: 'x' } }] });
-  assert.deepEqual(await link.status(), { state: 'unpaired', paired: false });
-  assert.equal(settings().artyToken, '');
+  assert.deepEqual(await link.status(), { state: 'unproven', paired: true });
+  assert.equal(settings().artyToken, TOKEN);
 });
 
 test('any other answer is unreachable and keeps the token', async () => {
@@ -70,15 +72,16 @@ test('any other answer is unreachable and keeps the token', async () => {
   assert.equal(settings().artyToken, TOKEN);
 });
 
-test('pairing trims the code, sends it with the app name, and keeps the token out of the answer', async () => {
-  const { link, calls, settings } = build({ settings: { artyLink: true }, replies: [{ status: 200, body: { token: TOKEN } }] });
-  const result = await link.pair(' 123 456 ');
-  assert.deepEqual(result, { ok: true });
-  assert.equal(settings().artyToken, TOKEN);
-  assert.deepEqual(calls[0].body, { code: '123456', name: 'starfire Desktop' });
+test('pairing trims the code and sends only the app name and a share, never the code', async () => {
+  const { link, calls } = build({ settings: { artyLink: true }, replies: [{ status: 403, body: { error: 'No code is showing.' } }] });
+  await link.pair(' 123 456 ');
   assert.equal(calls[0].method, 'POST');
-  assert.equal(calls[0].path, '/link/pair');
+  assert.equal(calls[0].path, '/link/pair/start');
   assert.equal(calls[0].token, undefined);
+  assert.deepEqual(Object.keys(calls[0].body).sort(), ['name', 'share']);
+  assert.equal(calls[0].body.name, 'starfire Desktop');
+  assert.match(calls[0].body.share, /^[0-9a-f]{512}$/);
+  assert.doesNotMatch(JSON.stringify(calls[0]), /123456|123 456/);
 });
 
 test('a code that is not six digits never leaves the app', async () => {
@@ -105,11 +108,12 @@ test('pairing with Arty Desktop closed says so', async () => {
   assert.match(result.error, /not running/);
 });
 
-test('a token that does not look like one is refused rather than stored', async () => {
-  for (const body of [{ token: 'short' }, { token: 42 }, {}, { token: 'bad token with spaces and enough length to pass' }]) {
-    const { link, settings } = build({ settings: { artyLink: true }, replies: [{ status: 200, body }] });
+test('an answer that is not a pairing answer saves nothing and finishes nothing', async () => {
+  for (const body of [{ token: 'F'.repeat(43) }, { session: 'x', share: 'y', proof: 'z' }, {}, { session: '0'.repeat(32), share: '00'.repeat(256), proof: '0'.repeat(64) }]) {
+    const { link, settings, calls } = build({ settings: { artyLink: true }, replies: [{ status: 200, body }] });
     assert.equal((await link.pair('123456')).ok, false);
     assert.equal(settings().artyToken, '');
+    assert.equal(calls.some((call) => call.path === '/link/pair/finish'), false);
   }
 });
 
@@ -123,9 +127,9 @@ test('unpairing tells Arty Desktop and forgets the token, even when Arty Desktop
   assert.equal(second.settings().artyToken, '');
 });
 
-test('a computer step goes to Arty Desktop with the token and comes back as a result', async () => {
+test('trying the link sends one fixed step with the token and comes back as a result', async () => {
   const { link, calls } = build({ settings: { artyLink: true, artyToken: TOKEN }, replies: [{ status: 200, body: { ok: true, result: 'Terminal, Firefox' } }] });
-  const result = await link.runComputer('computer_apps', {});
+  const result = await link.tryLink();
   assert.deepEqual(result, { ok: true, result: 'Terminal, Firefox' });
   assert.equal(calls[0].path, '/link/computer');
   assert.equal(calls[0].token, TOKEN);
@@ -135,20 +139,12 @@ test('a computer step goes to Arty Desktop with the token and comes back as a re
 
 test('a no from the user comes back as declined, not as a failure to retry', async () => {
   const { link } = build({ settings: { artyLink: true, artyToken: TOKEN }, replies: [{ status: 403, body: { error: 'You said no.', declined: true } }] });
-  assert.deepEqual(await link.runComputer('computer_apps', {}), { ok: false, declined: true, error: 'You said no.' });
-});
-
-test('only computer tools with plain object arguments are sent', async () => {
-  const { link, calls } = build({ settings: { artyLink: true, artyToken: TOKEN } });
-  for (const [tool, args] of [['chrome_click', {}], ['computer_', {}], ['', {}], [null, {}], ['computer_apps', []], ['computer_apps', null], ['computer_apps', 'x'], ['../computer_apps', {}], ['computer_apps ', {}]]) {
-    assert.equal((await link.runComputer(tool, args)).ok, false, `${tool} ${JSON.stringify(args)}`);
-  }
-  assert.equal(calls.length, 0);
+  assert.deepEqual(await link.tryLink(), { ok: false, declined: true, error: 'You said no.' });
 });
 
 test('Arty Desktop going away mid-step is reported plainly', async () => {
   const { link } = build({ settings: { artyLink: true, artyToken: TOKEN }, replies: [refused()] });
-  const result = await link.runComputer('computer_apps', {});
+  const result = await link.tryLink();
   assert.equal(result.ok, false);
   assert.match(result.error, /not running/);
 });

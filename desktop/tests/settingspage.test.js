@@ -25,14 +25,14 @@ test('the pairing and paired rows start hidden and the stylesheet can hide them'
 });
 
 test('the light has a colour for every state the link can report', () => {
-  for (const state of ['off', 'unpaired', 'unreachable', 'connected']) {
+  for (const state of ['off', 'unpaired', 'unreachable', 'unproven', 'connected']) {
     assert.match(styles, new RegExp(`\\.light\\[data-state="${state}"\\]`));
   }
 });
 
 test('the page polls the link while it is open and uses only the link bridge calls', () => {
   assert.match(script, /setInterval\(refreshLink/);
-  for (const call of ['linkStatus', 'linkPair', 'linkUnpair', 'linkComputer']) {
+  for (const call of ['linkStatus', 'linkPair', 'linkUnpair', 'linkTry']) {
     assert.ok(script.includes(`bridge.${call}(`), call);
     assert.ok(preload.includes(`${call}:`), `${call} in the preload`);
   }

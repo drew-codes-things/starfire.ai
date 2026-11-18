@@ -23,6 +23,8 @@ const WEB_PRELOAD_PATH = path.join(__dirname, 'preload-web.js');
 const ICON_PATH = path.join(__dirname, 'assets', 'icon.png');
 const TRAY_ICON_PATH = path.join(__dirname, 'assets', 'tray.png');
 const CONNECTED_PAUSE_MS = 700;
+const SETTINGS_PAGE = 'settings.html';
+const TRY_NEEDS_A_CLICK = { ok: false, error: 'Click Try it in this window to try the link.' };
 const CHAT_STREAM_FILTER = { urls: ['*://*/api/chat_stream*'] };
 
 let windows = null;
@@ -41,10 +43,10 @@ function setAutostart(enabled) {
 function installStarfireSession() {
   const starfire = session.fromPartition(STARFIRE_PARTITION);
   starfire.setPermissionRequestHandler((contents, permission, callback, details) => {
-    callback(isPermissionAllowed(permission, details.requestingUrl, controller.get().address));
+    callback(isPermissionAllowed(permission, details.requestingUrl, controller.get().address, details));
   });
-  starfire.setPermissionCheckHandler((contents, permission, requestingOrigin) => (
-    isPermissionAllowed(permission, requestingOrigin, controller.get().address)
+  starfire.setPermissionCheckHandler((contents, permission, requestingOrigin, details) => (
+    isPermissionAllowed(permission, requestingOrigin, controller.get().address, details)
   ));
   starfire.webRequest.onCompleted(CHAT_STREAM_FILTER, (details) => {
     const settings = controller.get();
@@ -67,6 +69,10 @@ function installLocalSession() {
 
 function isLocalSender(event) {
   return Boolean(event.senderFrame) && isLocalPageUrl(event.senderFrame.url, PAGES_DIR);
+}
+
+function isSettingsSender(event) {
+  return isLocalSender(event) && new URL(event.senderFrame.url).pathname.endsWith(`/${SETTINGS_PAGE}`);
 }
 
 function buildMenu() {
@@ -120,6 +126,7 @@ function startApp() {
     ipcMain,
     controller,
     isLocalSender,
+    isSettingsSender,
     describeKey: acceleratorFromKeyEvent,
     actions: {
       shortcutProblem: () => controller.shortcutProblem(),
@@ -131,7 +138,7 @@ function startApp() {
       linkStatus: () => artyLink.status(),
       linkPair: (code) => artyLink.pair(code),
       linkUnpair: () => artyLink.unpair(),
-      linkComputer: (tool, args) => artyLink.runComputer(tool, args),
+      linkTry: (sender) => (windows.consumeGesture(sender) ? artyLink.tryLink() : TRY_NEEDS_A_CLICK),
       connected: () => setTimeout(() => {
         windows.closeConnect();
         windows.showMain();

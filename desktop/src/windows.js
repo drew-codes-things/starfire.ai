@@ -2,7 +2,8 @@ const path = require('node:path');
 const { secureWebPreferences, STARFIRE_PARTITION, LOCAL_PARTITION } = require('./webPreferences');
 const { createNavigationGuard, isSafeExternalUrl, guardWebContents } = require('./navigation');
 const { SHOWN_EVENT } = require('./ipc');
-const { deliverQuestion } = require('./quickask');
+const { deliverQuestion, cleanQuestion } = require('./quickask');
+const { createGestureTracker } = require('./userGesture');
 
 const MAIN_SIZE = { width: 1200, height: 800, minWidth: 480, minHeight: 480 };
 const CONNECT_SIZE = { width: 520, height: 560 };
@@ -12,6 +13,7 @@ const QUICK_ASK_TOP_FRACTION = 0.2;
 const BACKGROUND = '#19191c';
 const ABORTED_LOAD_CODE = -3;
 const SIGN_IN_HINT = 'Sign in to starfire, then ask again.';
+const EMPTY_QUESTION = 'Type a question first.';
 
 function createWindowManager({ electron, controller, pagesDir, preloadPath, webPreloadPath, iconPath }) {
   const { BrowserWindow, Notification, screen, shell } = electron;
@@ -21,6 +23,21 @@ function createWindowManager({ electron, controller, pagesDir, preloadPath, webP
   let quick = null;
   let quitting = false;
   let loadedAddress = '';
+  const gestures = new Map();
+
+  function trackGestures(window) {
+    const contents = window.webContents;
+    const tracker = createGestureTracker();
+    tracker.watch(contents);
+    gestures.set(contents, tracker);
+    window.on('closed', () => gestures.delete(contents));
+    return tracker;
+  }
+
+  function consumeGesture(contents) {
+    const tracker = gestures.get(contents);
+    return tracker ? tracker.consume() : false;
+  }
 
   function localWebPreferences() {
     return secureWebPreferences({ partition: LOCAL_PARTITION, preload: preloadPath });
@@ -56,9 +73,11 @@ function createWindowManager({ electron, controller, pagesDir, preloadPath, webP
       webPreferences: secureWebPreferences({ partition: STARFIRE_PARTITION, preload: webPreloadPath, spellcheck: true }),
     });
     const guard = { decide: (url) => createNavigationGuard(controller.get().address).decide(url) };
+    const mainGestures = trackGestures(main);
     guardWebContents(main.webContents, guard, {
       openExternal,
       loadInside: (url) => main.loadURL(url),
+      mayOpenExternal: () => mainGestures.consume(),
     });
     main.webContents.on('did-fail-load', (event, code, description, url, isMainFrame) => {
       if (!isMainFrame || code === ABORTED_LOAD_CODE) return;
@@ -135,6 +154,7 @@ function createWindowManager({ electron, controller, pagesDir, preloadPath, webP
       webPreferences: localWebPreferences(),
     });
     lockLocalWindow(settings);
+    trackGestures(settings);
     settings.removeMenu();
     settings.loadFile(pageUrlFile('settings.html'));
     settings.on('closed', () => { settings = null; });
@@ -200,7 +220,9 @@ function createWindowManager({ electron, controller, pagesDir, preloadPath, webP
     if (Notification.isSupported()) new Notification({ title: 'starfire', body }).show();
   }
 
-  async function submitQuickAsk(question) {
+  async function submitQuickAsk(text) {
+    const question = cleanQuestion(text);
+    if (question === '') return { ok: false, error: EMPTY_QUESTION };
     hideQuickAsk();
     const window = showMain();
     if (!window) return { ok: false, error: 'Set up your starfire address first.' };
@@ -262,6 +284,7 @@ function createWindowManager({ electron, controller, pagesDir, preloadPath, webP
     mainIsHidden,
     mainIsFocused,
     isMainContents,
+    consumeGesture,
     reloadMain,
     allWindows,
     isMainVisible: () => !mainIsHidden(),

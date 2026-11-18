@@ -36,18 +36,21 @@ so a new starfire release shows up in the app without updating it.
   notification says so. Click it to open the window. Off in Settings if you prefer.
 - **Start with the PC** - off by default. On Linux it writes `~/.config/autostart/starfire-desktop.desktop`; on Windows it
   uses the login item. It starts hidden in the tray.
-- **Link to Arty Desktop** - a switch in Settings with a light that says Off, Not paired, Arty Desktop is not running or
-  Connected. Switched on, you pair once: Arty Desktop's tray menu has **Link starfire...**, which shows a 6 digit code (one
-  use, two minutes); type it into Settings. After that starfire Desktop can ask Arty Desktop's computer control to take a
-  step (Settings has a **Try it** button that asks for the list of open windows). Arty Desktop puts every step to you as
-  its normal Allow / Not now card, so starfire never gets round it, and a step is refused while the switch is off or
+- **Link to Arty Desktop** - a switch in Settings with a light that says Off, Not paired, Arty Desktop is not running,
+  Arty Desktop did not prove itself, or Connected. Switched on, you pair once: Arty Desktop's tray menu has **Link
+  starfire...**, which shows a 6 digit code (one use, two minutes); type it into Settings. After that starfire Desktop can
+  ask Arty Desktop's computer control to take a step (Settings has a **Try it** button that asks for the list of open
+  windows; it works only from a click in that window). Arty Desktop puts every step to you as its normal Allow / Not now
+  card, showing the whole step, so starfire never gets round it, and a step is refused while the switch is off or
   Arty's HANDS is off. Everything goes to `127.0.0.1` only (the port is Arty Desktop's 8765, `artyPort` in the config
   file for a different one); the token is kept in `~/.config/starfire/config.json` (mode 600) and never reaches the
   app's pages. Unpair in Settings forgets it on both sides.
 - **Look at my screen** - with the link connected, an admin of your starfire can say "look at my discord" (or "look at my
   screen", "what's on my browser") and the chat model calls the `look_at_screen` tool. The page asks starfire Desktop,
   which sends only a screenshot request (an optional app name) to Arty Desktop. Arty puts it to you as an Allow card that
-  names the app, and nothing is captured unless you click Allow. The chat shows each step (Looking at Discord on your
+  names the app, and nothing is captured unless you click Allow. When an app is named and Arty Desktop can find its
+  window (X11, or X11 windows under Wayland), that window is captured by itself and nothing else is sent; otherwise the
+  card says plainly that the whole screen would be sent. The chat shows each step (Looking at Discord on your
   PC..., Waiting for you to allow it in Arty, Looked at Discord with a small thumbnail you can click to enlarge) and a
   clear line when you said no, Arty is not running or no window matches; the model is told to say it could not look. The
   tool is never offered in a normal browser or to an ordinary account, and the picture is not kept on the server beyond
@@ -70,7 +73,8 @@ running app to show the quick-ask window. `STARFIRE_WAYLAND=1` starts the app as
   Arty link is on and paired, and it exposes just `linkStatus()` and `lookAtScreen(app)`. The main process checks the
   sender again on every call. Nothing else in the page can reach the app.
 - Navigation, redirects and new windows are limited to the configured starfire origin. Any other link opens in the
-  system browser (web and mail links only); other schemes (`file:`, `javascript:`, `data:` and the like) are refused.
+  system browser (web and mail links only), and only for the main frame right after a click or key press in the window
+  (one opening per click); other schemes (`file:`, `javascript:`, `data:` and the like) are refused.
 - The app's own pages (address, settings, quick ask) are local files with a strict Content Security Policy
   (`default-src 'none'`, scripts and styles from the file itself only, no network), in a separate session with no
   permissions and all web requests cancelled. Their bridge to the app is a handful of checked calls, and the app only
@@ -78,9 +82,14 @@ running app to show the quick-ask window. `STARFIRE_WAYLAND=1` starts the app as
 - The address must be **https**. `http` is accepted only for `localhost` and local network addresses (192.168.x.x, 10.x.x.x,
   172.16-31.x.x, link-local, `.local`), and only with the tick box on the address screen.
 - The Arty Desktop link talks to `127.0.0.1` over plain http from the app's main process only (the pages cannot reach it),
-  sends no Origin header, follows no redirects and caps what it reads. The pairing code is single use and short lived on
-  Arty Desktop's side, and the stored token is a random value Arty Desktop keeps only as a hash.
-- Only the starfire origin is given microphone, notification, clipboard-write and full-screen permission.
+  sends no Origin header, follows no redirects and caps what it reads. Only the settings page can use it. Pairing uses
+  SPAKE2 (RFC 3526 group 14): both sides prove they know the 6 digit code without sending it, so whatever answers on
+  the port learns nothing it could try codes against, and the token is worked out on both sides rather than sent.
+  Before the token is sent on any call, Arty Desktop must answer a fresh challenge with an HMAC keyed by the hash of the
+  token it keeps from pairing (`GET /link/proof`); if it cannot, nothing is sent, the light says so and the pairing is
+  kept until you Unpair.
+- Only the starfire origin is given notification, clipboard-write and full-screen permission, and the microphone (never
+  the camera).
 - Certificate errors are never overridden.
 - The quick-ask text is passed to the page as data, not built into script text.
 

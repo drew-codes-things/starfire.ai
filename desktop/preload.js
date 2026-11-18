@@ -23,6 +23,6 @@ contextBridge.exposeInMainWorld('starfireDesktop', {
   linkStatus: () => call('starfire:link-status'),
   linkPair: (code) => call('starfire:link-pair', { code }),
   linkUnpair: () => call('starfire:link-unpair'),
-  linkComputer: (tool, args) => call('starfire:link-computer', { tool, arguments: args }),
+  linkTry: () => call('starfire:link-try'),
   onShown: (callback) => ipcRenderer.on('starfire:shown', () => callback()),
 });

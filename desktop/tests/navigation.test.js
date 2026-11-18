@@ -45,9 +45,10 @@ test('only web and mail links may be handed to the system', () => {
 });
 
 test('permissions are granted only to the starfire origin and only for what it needs', () => {
+  const microphone = { mediaTypes: ['audio'] };
   for (const permission of ['media', 'notifications', 'clipboard-sanitized-write', 'fullscreen']) {
-    assert.equal(isPermissionAllowed(permission, `${ORIGIN}/`, ORIGIN), true, permission);
-    assert.equal(isPermissionAllowed(permission, 'https://evil.com/', ORIGIN), false, permission);
+    assert.equal(isPermissionAllowed(permission, `${ORIGIN}/`, ORIGIN, microphone), true, permission);
+    assert.equal(isPermissionAllowed(permission, 'https://evil.com/', ORIGIN, microphone), false, permission);
   }
   for (const permission of ['geolocation', 'openExternal', 'clipboard-read', 'midi', 'hid', 'usb', 'serial', 'pointerLock']) {
     assert.equal(isPermissionAllowed(permission, `${ORIGIN}/`, ORIGIN), false, permission);
@@ -69,19 +70,19 @@ test('guardWebContents stops navigation away and opens the link outside', () => 
   const contents = fakeContents();
   const opened = [];
   const loaded = [];
-  guardWebContents(contents, guard, { openExternal: (url) => opened.push(url), loadInside: (url) => loaded.push(url) });
+  guardWebContents(contents, guard, { openExternal: (url) => opened.push(url), loadInside: (url) => loaded.push(url), mayOpenExternal: () => true });
 
   const inside = fakeEvent();
-  contents.emit('will-navigate', inside, `${ORIGIN}/chat`);
+  contents.emit('will-navigate', inside, `${ORIGIN}/chat`, false, true);
   assert.equal(inside.prevented, false);
 
   const outside = fakeEvent();
-  contents.emit('will-navigate', outside, 'https://example.org/page');
+  contents.emit('will-navigate', outside, 'https://example.org/page', false, true);
   assert.equal(outside.prevented, true);
   assert.deepEqual(opened, ['https://example.org/page']);
 
   const evil = fakeEvent();
-  contents.emit('will-navigate', evil, 'file:///etc/passwd');
+  contents.emit('will-navigate', evil, 'file:///etc/passwd', false, true);
   assert.equal(evil.prevented, true);
   assert.equal(opened.length, 1);
 });
@@ -90,9 +91,9 @@ test('guardWebContents also guards redirects', () => {
   const contents = fakeContents();
   const opened = [];
   const loaded = [];
-  guardWebContents(contents, guard, { openExternal: (url) => opened.push(url), loadInside: (url) => loaded.push(url) });
+  guardWebContents(contents, guard, { openExternal: (url) => opened.push(url), loadInside: (url) => loaded.push(url), mayOpenExternal: () => true });
   const event = fakeEvent();
-  contents.emit('will-redirect', event, 'https://example.org/');
+  contents.emit('will-redirect', event, 'https://example.org/', false, true);
   assert.equal(event.prevented, true);
   assert.deepEqual(opened, ['https://example.org/']);
 });
@@ -101,7 +102,7 @@ test('guardWebContents never opens a new window; starfire links load in the same
   const contents = fakeContents();
   const opened = [];
   const loaded = [];
-  guardWebContents(contents, guard, { openExternal: (url) => opened.push(url), loadInside: (url) => loaded.push(url) });
+  guardWebContents(contents, guard, { openExternal: (url) => opened.push(url), loadInside: (url) => loaded.push(url), mayOpenExternal: () => true });
 
   assert.deepEqual(contents.windowOpenHandler({ url: 'https://example.org/' }), { action: 'deny' });
   assert.deepEqual(contents.windowOpenHandler({ url: 'javascript:alert(1)' }), { action: 'deny' });
