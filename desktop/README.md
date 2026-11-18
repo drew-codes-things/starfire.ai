@@ -44,6 +44,14 @@ so a new starfire release shows up in the app without updating it.
   Arty's HANDS is off. Everything goes to `127.0.0.1` only (the port is Arty Desktop's 8765, `artyPort` in the config
   file for a different one); the token is kept in `~/.config/starfire/config.json` (mode 600) and never reaches the
   app's pages. Unpair in Settings forgets it on both sides.
+- **Look at my screen** - with the link connected, an admin of your starfire can say "look at my discord" (or "look at my
+  screen", "what's on my browser") and the chat model calls the `look_at_screen` tool. The page asks starfire Desktop,
+  which sends only a screenshot request (an optional app name) to Arty Desktop. Arty puts it to you as an Allow card that
+  names the app, and nothing is captured unless you click Allow. The chat shows each step (Looking at Discord on your
+  PC..., Waiting for you to allow it in Arty, Looked at Discord with a small thumbnail you can click to enlarge) and a
+  clear line when you said no, Arty is not running or no window matches; the model is told to say it could not look. The
+  tool is never offered in a normal browser or to an ordinary account, and the picture is not kept on the server beyond
+  that chat message.
 - **Its own icon** - starfire's red logo on a red tile, so it never gets mixed up with Arty Desktop in the taskbar.
 
 ### Wayland
@@ -58,7 +66,9 @@ running app to show the quick-ask window. `STARFIRE_WAYLAND=1` starts the app as
 ## Security
 
 - `contextIsolation` on, `nodeIntegration` off, `sandbox` on and no remote module in every window. The starfire window
-  has no preload script at all, so nothing in the page can reach the app.
+  has one narrow preload (`preload-web.js`): only the top frame of the configured starfire origin gets it, only while the
+  Arty link is on and paired, and it exposes just `linkStatus()` and `lookAtScreen(app)`. The main process checks the
+  sender again on every call. Nothing else in the page can reach the app.
 - Navigation, redirects and new windows are limited to the configured starfire origin. Any other link opens in the
   system browser (web and mail links only); other schemes (`file:`, `javascript:`, `data:` and the like) are refused.
 - The app's own pages (address, settings, quick ask) are local files with a strict Content Security Policy
