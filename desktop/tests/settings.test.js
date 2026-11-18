@@ -5,6 +5,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { DEFAULT_SETTINGS, loadSettings, saveSettings, applySettingsPatch, publicSettings, withArtyToken } = require('../src/settings');
 
+const NO_UNIX_PERMISSIONS = process.platform === 'win32' && 'Windows has no Unix permission bits';
+
 function scratchFile() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sfd-settings-'));
   return { dir, file: path.join(dir, 'config.json') };
@@ -41,7 +43,7 @@ test('a corrupt file gives the defaults and says why', () => {
   fs.rmSync(dir, { recursive: true });
 });
 
-test('saving then loading returns the same settings, privately and without leftovers', () => {
+test('saving then loading returns the same settings, privately and without leftovers', { skip: NO_UNIX_PERMISSIONS }, () => {
   const { dir, file } = scratchFile();
   const settings = { ...DEFAULT_SETTINGS, address: 'https://starfire.example.com', shortcut: 'Ctrl+Alt+K', startWithSystem: true };
   saveSettings(file, settings);
@@ -145,7 +147,7 @@ test('a stored port must be a whole number from 1024 up', () => {
   fs.rmSync(dir, { recursive: true });
 });
 
-test('the saved file holds the token privately', () => {
+test('the saved file holds the token privately', { skip: NO_UNIX_PERMISSIONS }, () => {
   const { dir, file } = scratchFile();
   saveSettings(file, { ...DEFAULT_SETTINGS, artyLink: true, artyToken: GOOD_TOKEN });
   assert.equal(fs.statSync(file).mode & 0o777, 0o600);

@@ -156,7 +156,7 @@ test('connect treats anything but true as an unticked box', async () => {
   assert.equal(result.ok, false);
 });
 
-test('a new Arty token is saved privately, announced, and cleared on request', () => {
+test('a new Arty token is saved privately, announced, and cleared on request', { skip: process.platform === 'win32' && 'Windows has no Unix permission bits' }, () => {
   const token = 'abcdefghijklmnopqrstuvwxyz0123456789_-ABCDE';
   const { controller, file, changes } = build();
   assert.equal(controller.setArtyToken(token).ok, true);

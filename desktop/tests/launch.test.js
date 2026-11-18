@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const { parseLaunchArgs } = require('../src/launch');
 const { isLocalPageUrl } = require('../src/navigation');
 const { deliverQuestion } = require('../src/quickask');
@@ -14,11 +15,13 @@ test('launch flags are read from the command line', () => {
 });
 
 test('only files directly inside the pages folder count as the app\'s own pages', () => {
-  const pages = path.join(path.sep, 'opt', 'starfire', 'pages');
-  assert.equal(isLocalPageUrl('file:///opt/starfire/pages/settings.html?x=1', pages), true);
-  assert.equal(isLocalPageUrl('file:///opt/starfire/pages/sub/x.html', pages), false);
-  assert.equal(isLocalPageUrl('file:///opt/starfire/pages/../main.js', pages), false);
-  assert.equal(isLocalPageUrl('file:///opt/starfire/pagesx/settings.html', pages), false);
+  const pages = path.resolve(path.sep, 'opt', 'starfire', 'pages');
+  const pagesUrl = pathToFileURL(pages).href;
+  const siblingUrl = pathToFileURL(path.resolve(path.sep, 'opt', 'starfire', 'pagesx')).href;
+  assert.equal(isLocalPageUrl(`${pagesUrl}/settings.html?x=1`, pages), true);
+  assert.equal(isLocalPageUrl(`${pagesUrl}/sub/x.html`, pages), false);
+  assert.equal(isLocalPageUrl(`${pagesUrl}/../main.js`, pages), false);
+  assert.equal(isLocalPageUrl(`${siblingUrl}/settings.html`, pages), false);
   assert.equal(isLocalPageUrl('file:///etc/passwd', pages), false);
   assert.equal(isLocalPageUrl('https://starfire.example.com/pages/settings.html', pages), false);
   assert.equal(isLocalPageUrl('', pages), false);
