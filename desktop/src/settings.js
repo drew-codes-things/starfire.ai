@@ -10,9 +10,24 @@ const DEFAULT_SETTINGS = Object.freeze({
   startWithSystem: false,
   notifications: true,
   closeToTray: true,
+  artyLink: false,
+  artyToken: '',
+  artyPort: 8765,
 });
-const BOOLEAN_KEYS = ['allowInsecure', 'startWithSystem', 'notifications', 'closeToTray'];
+const BOOLEAN_KEYS = ['allowInsecure', 'startWithSystem', 'notifications', 'closeToTray', 'artyLink'];
+const LOCKED_KEYS = ['artyToken', 'artyPort'];
+const ARTY_TOKEN_FORMAT = /^[A-Za-z0-9_-]{20,200}$/;
+const MIN_ARTY_PORT = 1024;
+const MAX_ARTY_PORT = 65535;
 const PRIVATE_FILE_MODE = 0o600;
+
+function isArtyToken(value) {
+  return typeof value === 'string' && ARTY_TOKEN_FORMAT.test(value);
+}
+
+function isArtyPort(value) {
+  return Number.isInteger(value) && value >= MIN_ARTY_PORT && value <= MAX_ARTY_PORT;
+}
 
 function booleanOrDefault(value, key) {
   return typeof value === 'boolean' ? value : DEFAULT_SETTINGS[key];
@@ -24,6 +39,8 @@ function normalizeStored(raw) {
   for (const key of BOOLEAN_KEYS) settings[key] = booleanOrDefault(source[key], key);
   const shortcut = parseAccelerator(source.shortcut);
   if (shortcut.ok) settings.shortcut = shortcut.accelerator;
+  if (isArtyToken(source.artyToken)) settings.artyToken = source.artyToken;
+  if (isArtyPort(source.artyPort)) settings.artyPort = source.artyPort;
   if (typeof source.address === 'string' && source.address !== '') {
     const address = normalizeAddress(source.address, { allowInsecure: settings.allowInsecure });
     if (address.ok) settings.address = address.origin;
@@ -61,6 +78,8 @@ function applySettingsPatch(current, patch) {
   if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) return refuse('Nothing to change.');
   const unknown = Object.keys(patch).filter((key) => !(key in DEFAULT_SETTINGS));
   if (unknown.length > 0) return refuse(`Unknown setting: ${unknown.join(', ')}.`);
+  const locked = Object.keys(patch).filter((key) => LOCKED_KEYS.includes(key));
+  if (locked.length > 0) return refuse(`${locked.join(', ')} cannot be changed from here.`);
   const merged = { ...current };
   for (const key of BOOLEAN_KEYS) {
     if (!(key in patch)) continue;
@@ -82,4 +101,14 @@ function applySettingsPatch(current, patch) {
   return { ok: true, settings: merged };
 }
 
-module.exports = { DEFAULT_SETTINGS, loadSettings, saveSettings, applySettingsPatch };
+function publicSettings(settings) {
+  const { artyToken, ...shown } = settings;
+  return { ...shown, artyPaired: artyToken !== '' };
+}
+
+function withArtyToken(current, token) {
+  if (token !== '' && !isArtyToken(token)) return refuse('That does not look like a token from Arty Desktop.');
+  return { ok: true, settings: { ...current, artyToken: token } };
+}
+
+module.exports = { isArtyToken, DEFAULT_SETTINGS, loadSettings, saveSettings, applySettingsPatch, publicSettings, withArtyToken };

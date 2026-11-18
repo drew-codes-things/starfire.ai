@@ -111,6 +111,17 @@ kbd {
   background: var(--surface);
 }
 
+.light { display: inline-block; width: 10px; height: 10px; margin: 0 6px 0 10px; border-radius: 50%; vertical-align: baseline; background: var(--line-strong); }
+.light[data-state="off"] { background: var(--line-strong); }
+.light[data-state="unpaired"] { background: #e0a93b; }
+.light[data-state="unreachable"] { background: #e0a93b; }
+.light[data-state="connected"] { background: var(--ok); box-shadow: 0 0 0 3px rgba(95, 217, 144, 0.25); }
+.light-label { font-weight: 400; font-size: 0.85rem; color: var(--muted); }
+.pair-actions { display: flex; gap: 8px; flex: none; }
+.pair-actions button, #link-pair { padding: 7px 14px; }
+#link-code { margin-top: 8px; max-width: 160px; font-family: var(--mono); letter-spacing: 0.1em; }
+input[type="text"]#link-code { width: 160px; }
+
 .switch { position: relative; display: inline-block; width: 42px; height: 24px; flex: none; }
 .switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
 .switch .track { position: absolute; inset: 0; border-radius: 999px; background: var(--raised); border: 1px solid var(--line-strong); transition: background 0.15s; pointer-events: none; }

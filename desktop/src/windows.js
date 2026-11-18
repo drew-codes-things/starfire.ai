@@ -6,7 +6,7 @@ const { deliverQuestion } = require('./quickask');
 
 const MAIN_SIZE = { width: 1200, height: 800, minWidth: 480, minHeight: 480 };
 const CONNECT_SIZE = { width: 520, height: 560 };
-const SETTINGS_SIZE = { width: 520, height: 600 };
+const SETTINGS_SIZE = { width: 520, height: 760 };
 const QUICK_ASK_SIZE = { width: 620, height: 176 };
 const QUICK_ASK_TOP_FRACTION = 0.2;
 const BACKGROUND = '#19191c';

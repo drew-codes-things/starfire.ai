@@ -155,3 +155,17 @@ test('connect treats anything but true as an unticked box', async () => {
   const result = await controller.connect({ address: 'http://192.168.77.5:8080', allowInsecure: 'true' });
   assert.equal(result.ok, false);
 });
+
+test('a new Arty token is saved privately, announced, and cleared on request', { skip: process.platform === 'win32' && 'Windows has no Unix permission bits' }, () => {
+  const token = 'abcdefghijklmnopqrstuvwxyz0123456789_-ABCDE';
+  const { controller, file, changes } = build();
+  assert.equal(controller.setArtyToken(token).ok, true);
+  assert.equal(controller.get().artyToken, token);
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).artyToken, token);
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  assert.equal(changes.length, 1);
+  assert.equal(controller.setArtyToken('').ok, true);
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).artyToken, '');
+  assert.equal(controller.setArtyToken('bad').ok, false);
+  assert.equal(JSON.parse(fs.readFileSync(file, 'utf8')).artyToken, '');
+});

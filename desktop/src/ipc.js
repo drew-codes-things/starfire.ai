@@ -1,3 +1,5 @@
+const { publicSettings } = require('./settings');
+
 const CHANNELS = {
   getSettings: 'starfire:get-settings',
   saveSettings: 'starfire:save-settings',
@@ -8,6 +10,10 @@ const CHANNELS = {
   changeAddress: 'starfire:change-address',
   retry: 'starfire:retry',
   cancelConnect: 'starfire:cancel-connect',
+  linkStatus: 'starfire:link-status',
+  linkPair: 'starfire:link-pair',
+  linkUnpair: 'starfire:link-unpair',
+  linkComputer: 'starfire:link-computer',
 };
 const SHOWN_EVENT = 'starfire:shown';
 const KEY_EVENT_FIELDS = ['code', 'ctrlKey', 'altKey', 'shiftKey', 'metaKey'];
@@ -19,6 +25,10 @@ function pickKeyEvent(raw) {
   return picked;
 }
 
+function asObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
 function registerIpc({ ipcMain, controller, isLocalSender, actions, describeKey }) {
   function handle(channel, handler) {
     ipcMain.handle(channel, async (event, ...args) => {
@@ -26,8 +36,11 @@ function registerIpc({ ipcMain, controller, isLocalSender, actions, describeKey 
       return handler(...args);
     });
   }
-  handle(CHANNELS.getSettings, () => ({ settings: controller.get(), shortcutProblem: actions.shortcutProblem() }));
-  handle(CHANNELS.saveSettings, (patch) => controller.update(patch));
+  handle(CHANNELS.getSettings, () => ({ settings: publicSettings(controller.get()), shortcutProblem: actions.shortcutProblem() }));
+  handle(CHANNELS.saveSettings, (patch) => {
+    const result = controller.update(patch);
+    return result.ok ? { ...result, settings: publicSettings(result.settings) } : result;
+  });
   handle(CHANNELS.connect, async (request) => {
     const body = request !== null && typeof request === 'object' ? request : {};
     const result = await controller.connect({ address: body.address, allowInsecure: body.allowInsecure === true });
@@ -40,6 +53,13 @@ function registerIpc({ ipcMain, controller, isLocalSender, actions, describeKey 
   handle(CHANNELS.changeAddress, () => actions.openConnect('change'));
   handle(CHANNELS.retry, () => actions.retry());
   handle(CHANNELS.cancelConnect, () => actions.closeConnect());
+  handle(CHANNELS.linkStatus, () => actions.linkStatus());
+  handle(CHANNELS.linkPair, (request) => actions.linkPair(asObject(request).code));
+  handle(CHANNELS.linkUnpair, () => actions.linkUnpair());
+  handle(CHANNELS.linkComputer, (request) => {
+    const step = asObject(request);
+    return actions.linkComputer(step.tool, step.arguments);
+  });
 }
 
 module.exports = { registerIpc, CHANNELS, SHOWN_EVENT, pickKeyEvent };

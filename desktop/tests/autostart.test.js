@@ -43,7 +43,7 @@ function fakeFs() {
 
 test('turning it on writes the entry and turning it off removes it', () => {
   const fsImpl = fakeFs();
-  const file = '/home/me/.config/autostart/starfire-desktop.desktop';
+  const file = path.join('/home/me', '.config', 'autostart', 'starfire-desktop.desktop');
   applyAutostart({ enabled: true, platform: 'linux', fsImpl, env: {}, home: '/home/me', execPath: '/opt/starfire' });
   assert.match(fsImpl.files.get(file), /Exec="\/opt\/starfire" --hidden/);
   applyAutostart({ enabled: false, platform: 'linux', fsImpl, env: {}, home: '/home/me', execPath: '/opt/starfire' });

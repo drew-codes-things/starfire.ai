@@ -1,6 +1,7 @@
 const electron = require('electron');
 const path = require('node:path');
 const { createSettingsController } = require('./src/controller');
+const { createArtyLink } = require('./src/artyLink');
 const { loadSettings } = require('./src/settings');
 const { applyAutostart } = require('./src/autostart');
 const { acceleratorFromKeyEvent } = require('./src/shortcut');
@@ -25,6 +26,7 @@ const CHAT_STREAM_FILTER = { urls: ['*://*/api/chat_stream*'] };
 let windows = null;
 let controller = null;
 let trayHandle = null;
+let artyLink = null;
 
 function programPath() {
   return process.env.APPIMAGE || process.execPath;
@@ -106,6 +108,7 @@ function startApp() {
       if (trayHandle) trayHandle.refresh();
     },
   });
+  artyLink = createArtyLink({ getSettings: () => controller.get(), setToken: (token) => controller.setArtyToken(token) });
   windows = createWindowManager({ electron, controller, pagesDir: PAGES_DIR, preloadPath: PRELOAD_PATH, iconPath: ICON_PATH });
 
   installStarfireSession();
@@ -122,6 +125,10 @@ function startApp() {
       openConnect: (mode) => windows.showConnect(mode),
       retry: () => windows.retry(),
       closeConnect: () => windows.closeConnect(),
+      linkStatus: () => artyLink.status(),
+      linkPair: (code) => artyLink.pair(code),
+      linkUnpair: () => artyLink.unpair(),
+      linkComputer: (tool, args) => artyLink.runComputer(tool, args),
       connected: () => setTimeout(() => {
         windows.closeConnect();
         windows.showMain();

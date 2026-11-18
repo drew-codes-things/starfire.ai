@@ -45,6 +45,31 @@
       </div>
       <button id="address-change" type="button">Change</button>
     </div>
+    <div class="row">
+      <div class="what">
+        <strong>Link to Arty Desktop <span class="light" id="link-light" data-state="off"></span><span id="link-label" class="light-label">Off</span></strong>
+        <small id="link-help">Lets starfire ask Arty Desktop on this PC to use the computer. Only this PC, and Arty Desktop still asks you each time.</small>
+      </div>
+      <label class="switch"><input id="artyLink" type="checkbox" aria-label="Link to Arty Desktop"><span class="track"></span></label>
+    </div>
+    <div class="row" id="link-pairing" hidden>
+      <div class="what">
+        <strong>Pair with Arty Desktop</strong>
+        <small>In Arty Desktop open the tray menu, choose Link starfire, then Make a code. Type the 6 digits here within two minutes.</small>
+        <input id="link-code" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" maxlength="7" placeholder="123 456" aria-label="Code from Arty Desktop">
+      </div>
+      <button id="link-pair" type="button">Pair</button>
+    </div>
+    <div class="row" id="link-paired" hidden>
+      <div class="what">
+        <strong>Paired with Arty Desktop</strong>
+        <small id="link-detail"></small>
+      </div>
+      <div class="pair-actions">
+        <button id="link-test" type="button">Try it</button>
+        <button id="link-unpair" type="button">Unpair</button>
+      </div>
+    </div>
     <p id="status" class="status" role="status" aria-live="polite"></p>
   </main>
   <script src="settings.js"></script>

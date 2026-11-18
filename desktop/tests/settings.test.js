@@ -3,7 +3,9 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { DEFAULT_SETTINGS, loadSettings, saveSettings, applySettingsPatch } = require('../src/settings');
+const { DEFAULT_SETTINGS, loadSettings, saveSettings, applySettingsPatch, publicSettings, withArtyToken } = require('../src/settings');
+
+const NO_UNIX_PERMISSIONS = process.platform === 'win32' && 'Windows has no Unix permission bits';
 
 function scratchFile() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sfd-settings-'));
@@ -18,6 +20,9 @@ test('defaults are no address, https only, Ctrl+Shift+Space, notifications on, n
     startWithSystem: false,
     notifications: true,
     closeToTray: true,
+    artyLink: false,
+    artyToken: '',
+    artyPort: 8765,
   });
 });
 
@@ -38,7 +43,7 @@ test('a corrupt file gives the defaults and says why', () => {
   fs.rmSync(dir, { recursive: true });
 });
 
-test('saving then loading returns the same settings, privately and without leftovers', () => {
+test('saving then loading returns the same settings, privately and without leftovers', { skip: NO_UNIX_PERMISSIONS }, () => {
   const { dir, file } = scratchFile();
   const settings = { ...DEFAULT_SETTINGS, address: 'https://starfire.example.com', shortcut: 'Ctrl+Alt+K', startWithSystem: true };
   saveSettings(file, settings);
@@ -115,4 +120,62 @@ test('clearing the tick box while the address is http is refused', () => {
   const current = { ...DEFAULT_SETTINGS, address: 'http://10.0.0.2:8080', allowInsecure: true };
   const result = applySettingsPatch(current, { allowInsecure: false });
   assert.equal(result.ok, false);
+});
+
+const GOOD_TOKEN = 'abcdefghijklmnopqrstuvwxyz0123456789_-ABCDE';
+
+test('the Arty link is off by default and a stored token only loads when it looks like one', () => {
+  const { dir, file } = scratchFile();
+  fs.writeFileSync(file, JSON.stringify({ artyLink: true, artyToken: GOOD_TOKEN, artyPort: 8800 }));
+  const { settings } = loadSettings(file);
+  assert.equal(settings.artyLink, true);
+  assert.equal(settings.artyToken, GOOD_TOKEN);
+  assert.equal(settings.artyPort, 8800);
+  for (const bad of ['', 'short', 'has spaces in it and more more more more', 'x'.repeat(300), 42, null, ['a']]) {
+    fs.writeFileSync(file, JSON.stringify({ artyToken: bad }));
+    assert.equal(loadSettings(file).settings.artyToken, '', String(bad));
+  }
+  fs.rmSync(dir, { recursive: true });
+});
+
+test('a stored port must be a whole number from 1024 up', () => {
+  const { dir, file } = scratchFile();
+  for (const bad of [80, 1023, 65536, 8765.5, '8765', null, -1, Number.NaN]) {
+    fs.writeFileSync(file, JSON.stringify({ artyPort: bad }));
+    assert.equal(loadSettings(file).settings.artyPort, 8765, String(bad));
+  }
+  fs.rmSync(dir, { recursive: true });
+});
+
+test('the saved file holds the token privately', { skip: NO_UNIX_PERMISSIONS }, () => {
+  const { dir, file } = scratchFile();
+  saveSettings(file, { ...DEFAULT_SETTINGS, artyLink: true, artyToken: GOOD_TOKEN });
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+  assert.equal(loadSettings(file).settings.artyToken, GOOD_TOKEN);
+  fs.rmSync(dir, { recursive: true });
+});
+
+test('a patch can switch the link but never set the token or the port', () => {
+  const current = { ...DEFAULT_SETTINGS };
+  assert.equal(applySettingsPatch(current, { artyLink: true }).settings.artyLink, true);
+  assert.equal(applySettingsPatch(current, { artyLink: 'yes' }).ok, false);
+  const token = applySettingsPatch(current, { artyToken: GOOD_TOKEN });
+  assert.equal(token.ok, false);
+  assert.match(token.error, /artyToken/);
+  assert.equal(applySettingsPatch(current, { artyPort: 9000 }).ok, false);
+});
+
+test('the pages see whether Arty is paired but never the token', () => {
+  const shown = publicSettings({ ...DEFAULT_SETTINGS, artyToken: GOOD_TOKEN, artyLink: true });
+  assert.equal(shown.artyPaired, true);
+  assert.equal('artyToken' in shown, false);
+  assert.equal(JSON.stringify(shown).includes(GOOD_TOKEN), false);
+  assert.equal(publicSettings({ ...DEFAULT_SETTINGS }).artyPaired, false);
+});
+
+test('a new token is checked, and an empty one forgets the pairing', () => {
+  const current = { ...DEFAULT_SETTINGS, artyToken: GOOD_TOKEN };
+  assert.equal(withArtyToken(current, 'nope').ok, false);
+  assert.equal(withArtyToken(current, '').settings.artyToken, '');
+  assert.equal(withArtyToken({ ...DEFAULT_SETTINGS }, GOOD_TOKEN).settings.artyToken, GOOD_TOKEN);
 });
