@@ -32,6 +32,7 @@ import mcp_oauth
 import model_capabilities
 import model_voices
 import ollama_manager
+import screen_look
 import shell_tool
 from agent_loop import run_chat_with_tools
 from attachments import AttachmentError, AttachmentNoRoom, expand_attachments
@@ -877,7 +878,7 @@ def _task_chat_fn(endpoint_id, model, prompt, enabled_mcp_servers, enabled_built
     return run_chat_collected(
         endpoint.base_url, api_key, model, [{"role": "user", "content": prompt}],
         enabled_server_ids=set(enabled_mcp_servers),
-        enabled_builtin_tools=model_capabilities.tools_for_tier(tier, set(enabled_builtin_tools)),
+        enabled_builtin_tools=model_capabilities.tools_for_tier(tier, set(enabled_builtin_tools) - {builtin_tools.SCREEN_TOOL}),
         ctx=ctx, max_tools=model_capabilities.tool_cap_for_tier(tier),
     )
 
@@ -1379,6 +1380,7 @@ class ChatBody(BaseModel):
     require_edit_approval: bool | None = None
     require_shell_approval: bool | None = None
     earlier_untrusted_content: bool = False
+    desktop_screen: bool = False
     memory_commands: bool = False
     session_id: str = ""
     reply_index: int = -1
@@ -1561,7 +1563,10 @@ async def chat_stream_endpoint(body: ChatBody):
     if body.session_id and any(_carries_untrusted_content(m) for m in body.messages):
         _remember_untrusted_content(user_data.current_user_id.get(), body.session_id)
     auto_chose_own_tools = bool(pick) and _brings_own_tools(model)
-    tools_requested = bool(body.enabled_mcp_servers or body.enabled_builtin_tools) and not auto_chose_own_tools
+    screen_offered = body.desktop_screen and _current_user_is_active_admin()
+    requested_builtin_tools = (set(body.enabled_builtin_tools) - {builtin_tools.SCREEN_TOOL}) | (
+        {builtin_tools.SCREEN_TOOL} if screen_offered else set())
+    tools_requested = bool(body.enabled_mcp_servers or requested_builtin_tools) and not auto_chose_own_tools
     tools_usable = tools_requested and model_capabilities.supports_tools(endpoint.provider, model)
     if tools_usable:
         for server_id in body.enabled_mcp_servers:
@@ -1579,10 +1584,11 @@ async def chat_stream_endpoint(body: ChatBody):
                                                                       body.require_edit_approval),
                             interactive=True)
         ctx.untrusted_read = _turn_starts_with_untrusted_content(body)
+        ctx.desktop_screen = screen_offered
         tier = model_capabilities.tool_tier(endpoint.provider, model)
         generator = run_chat_with_tools(endpoint.base_url, api_key, model, messages,
                                           system, options, set(body.enabled_mcp_servers),
-                                          model_capabilities.tools_for_tier(tier, set(body.enabled_builtin_tools)), ctx,
+                                          model_capabilities.tools_for_tier(tier, requested_builtin_tools), ctx,
                                           max_tools=model_capabilities.tool_cap_for_tier(tier))
         if body.session_id:
             generator = _marking_the_chat_untrusted(generator, ctx, body.session_id)
@@ -2089,6 +2095,38 @@ async def reject_pending_shell(pending_id: str):
     if not shell_tool.resolve(pending_id, False, user_data.current_user_id.get()):
         raise HTTPException(404, "no command is waiting with that id")
     return {"rejected": True}
+
+class ScreenLookResultBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    ok: bool
+    image: str = Field("", max_length=screen_look.MAX_IMAGE_BASE64_CHARS)
+    mime: str = Field("", max_length=40)
+    target: str = Field("", max_length=120)
+    window: str = Field("", max_length=300)
+    note: str = Field("", max_length=400)
+    reason: str = Field("", max_length=40)
+    detail: str = Field("", max_length=screen_look.MAX_DETAIL_CHARS)
+
+@router.post("/screen-looks/{request_id}/claim")
+async def claim_screen_look(request_id: str):
+    _require_host_tool_access("look at the screen")
+    try:
+        return {"app": screen_look.claim(request_id, user_data.current_user_id.get())}
+    except screen_look.NotWaiting:
+        raise HTTPException(404, "no look is waiting with that id (already answered, timed out, or the server restarted)")
+    except screen_look.AlreadyClaimed:
+        raise HTTPException(409, "that look was already taken up")
+
+@router.post("/screen-looks/{request_id}/result")
+async def answer_screen_look(request_id: str, body: ScreenLookResultBody):
+    _require_host_tool_access("look at the screen")
+    try:
+        answered = screen_look.resolve(request_id, user_data.current_user_id.get(), body.model_dump())
+    except screen_look.BadPicture as error:
+        raise HTTPException(400, str(error))
+    if not answered:
+        raise HTTPException(404, "no look is waiting with that id")
+    return {"ok": True}
 
 @router.get("/pending-edits")
 async def list_pending_edits():
