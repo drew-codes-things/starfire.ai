@@ -1,0 +1,81 @@
+{
+  "name": "starfire-desktop",
+  "version": "1.0.0",
+  "productName": "starfire",
+  "description": "starfire.ai in its own window: your starfire, a tray icon, a quick-ask shortcut and notifications",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test tests/*.test.js",
+    "dist": "electron-builder --linux dir",
+    "appimage": "electron-builder --linux AppImage",
+    "installer": "electron-builder --win nsis --x64"
+  },
+  "license": "Apache-2.0",
+  "author": "drew-codes-things",
+  "devDependencies": {
+    "electron": "44.9.3",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "app.starfire.desktop",
+    "productName": "starfire",
+    "directories": {
+      "buildResources": "build",
+      "output": "release"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "pages/**/*",
+      "assets/**/*"
+    ],
+    "linux": {
+      "executableName": "starfire",
+      "category": "Network",
+      "icon": "build/icon.png",
+      "synopsis": "starfire.ai in its own window",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "dir",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "syncDesktopName": true
+    },
+    "appImage": {
+      "artifactName": "starfire-${version}-${arch}.AppImage"
+    },
+    "afterPack": "build/afterPack.js",
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "starfire-Setup-${version}.exe",
+      "shortcutName": "starfire",
+      "runAfterFinish": true
+    }
+  },
+  "desktopName": "starfire.desktop"
+}

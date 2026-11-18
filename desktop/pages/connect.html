@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>starfire</title>
+  <link rel="stylesheet" href="pages.css">
+</head>
+<body>
+  <main>
+    <div class="brand"><img src="../assets/icon.png" alt=""><span>starfire<b>.ai</b></span></div>
+    <h1 id="heading">Welcome to starfire</h1>
+    <p id="intro">Enter the address of your starfire to get started.</p>
+    <p id="detail" class="error-detail" hidden></p>
+    <div id="retry-actions" class="actions" hidden>
+      <button id="retry" class="primary" type="button">Try again</button>
+      <button id="show-form" type="button">Change address</button>
+    </div>
+    <form id="form" novalidate>
+      <label class="field" for="address">Your starfire address</label>
+      <input id="address" type="text" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="starfire.example.com">
+      <label class="check"><input id="insecure" type="checkbox"><span>This runs on my own computer or home network without https (localhost or a local address only)</span></label>
+      <div class="actions">
+        <button id="connect" class="primary" type="submit">Connect</button>
+        <button id="cancel" type="button" hidden>Cancel</button>
+      </div>
+    </form>
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+  </main>
+  <script src="connect.js"></script>
+</body>
+</html>
