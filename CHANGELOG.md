@@ -140,6 +140,14 @@
   file.
 
 ### Added
+- **starfire Desktop** (`desktop/`): an Electron app that opens your own starfire in its own window on Debian (AppImage;
+  the Windows installer is configured but not built yet). The first run asks for the address and only saves one that
+  answers `/api/health` like starfire; `http` is accepted only for localhost and local network addresses with an explicit
+  tick box. It stays signed in, has a tray icon (Open, Quick ask, Settings, Quit), an optional start with the PC, a global
+  quick-ask shortcut (Ctrl+Shift+Space, changeable in its settings) that sends a question as a new chat, and a notification
+  when a reply finishes while the window is hidden. The window runs sandboxed with context isolation, navigation and new
+  windows limited to your starfire's origin (other links open in the system browser), and its own pages carry a strict CSP.
+  It has its own red logo so it is not mixed up with Arty Desktop. Unit tests run in CI (`node --test desktop/tests/*.test.js`).
 - **Settings > Arty memory** for admins: list and search what Arty remembers, edit a fact in place, remove a
   fact or a whole name after a confirm, and add a fact. starfire relays each change to Arty's memory API with its
   own Arty connection (`GET /api/arty-memory`, `POST /api/arty-memory/add`, `/edit`, `/delete`) and shows Arty's

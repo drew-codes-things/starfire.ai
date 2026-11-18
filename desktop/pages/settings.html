@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>starfire settings</title>
+  <link rel="stylesheet" href="pages.css">
+</head>
+<body>
+  <main>
+    <div class="brand"><img src="../assets/icon.png" alt=""><span>starfire<b>.ai</b> settings</span></div>
+    <div class="row">
+      <div class="what">
+        <strong>Quick ask shortcut <kbd id="shortcut-value">Ctrl+Shift+Space</kbd></strong>
+        <small id="shortcut-help">Opens a small window to ask starfire something from anywhere.</small>
+      </div>
+      <button id="shortcut-change" type="button">Change</button>
+    </div>
+    <div class="row">
+      <div class="what">
+        <strong>Start with the PC</strong>
+        <small>Starts in the tray when you log in.</small>
+      </div>
+      <label class="switch"><input id="startWithSystem" type="checkbox" aria-label="Start with the PC"><span class="track"></span></label>
+    </div>
+    <div class="row">
+      <div class="what">
+        <strong>Notify when a reply finishes</strong>
+        <small>Only when the starfire window is hidden or in the background.</small>
+      </div>
+      <label class="switch"><input id="notifications" type="checkbox" aria-label="Notify when a reply finishes"><span class="track"></span></label>
+    </div>
+    <div class="row">
+      <div class="what">
+        <strong>Closing the window keeps starfire in the tray</strong>
+        <small>Turn off to quit when the window is closed.</small>
+      </div>
+      <label class="switch"><input id="closeToTray" type="checkbox" aria-label="Closing the window keeps starfire in the tray"><span class="track"></span></label>
+    </div>
+    <div class="row">
+      <div class="what">
+        <strong>Address</strong>
+        <small id="address-value"></small>
+      </div>
+      <button id="address-change" type="button">Change</button>
+    </div>
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+  </main>
+  <script src="settings.js"></script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>starfire quick ask</title>
+  <link rel="stylesheet" href="pages.css">
+</head>
+<body class="quick">
+  <div class="quick-bar"><img src="../assets/icon.png" alt=""><span>Ask starfire</span></div>
+  <form id="form" class="quick-body" novalidate>
+    <textarea id="question" aria-label="Your question" placeholder="Ask anything" spellcheck="true" autofocus></textarea>
+    <div class="quick-hint">
+      <span>Enter to ask, Shift+Enter for a new line, Esc to close</span>
+      <span id="status" class="status" role="status" aria-live="polite"></span>
+    </div>
+  </form>
+  <script src="quick-ask.js"></script>
+</body>
+</html>

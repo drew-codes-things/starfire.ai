@@ -840,11 +840,19 @@ stored keys unrecoverable.
   managed by the admin from Settings → Accounts
 - Runs 100% locally unless you opt in to a hosted provider - no telemetry, no cloud accounts
 
+## Desktop app
+
+[starfire Desktop](desktop/README.md) puts your starfire in its own window on Debian (AppImage) and, later, Windows:
+it asks for your starfire's address on first run, stays signed in, lives in the tray, opens a quick-ask window from a
+global shortcut (Ctrl+Shift+Space by default) and shows a notification when a reply finishes while the window is hidden.
+It is a small Electron shell in `desktop/`, separate from the server, and it only ever opens the address you give it.
+
 ## Development
 
 `pip install -r requirements.txt pytest pyflakes`, then `python -m pytest -q` for the server
 and the static-file checks, and `node --test tests/js/` for the browser logic in
-`static/uiLogic.js` and the inline theme script (Node 20 or newer, no packages to install).
+`static/uiLogic.js` and the inline theme script (Node 20 or newer, no packages to install); the desktop
+app has its own tests (`cd desktop && npm test`).
 The pages and scripts are served as written, with no build step; the server sends static
 files gzip-compressed to browsers that accept it and leaves API replies and streams alone.
 
