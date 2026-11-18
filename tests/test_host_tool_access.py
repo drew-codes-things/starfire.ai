@@ -14,14 +14,16 @@ import file_edit_tool
 import routes
 import shell_tool
 import user_data
+from host_sandbox import HostLimits
 
 
-def context(may_use_host_tools: bool):
+def context(may_use_host_tools: bool, workspace: str = ""):
     async def emit(event):
         return None
 
     return SimpleNamespace(may_use_host_tools=may_use_host_tools, require_edit_approval=False,
-                           require_shell_approval=False, events=None, emit=emit)
+                           require_shell_approval=False, events=None, emit=emit,
+                           host_limits=HostLimits(workspace=workspace))
 
 
 @pytest.mark.parametrize("name, arguments", [
@@ -41,7 +43,7 @@ def test_accounts_that_are_not_admins_cannot_use_host_tools(tmp_path, name, argu
 
 def test_admins_can_use_host_tools(tmp_path):
     target = tmp_path / "written.txt"
-    ctx = context(True)
+    ctx = context(True, workspace=str(tmp_path))
     asyncio.run(builtin_tools.call_builtin_tool("edit_file", {"path": str(target), "content": "hello"}, ctx))
     assert target.read_text() == "hello"
     result = asyncio.run(builtin_tools.call_builtin_tool("run_shell", {"command": "echo admin-ran"}, ctx))
@@ -73,7 +75,7 @@ def test_pending_edits_belong_to_the_account_that_started_them():
 
 
 def test_staged_edit_is_owned_by_the_current_account(tmp_path):
-    ctx = SimpleNamespace(may_use_host_tools=True, require_edit_approval=True)
+    ctx = SimpleNamespace(may_use_host_tools=True, require_edit_approval=True, host_limits=HostLimits(workspace=str(tmp_path)))
     with user_data.run_as("alice"):
         staged = asyncio.run(builtin_tools.call_builtin_tool(
             "edit_file", {"path": str(tmp_path / "f.txt"), "content": "x"}, ctx))

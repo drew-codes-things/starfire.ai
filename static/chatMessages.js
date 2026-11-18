@@ -17,9 +17,36 @@ function printLine(text, cls) {
   return div;
 }
 
+const MARKDOWN_SANITIZE_OPTIONS = {
+  FORBID_TAGS: ['style', 'form', 'input', 'textarea', 'button', 'select', 'option', 'meta', 'base', 'link'],
+  FORBID_ATTR: ['style', 'srcset', 'id', 'name', 'formaction'],
+};
+const MEDIA_SOURCE_ATTRIBUTES = ['src', 'poster'];
+
+function keepOnlyCodeLanguageClasses(node, data) {
+  if (data.attrName === 'class') data.keepAttr = isCodeLanguageClass(data.attrValue);
+}
+
+function dropOffSiteMediaSources(node) {
+  for (const name of MEDIA_SOURCE_ATTRIBUTES) {
+    if (node.hasAttribute && node.hasAttribute(name) && !isLocalMediaUrl(node.getAttribute(name), location.origin)) {
+      node.removeAttribute(name);
+    }
+  }
+}
+
+function installMarkdownGuards(purifier) {
+  purifier.addHook('uponSanitizeAttribute', keepOnlyCodeLanguageClasses);
+  purifier.addHook('afterSanitizeAttributes', dropOffSiteMediaSources);
+}
+
+if (window.DOMPurify) installMarkdownGuards(window.DOMPurify);
+
 function markdownRender(text) {
 
-  if (window.marked && window.DOMPurify) return window.DOMPurify.sanitize(window.marked.parse(text));
+  if (window.marked && window.DOMPurify) {
+    return window.DOMPurify.sanitize(window.marked.parse(text), MARKDOWN_SANITIZE_OPTIONS);
+  }
 
   return text.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 }
@@ -247,7 +274,7 @@ async function forkSession(uptoIdx, textBeingSent) {
 
 const ARTY_MEDIA = { image: /\.(png|jpe?g|gif|webp)$/i, video: /\.(mp4|webm|mov|m4v)$/i };
 
-const appConfig = { version: '', own_tools_models: ['Arty', 'assistant-core', 'arty/*'], inline_media_prefixes: ['/arty-files/'], voice_models: [] };
+const appConfig = { version: '', inline_media_prefixes: ['/arty-files/'], voice_models: [] };
 
 async function loadAppConfig() {
   try {
@@ -258,7 +285,6 @@ async function loadAppConfig() {
     const r = await fetch('/api/config');
     if (!r.ok) return;
     const data = await r.json();
-    if (Array.isArray(data.own_tools_models)) appConfig.own_tools_models = data.own_tools_models;
     if (Array.isArray(data.inline_media_prefixes)) appConfig.inline_media_prefixes = data.inline_media_prefixes;
     if (Array.isArray(data.voice_models)) appConfig.voice_models = data.voice_models;
     appConfig.version = data.version || '';
@@ -415,6 +441,7 @@ function toggleMessageInfo(row, idx) {
   const approxTokens = Math.ceil((m.content || '').length / CHARS_PER_TOKEN_ESTIMATE);
   info.textContent = [
     m.model ? 'model: ' + m.model : '',
+    m.auto ? 'chosen by Auto for ' + m.auto : '',
     m.created ? new Date(m.created).toLocaleString() : '',
     '~' + approxTokens + ' tokens (estimated)',
   ].filter(Boolean).join(' · ');
@@ -474,7 +501,7 @@ function autosizeEditTextarea(ta) {
 
 function renderStaticMessage(role, msg, idx) {
   const text = role === 'user' ? (msg.display ?? msg.content) : msg.content;
-  const { row, content, actions } = appendMessageRow(role, idx, msg.model, msg.files, msg.attachments);
+  const { row, content, actions } = appendMessageRow(role, idx, msg.model ? replyModelLabel(msg) : msg.model, msg.files, msg.attachments);
   if (role === 'ai') renderAiContent(content, text, msg.code_checks);
   else content.textContent = text;
   addActionButtons(role, row, actions, idx);
@@ -497,6 +524,114 @@ function addActionButtons(role, row, actions, idx) {
   addActionButton(actions, 'delete', 'Delete this reply', () => deleteMessage(idx));
 }
 
+const CHAT_STATS_REFRESH_MS = 250;
+const CHAT_STATS_PROBE_CHARS = 10;
+const CHAT_STATS_SLACK_CHARS = 1;
+const SVG_NS = 'http://www.w3.org/2000/svg';
+const RING_CENTRE = 10;
+const RING_RADIUS = 8;
+const RING_PATH_LENGTH = 100;
+
+function chatStatsCharWidth(bar) {
+  const probe = document.createElement('span');
+  probe.className = 'chat-stats-probe';
+  probe.textContent = '0'.repeat(CHAT_STATS_PROBE_CHARS);
+  bar.appendChild(probe);
+  const width = probe.getBoundingClientRect().width / CHAT_STATS_PROBE_CHARS;
+  probe.remove();
+  return width;
+}
+
+function ringCircle(className) {
+  const circle = document.createElementNS(SVG_NS, 'circle');
+  circle.setAttribute('class', className);
+  circle.setAttribute('cx', RING_CENTRE);
+  circle.setAttribute('cy', RING_CENTRE);
+  circle.setAttribute('r', RING_RADIUS);
+  circle.setAttribute('pathLength', RING_PATH_LENGTH);
+  return circle;
+}
+
+function contextRing(item) {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('class', 'chat-stats-ring' + (item.nearlyFull ? ' nearly-full' : ''));
+  svg.setAttribute('viewBox', `0 0 ${RING_CENTRE * 2} ${RING_CENTRE * 2}`);
+  svg.setAttribute('aria-hidden', 'true');
+  const used = ringCircle('chat-stats-ring-used');
+  used.setAttribute('stroke-dasharray', `${item.share * RING_PATH_LENGTH} ${RING_PATH_LENGTH}`);
+  used.setAttribute('transform', `rotate(-90 ${RING_CENTRE} ${RING_CENTRE})`);
+  svg.append(ringCircle('chat-stats-ring-track'), used);
+  return svg;
+}
+
+function chatStatsGroupNode(group) {
+  const node = document.createElement('span');
+  node.className = 'chat-stats-group';
+  if (group.icon === RING_MARK) node.appendChild(contextRing(group.items[0]));
+  else node.insertAdjacentHTML('beforeend', icon(group.icon, 'chat-stats-icon'));
+  group.items.forEach((item, index) => {
+    if (index > 0 && !item.joinsWithSpace) {
+      const dot = document.createElement('span');
+      dot.className = 'chat-stats-dot';
+      dot.textContent = '·';
+      node.appendChild(dot);
+    }
+    const text = document.createElement('span');
+    text.className = 'chat-stats-item' + (item.joinsWithSpace ? ' after-space' : '') + (item.estimated ? ' estimated' : '');
+    text.dataset.item = item.key;
+    text.textContent = item.text;
+    node.appendChild(text);
+  });
+  return node;
+}
+
+function showChatStats(meter = null) {
+  const bar = els.chatStats;
+  const hasChat = messages.length > 0 || !!meter;
+  bar.hidden = !hasChat;
+  if (!hasChat) return;
+  const groups = statusGroups(chatStats(messages, meter));
+  const summary = statusSummary(groups);
+  const fitsChars = Math.floor(bar.clientWidth / chatStatsCharWidth(bar)) - CHAT_STATS_SLACK_CHARS;
+  const shown = document.createElement('span');
+  shown.className = 'chat-stats-line';
+  shown.setAttribute('aria-hidden', 'true');
+  shown.append(...fitStatusGroups(groups, fitsChars).map(chatStatsGroupNode));
+  const spoken = document.createElement('span');
+  spoken.className = 'sr-only';
+  spoken.textContent = summary;
+  bar.title = summary;
+  bar.replaceChildren(spoken, shown);
+}
+
+function chatStatsFollower() {
+  let timer = null;
+  let live = null;
+  const draw = () => {
+    timer = null;
+    showChatStats(live);
+  };
+  return {
+    follow(meter) {
+      live = meter;
+      if (timer === null) timer = setTimeout(draw, CHAT_STATS_REFRESH_MS);
+    },
+    stop() {
+      live = null;
+      clearTimeout(timer);
+      timer = null;
+      showChatStats();
+    },
+    redraw() {
+      showChatStats(live);
+    },
+  };
+}
+
+const liveChatStats = chatStatsFollower();
+
+if (window.ResizeObserver) new ResizeObserver(() => liveChatStats.redraw()).observe(els.chatStats);
+
 function rerenderAll() {
   els.output.innerHTML = '';
   messages.forEach((m, idx) => {
@@ -505,6 +640,7 @@ function rerenderAll() {
   });
   if (!messages.length) renderWelcome();
   showOpenApprovals();
+  liveChatStats.redraw();
 }
 
 function rerenderInPlace() {
@@ -518,7 +654,7 @@ function welcomeBody() {
   if (models.length) {
     const model = currentModel();
     return '<p class="info-line">Local-first AI chat. How can I help?</p>' +
-      `<p class="welcome-model">${escapeHtml(model ? model.id : '')}</p>`;
+      `<p class="welcome-model">${escapeHtml(model ? modelPickerText(model) : '')}</p>`;
   }
   if (!document.body.classList.contains('is-admin')) {
     return '<p class="info-line">No models yet. Ask an admin to add a connection.</p>';

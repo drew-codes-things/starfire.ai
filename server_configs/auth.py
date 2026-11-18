@@ -18,9 +18,13 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 import user_data
 from atomic_io import atomic_write_json
+from config import config
 
-SESSION_COOKIE = "starfire_session"
+LEGACY_SESSION_COOKIE = "starfire_session"
+SECURE_SESSION_COOKIE = "__Host-" + LEGACY_SESSION_COOKIE
+SESSION_COOKIE = SECURE_SESSION_COOKIE if config.cookie_secure else LEGACY_SESSION_COOKIE
 SESSION_LIFETIME_SECONDS = 30 * 24 * 3600
+LEGACY_COOKIE_ISSUED_UNTIL = datetime(2026, 11, 18, 13, 30, tzinfo=timezone.utc).timestamp()
 MAX_FAILED_LOGINS = 5
 LOCKOUT_SECONDS = 15 * 60
 ACCOUNT_MAX_FAILED_LOGINS = 20
@@ -28,6 +32,9 @@ ACCOUNT_LOCKOUT_SECONDS = 60 * 60
 KNOWN_ADDRESS_SECONDS = 90 * 24 * 3600
 MAX_KNOWN_ADDRESSES = 20
 MAX_LIMITER_KEYS = 10_000
+LOGIN_ATTEMPTS_PER_ADDRESS = 10
+LOGIN_ATTEMPT_WINDOW_SECONDS = 60
+WRONG_CURRENT_PASSWORD = "your current password is wrong"
 LOGIN_PAGE = "/login.html"
 SETUP_PAGE = "/setup.html"
 PUBLIC_PATHS = frozenset({LOGIN_PAGE, "/login.js", "/loginNext.js", "/style.css", "/vendor/fonts.css", "/api/auth/login",
@@ -71,7 +78,8 @@ def _now_iso() -> str:
 ADMIN_ONLY_PREFIXES = ("/api/model-endpoints", "/api/mcp/servers", "/api/comfyui", "/api/piper",
                        "/api/custom-workflows", "/api/hardware", "/api/restore", "/api/auth/users")
 ADMIN_ONLY_PATHS = frozenset({"/api/backup"})
-ADMIN_ONLY_FOR_EVERY_METHOD = ("/api/arty-devices", "/api/arty-cli", "/api/browse-dir", "/api/discover", "/api/hardware")
+ADMIN_ONLY_FOR_EVERY_METHOD = ("/api/arty-devices", "/api/arty-cli", "/api/browse-dir", "/api/discover", "/api/hardware",
+                               "/api/model-endpoints", "/api/comfyui/config", "/api/piper/config")
 READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 
@@ -230,7 +238,7 @@ class UserStore:
     def change_password(self, user_id: str, current: str, password: str, confirm: str) -> None:
         user = self.find_by_id(user_id)
         if not user or not self.verify(user.email, current[:MAX_FIELD_CHARS]):
-            raise AccountError("your current password is wrong")
+            raise AccountError(WRONG_CURRENT_PASSWORD)
         check_new_password(password, confirm)
         with self._lock:
             users = self.list()
@@ -307,7 +315,7 @@ class SessionStore:
         with self._lock:
             sessions = self._live(_read_json(self.path, dict), now)
             sessions[_token_digest(token)] = {"user_id": user_id, "expires": now + SESSION_LIFETIME_SECONDS,
-                                              "hosts": hosts}
+                                              "hosts": hosts, "created": now}
             atomic_write_json(self.path, sessions)
             os.chmod(self.path, 0o600)
         return token
@@ -321,6 +329,13 @@ class SessionStore:
         if host is not None and normalise_host(host) not in session.get("hosts", []):
             return None
         return session.get("user_id")
+
+    def issued_before(self, token: str, moment: float) -> bool:
+        session = _read_json(self.path, dict).get(_token_digest(token)) if token else None
+        if not session:
+            return False
+        created = session.get("created", session.get("expires", 0) - SESSION_LIFETIME_SECONDS)
+        return created < moment
 
     def revoke(self, token: str) -> None:
         with self._lock:
@@ -378,6 +393,17 @@ class LoginLimiter:
     def reset(self, key: str) -> None:
         with self._lock:
             self._failures.pop(key, None)
+
+    def take_attempt(self, key: str) -> int:
+        now = time.time()
+        with self._lock:
+            recent = self._recent(key, now)
+            if len(recent) >= self.max_failures:
+                return int(self.lockout_seconds - (now - recent[0])) + 1
+            self._forget_expired(now)
+            self._make_room_for(key)
+            self._failures[key] = recent + [now]
+            return 0
 
 
 class KnownAddresses:
@@ -471,8 +497,44 @@ def _is_local_identity_check(request: Request, sessions: SessionStore) -> bool:
             and request_host(request) in sessions.identity_check_hosts)
 
 
+def session_token(request: Request) -> str:
+    return request.cookies.get(SESSION_COOKIE) or request.cookies.get(LEGACY_SESSION_COOKIE, "")
+
+
+def holds_only_legacy_cookie(request: Request) -> bool:
+    return (SESSION_COOKIE != LEGACY_SESSION_COOKIE and SESSION_COOKIE not in request.cookies
+            and LEGACY_SESSION_COOKIE in request.cookies)
+
+
+def accepted_session_token(request: Request, sessions: SessionStore) -> str:
+    if not holds_only_legacy_cookie(request):
+        return request.cookies.get(SESSION_COOKIE, "")
+    legacy = request.cookies.get(LEGACY_SESSION_COOKIE, "")
+    return legacy if sessions.issued_before(legacy, LEGACY_COOKIE_ISSUED_UNTIL) else ""
+
+
+def all_session_tokens(request: Request) -> list[str]:
+    return [token for token in (request.cookies.get(SESSION_COOKIE), request.cookies.get(LEGACY_SESSION_COOKIE))
+            if token]
+
+
+def sets_session_cookie(response) -> bool:
+    return any(header.startswith(SESSION_COOKIE + "=") for header in response.headers.getlist("set-cookie"))
+
+
+def set_session_cookie(response, token: str) -> None:
+    response.set_cookie(SESSION_COOKIE, token, max_age=SESSION_LIFETIME_SECONDS,
+                        httponly=True, secure=config.cookie_secure, samesite="lax", path="/")
+    forget_legacy_cookie(response)
+
+
+def forget_legacy_cookie(response) -> None:
+    if SESSION_COOKIE != LEGACY_SESSION_COOKIE:
+        response.delete_cookie(LEGACY_SESSION_COOKIE, path="/")
+
+
 def current_user(request: Request, users: UserStore, sessions: SessionStore) -> User | None:
-    token = request.cookies.get(SESSION_COOKIE, "")
+    token = accepted_session_token(request, sessions)
     any_host = None if _is_local_identity_check(request, sessions) else request_host(request)
     user_id = sessions.user_id_for(token, any_host)
     user = users.find_by_id(user_id) if user_id else None
@@ -528,9 +590,12 @@ def install(app: FastAPI, users: UserStore, sessions: SessionStore) -> None:
             request.state.user = user
             token = user_data.current_user_id.set(user.id)
             try:
-                return await call_next(request)
+                response = await call_next(request)
             finally:
                 user_data.current_user_id.reset(token)
+            if holds_only_legacy_cookie(request) and not sets_session_cookie(response):
+                set_session_cookie(response, accepted_session_token(request, sessions))
+            return response
         if request.url.path.startswith("/api/"):
             return JSONResponse({"detail": "not logged in"}, status_code=401)
         return RedirectResponse(login_redirect(request), status_code=303)

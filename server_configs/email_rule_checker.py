@@ -6,6 +6,7 @@ import logging
 import email_client
 import user_data
 from email_store import EmailAccountStore, EmailRule, EmailRuleStore
+from mail_runner import mail_runner
 from note_store import NoteStore
 
 logger = logging.getLogger(__name__)
@@ -14,8 +15,9 @@ TICK_SECONDS = 120
 
 class EmailRuleChecker:
     def __init__(self, rules: EmailRuleStore, accounts: EmailAccountStore, get_password, chat_fn, notes: NoteStore,
-                 user_ids_fn=None):
+                 user_ids_fn=None, private_hosts_fn=None):
         self.rules = rules
+        self.private_hosts_fn = private_hosts_fn or (lambda: False)
         self.accounts = accounts
         self.get_password = get_password
         self.chat_fn = chat_fn
@@ -53,6 +55,9 @@ class EmailRuleChecker:
             if rule.enabled:
                 await self._check_rule(rule)
 
+    def _mail(self, action, *args, **kwargs):
+        return mail_runner.run(user_data.current_user_id.get() or "", None, action, *args, **kwargs)
+
     async def _check_rule(self, rule: EmailRule):
         account = self.accounts.get(rule.account_id)
         if not account:
@@ -61,7 +66,8 @@ class EmailRuleChecker:
         if not password:
             return
         try:
-            messages = await asyncio.to_thread(email_client.list_messages, account, password, rule.folder)
+            messages = await self._mail(email_client.list_messages, account, password, rule.folder,
+                                              allow_private_hosts=self.private_hosts_fn())
         except Exception as e:
             logger.warning("email rule %s: could not list messages: %s", rule.id, e)
             return
@@ -91,11 +97,14 @@ class EmailRuleChecker:
         uid = message["uid"]
         try:
             if rule.action == "mark_read":
-                await asyncio.to_thread(email_client.mark_read, account, password, rule.folder, uid)
+                await self._mail(email_client.mark_read, account, password, rule.folder, uid,
+                                        allow_private_hosts=self.private_hosts_fn())
             elif rule.action == "archive":
-                await asyncio.to_thread(email_client.archive_message, account, password, rule.folder, uid)
+                await self._mail(email_client.archive_message, account, password, rule.folder, uid,
+                                        allow_private_hosts=self.private_hosts_fn())
             elif rule.action == "delete":
-                await asyncio.to_thread(email_client.delete_message, account, password, rule.folder, uid)
+                await self._mail(email_client.delete_message, account, password, rule.folder, uid,
+                                        allow_private_hosts=self.private_hosts_fn())
             elif rule.action == "add_note":
                 self.notes.add(
                     title=f"Email: {message.get('subject') or '(no subject)'}",
@@ -103,7 +112,8 @@ class EmailRuleChecker:
                     source="agent",
                 )
             elif rule.action == "ai_summarize_note":
-                full = await asyncio.to_thread(email_client.read_message, account, password, rule.folder, uid, False)
+                full = await self._mail(email_client.read_message, account, password, rule.folder, uid, False,
+                                               allow_private_hosts=self.private_hosts_fn())
                 prompt = (f"Summarize this email in 2-3 sentences.\n\nFrom: {full['from']}\n"
                           f"Subject: {full['subject']}\n\n{full['body']}")
                 summary = await self.chat_fn(rule.endpoint_id, rule.model, prompt)

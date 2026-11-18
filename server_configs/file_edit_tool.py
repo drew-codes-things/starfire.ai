@@ -5,6 +5,8 @@ import logging
 import os
 import uuid
 
+from host_sandbox import HostLimits
+
 logger = logging.getLogger(__name__)
 
 def read_current(path: str) -> str:
@@ -27,22 +29,49 @@ def make_diff(path: str, old_content: str, new_content: str) -> str:
     text = "".join(diff)
     return text or "(no changes - new content is identical to the current file)"
 
-def apply_edit(path: str, new_content: str) -> dict:
+class EditRefused(ValueError):
+    pass
+
+
+OUTSIDE_THE_ALLOWED_FOLDERS = ("edit_file can only change files in this account's starfire workspace folder or in a "
+                               "folder an admin allowed; use a path relative to the workspace")
+
+
+def _is_within(path: str, folder: str) -> bool:
+    return path == folder or path.startswith(folder.rstrip(os.sep) + os.sep)
+
+
+def resolve_target(path: str, limits: HostLimits) -> str:
+    if not limits.workspace:
+        raise EditRefused(OUTSIDE_THE_ALLOWED_FOLDERS)
+    workspace = os.path.realpath(limits.workspace)
+    target = os.path.realpath(os.path.join(workspace, os.path.expanduser(path)))
+    if _is_within(target, workspace) and target != workspace:
+        return target
+    if any(_is_within(target, os.path.realpath(folder)) for folder in limits.protected):
+        raise EditRefused(OUTSIDE_THE_ALLOWED_FOLDERS)
+    if any(_is_within(target, os.path.realpath(root)) for root in limits.edit_roots):
+        return target
+    raise EditRefused(OUTSIDE_THE_ALLOWED_FOLDERS)
+
+
+def apply_edit(path: str, new_content: str, limits: HostLimits) -> dict:
     try:
-        parent = os.path.dirname(os.path.abspath(path))
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
+        target = resolve_target(path, limits)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as f:
             f.write(new_content)
         return {"ok": True}
-    except OSError as e:
+    except (EditRefused, OSError) as e:
         return {"ok": False, "error": str(e)}
 
 _pending: dict[str, dict] = {}
 
-def stage(path: str, content: str, diff_text: str, owner: str | None) -> str:
+def stage(path: str, content: str, diff_text: str, owner: str | None, untrusted: bool = False) -> str:
     edit_id = uuid.uuid4().hex[:12]
-    _pending[edit_id] = {"id": edit_id, "owner": owner, "path": path, "content": content, "diff": diff_text}
+    _pending[edit_id] = {"id": edit_id, "owner": owner, "path": path, "content": content, "diff": diff_text,
+                         "untrusted": untrusted}
     return edit_id
 
 def get_pending(edit_id: str, owner: str | None) -> dict | None:

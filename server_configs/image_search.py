@@ -5,6 +5,7 @@ import re
 import httpx
 
 from deep_research import _block_unsafe_redirects, _resolves_to_public_address
+from public_fetch import public_only_client
 
 SEARCH_URL = "https://duckduckgo.com/"
 RESULTS_URL = "https://duckduckgo.com/i.js"
@@ -77,8 +78,8 @@ async def download(url: str, client: httpx.AsyncClient | None = None) -> tuple[b
         raise ImageSearchError("that image is hosted on a non-public address")
     own_client = client is None
     if own_client:
-        client = httpx.AsyncClient(timeout=15.0, follow_redirects=True, headers={"User-Agent": USER_AGENT},
-                                   event_hooks={"request": [_block_unsafe_redirects]})
+        client = public_only_client(timeout=15.0, follow_redirects=True, headers={"User-Agent": USER_AGENT},
+                                    event_hooks={"request": [_block_unsafe_redirects]})
     try:
         async with client.stream("GET", url) as response:
             response.raise_for_status()

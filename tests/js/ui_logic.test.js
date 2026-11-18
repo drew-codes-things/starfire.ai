@@ -128,9 +128,61 @@ test('waiting approvals become cards the chat can draw', () => {
     [{ id: 'def456', path: '/srv/app.yaml', diff: '--- a\n+++ b', content: 'secret file body' }],
   );
   assert.deepEqual(cards, [
-    { kind: 'shell', id: 'abc123', data: { pending_id: 'abc123', command: 'df -h', cwd: '/srv' } },
-    { kind: 'edit', id: 'def456', data: { staged: true, pending_id: 'def456', path: '/srv/app.yaml', diff: '--- a\n+++ b' } },
+    { kind: 'shell', id: 'abc123', data: { pending_id: 'abc123', command: 'df -h', cwd: '/srv', tool: 'run_shell', untrusted: false } },
+    { kind: 'edit', id: 'def456', data: { staged: true, pending_id: 'def456', path: '/srv/app.yaml', diff: '--- a\n+++ b', untrusted: false } },
   ]);
+});
+
+test('a waiting card keeps which tool asked and whether untrusted content was read first', () => {
+  const [memory, edit] = logic.pendingApprovalCards(
+    [{ id: 'm1', command: '{"action": "add"}', tool: 'manage_memory', untrusted: true }],
+    [{ id: 'e1', path: '/w/a.txt', diff: '', untrusted: true }],
+  );
+  assert.equal(memory.data.tool, 'manage_memory');
+  assert.equal(memory.data.untrusted, true);
+  assert.equal(edit.data.untrusted, true);
+  assert.equal(logic.pendingApprovalCards([{ id: 'x', untrusted: 'yes' }], [])[0].data.untrusted, false);
+});
+
+test('an approval card says which tool is waiting', () => {
+  assert.equal(logic.approvalHeading({ tool: 'run_shell' }), 'shell command - waiting for your approval');
+  assert.equal(logic.approvalHeading({}), 'shell command - waiting for your approval');
+  assert.equal(logic.approvalHeading({ tool: 'manage_email' }), 'manage_email - waiting for your approval to run with these details');
+  assert.equal(logic.approvalHeading({ tool: 'mcp__files__write_file' }), 'write_file - waiting for your approval to run with these details');
+  assert.match(logic.UNTRUSTED_APPROVAL_NOTE, /untrusted content/i);
+});
+
+function cardText(fields) {
+  return JSON.stringify(fields, null, 2);
+}
+
+test('an approval card heading names the action, the recipient and the mailbox of the call', () => {
+  const shown = cardText({ action: 'send', to: 'attacker@evil.example', account_id: 'box1', body: 'x'.repeat(18000) });
+  assert.equal(
+    logic.approvalHeading({ tool: 'manage_email', command: shown }),
+    'manage_email (action: "send", to: "attacker@evil.example", account_id: "box1") - waiting for your approval to run with these details',
+  );
+  assert.equal(
+    logic.approvalHeading({ tool: 'manage_email', command: cardText({ action: 'send', to: ['a@x.example', 'b@y.example'], body: 'hi' }) }),
+    'manage_email (action: "send", to: [ "a@x.example", "b@y.example" ]) - waiting for your approval to run with these details',
+  );
+  assert.equal(
+    logic.approvalHeading({ tool: 'manage_tasks', command: cardText({ action: 'create', prompt: 'p' }) }),
+    'manage_tasks (action: "create") - waiting for your approval to run with these details',
+  );
+  assert.equal(logic.approvalHeading({ tool: 'run_shell', command: cardText({ action: 'send' }) }),
+    'shell command - waiting for your approval');
+  assert.equal(logic.approvalHeading({ tool: 'manage_notes', command: 'not json' }),
+    'manage_notes - waiting for your approval to run with these details');
+});
+
+test('a long or padded value in an approval heading is shortened where everyone can see it', () => {
+  const padded = cardText({ action: 'send', to: ' '.repeat(5000) + 'attacker@evil.example' });
+  assert.match(logic.approvalHeading({ tool: 'manage_email', command: padded }), /to: " attacker@evil\.example"/);
+  const long = cardText({ action: 'send', to: 'a'.repeat(1000) + '@evil.example' });
+  const heading = logic.approvalHeading({ tool: 'manage_email', command: long });
+  assert.ok(heading.length < 600, heading.length);
+  assert.match(heading, /… \(\d+ more characters, see the full call below\)/);
 });
 
 test('missing or malformed approval lists give no cards', () => {
@@ -423,4 +475,54 @@ test('adding a local server says when it was stored as OpenAI-compatible', () =>
   assert.equal(logic.addedLocalMessage({ kind: 'openai-compatible', base_url: 'http://localhost:1234/v1' }),
     'added http://localhost:1234/v1 as an OpenAI-compatible server: it has no Ollama API, so it is used for chat '
     + 'but not for memory search or pulls');
+});
+
+test('only media from starfire itself, data: or blob: may load in a chat message', () => {
+  const origin = 'https://starfire.example';
+  assert.equal(logic.isLocalMediaUrl('/api/generated/abc', origin), true);
+  assert.equal(logic.isLocalMediaUrl('assets/logo.svg', origin), true);
+  assert.equal(logic.isLocalMediaUrl('data:image/png;base64,AAAA', origin), true);
+  assert.equal(logic.isLocalMediaUrl('blob:https://starfire.example/1-2', origin), true);
+  assert.equal(logic.isLocalMediaUrl('https://exfil.invalid/p.png?d=SECRET', origin), false);
+  assert.equal(logic.isLocalMediaUrl('//exfil.invalid/p.png', origin), false);
+  assert.equal(logic.isLocalMediaUrl('https://starfire.example.exfil.invalid/p.png', origin), false);
+  assert.equal(logic.isLocalMediaUrl('http://[::1', origin), false);
+});
+
+test('a chat message may only carry code language classes, never the page\'s own classes', () => {
+  assert.equal(logic.isCodeLanguageClass('language-python'), true);
+  assert.equal(logic.isCodeLanguageClass('language-c++ language-cpp'), true);
+  assert.equal(logic.isCodeLanguageClass('diff-card shell-card'), false);
+  assert.equal(logic.isCodeLanguageClass('language-js btn'), false);
+  assert.equal(logic.isCodeLanguageClass(''), false);
+});
+
+test('a tool that was refused shows as blocked, one that broke as failed, and only a real result as done', () => {
+  assert.deepEqual(logic.toolOutcome('{"applied": true}'), { state: 'done', reason: '' });
+  assert.equal(logic.toolOutcome("error: only an admin account can use edit_file, because it acts directly on the server").state, 'blocked');
+  assert.equal(logic.toolOutcome('error: the user rejected this command, so it was not run').state, 'blocked');
+  assert.equal(logic.toolOutcome('error: the user did not approve this gh command within 5 minutes, so it was not run').state, 'blocked');
+  assert.equal(logic.toolOutcome("error: edit_file can only change files in this account's starfire workspace folder").state, 'blocked');
+  assert.equal(logic.toolOutcome('error: failed to start command: there is no folder /x').state, 'failed');
+  assert.equal(logic.toolOutcome(undefined).state, 'done');
+});
+
+test('the chat line names the tool and says blocked or failed with the reason instead of done', () => {
+  assert.deepEqual(logic.toolOutcomeLine('edit_file', 'error: only an admin account can use edit_file, because it acts directly on the server'),
+    { text: '» edit_file blocked: only an admin account can use edit_file, because it acts directly on the server', cls: 'err' });
+  assert.deepEqual(logic.toolOutcomeLine('mcp__files__write_file', 'error: disk full'),
+    { text: '» write_file failed: disk full', cls: 'err' });
+  assert.deepEqual(logic.toolOutcomeLine('manage_notes', 'added'), { text: '» manage_notes done', cls: 'info' });
+  const long = logic.toolOutcomeLine('run_shell', 'error: ' + 'x'.repeat(500));
+  assert.equal(long.text.length, '» run_shell failed: '.length + 201);
+});
+
+test('the models an admin types for an account become a list, and blank means the default', () => {
+  assert.deepEqual(logic.modelPatternsFrom('qwen3:14b, llama*\n own/example-uncensored ,'), ['qwen3:14b', 'llama*', 'own/example-uncensored']);
+  assert.equal(logic.modelPatternsFrom('  ,  '), null);
+  assert.equal(logic.modelPatternsFrom(''), null);
+  assert.equal(logic.modelAccessSummary(null), 'every model except the restricted ones');
+  assert.equal(logic.modelAccessSummary([]), 'no models');
+  assert.match(logic.modelAccessHint(['*-abl', '*uncensored*']), /restricted ones \(\*-abl, \*uncensored\*\)/);
+  assert.match(logic.modelAccessHint([]), /only opened by its full name/);
 });

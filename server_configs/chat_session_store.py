@@ -30,6 +30,7 @@ class ChatSession:
     tags: list[str] = field(default_factory=list)
     system_prompt: str | None = None
     params: dict | None = None
+    untrusted_content: bool = False
     created: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -61,6 +62,7 @@ class ChatSessionStore:
                 folder_id=item.get("folder_id", ""), archived=item.get("archived", False),
                 tags=item.get("tags") or [],
                 system_prompt=item.get("system_prompt"), params=item.get("params"),
+                untrusted_content=item.get("untrusted_content") is True,
                 created=item.get("created", ""), updated=item.get("updated", ""),
             ))
         return sessions
@@ -130,7 +132,7 @@ class ChatSessionStore:
         return self.add(title=f"Clone of {source.title}", messages=copy.deepcopy(source.messages),
                         endpoint_id=source.endpoint_id, model=source.model, folder_id=source.folder_id,
                         tags=list(source.tags), system_prompt=source.system_prompt,
-                        params=copy.deepcopy(source.params))
+                        params=copy.deepcopy(source.params), untrusted_content=source.untrusted_content)
 
     @holds_file_lock()
     def update(self, session_id: str, **fields) -> bool:
@@ -148,6 +150,20 @@ class ChatSessionStore:
         if found:
             self._save(sessions)
         return found
+
+    @holds_file_lock()
+    def place_reply(self, session_id: str, reply_index: int, reply: dict) -> bool:
+        sessions = self._load()
+        session = next((s for s in sessions if s.id == session_id), None)
+        if not session or reply_index < 1 or len(session.messages) != reply_index:
+            return False
+        asked = session.messages[reply_index - 1]
+        if not isinstance(asked, dict) or asked.get("role") != "user":
+            return False
+        session.messages.append(reply)
+        session.updated = datetime.now(timezone.utc).isoformat()
+        self._save(sessions)
+        return True
 
     @holds_file_lock()
     def delete(self, session_id: str) -> bool:

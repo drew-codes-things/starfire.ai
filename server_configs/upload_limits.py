@@ -5,11 +5,22 @@ import shutil
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
+KIB = 1024
 MIB = 1024 * 1024
 ATTACHMENT_BODY_MB = 301
 DOCUMENT_PATH = "/api/documents"
 ATTACHMENT_PATH = "/api/attachments"
 RESTORE_PATH = "/api/restore"
+CHAT_IMPORT_PATH = "/api/chat/sessions/import"
+BODY_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+DEFAULT_BODY_BYTES = 32 * MIB
+CHAT_IMPORT_BODY_BYTES = 128 * MIB
+SMALL_BODY_PREFIXES = (
+    ("/api/auth/", 64 * KIB),
+    ("/api/memory", 256 * KIB),
+    ("/api/code-check", 1 * MIB),
+    ("/api/notes", 8 * MIB),
+)
 
 
 def room_on_disk(path: str, reserve_mb: int) -> int:
@@ -33,6 +44,12 @@ def body_caps(settings) -> dict[str, int]:
     }
 
 
+def request_body_cap(path: str) -> int:
+    if path == CHAT_IMPORT_PATH:
+        return CHAT_IMPORT_BODY_BYTES
+    return next((cap for prefix, cap in SMALL_BODY_PREFIXES if path.startswith(prefix)), DEFAULT_BODY_BYTES)
+
+
 def _declared_length(scope) -> int | None:
     for name, value in scope.get("headers", []):
         if name == b"content-length":
@@ -44,6 +61,7 @@ def _declared_length(scope) -> int | None:
 
 
 TOO_LARGE = (413, "that upload is too large")
+REQUEST_TOO_LARGE = (413, "that request is too large")
 NO_ROOM = (507, "there isn't enough free disk space for that upload - free some space and try again")
 
 
@@ -53,19 +71,28 @@ class LimitUploadBodies:
         self.app = app
         self.settings = settings
 
-    def _refusal(self, size: int, cap: int, room: int) -> tuple[int, str] | None:
-        if size > room:
+    def _refusal(self, size: int, cap: int, room: int | None) -> tuple[int, str] | None:
+        is_upload = room is not None
+        if is_upload and size > room:
             return NO_ROOM
         if size > cap:
-            return TOO_LARGE
+            return TOO_LARGE if is_upload else REQUEST_TOO_LARGE
         return None
 
+    def _limits(self, scope) -> tuple[int, int | None] | None:
+        if scope["type"] != "http" or scope["method"] not in BODY_METHODS:
+            return None
+        upload_cap = body_caps(self.settings).get(scope["path"]) if scope["method"] == "POST" else None
+        if upload_cap is None:
+            return request_body_cap(scope["path"]), None
+        return upload_cap, room_on_disk(self.settings.data_dir, self.settings.min_free_disk_mb)
+
     async def __call__(self, scope, receive, send):
-        cap = body_caps(self.settings).get(scope["path"]) if scope["type"] == "http" else None
-        if cap is None or scope["method"] != "POST":
+        limits = self._limits(scope)
+        if limits is None:
             await self.app(scope, receive, send)
             return
-        room = room_on_disk(self.settings.data_dir, self.settings.min_free_disk_mb)
+        cap, room = limits
         refusal = self._refusal(_declared_length(scope) or 0, cap, room)
         if refusal:
             status, detail = refusal

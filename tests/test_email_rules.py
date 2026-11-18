@@ -32,7 +32,7 @@ def mailbox(monkeypatch):
     state = {"inbox": list(INBOX), "fail": set()}
 
     def recorded(name, result=None):
-        def call(account, password, *args):
+        def call(account, password, *args, **options):
             if name in state["fail"]:
                 raise OSError(f"{name} failed")
             calls.append((name, account.email_address, password, *args))

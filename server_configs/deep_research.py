@@ -10,6 +10,8 @@ from urllib.parse import urlparse
 import httpx
 
 import web_search
+from mcp_oauth import is_public_address
+from public_fetch import public_only_client
 
 logger = logging.getLogger(__name__)
 
@@ -22,11 +24,8 @@ def _resolves_to_public_address(url: str) -> bool:
         host = urlparse(url).hostname
         if not host:
             return False
-        for _family, _type, _proto, _canon, sockaddr in socket.getaddrinfo(host, None):
-            ip = ipaddress.ip_address(sockaddr[0])
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
-                return False
-        return True
+        answers = socket.getaddrinfo(host, None)
+        return bool(answers) and all(is_public_address(ipaddress.ip_address(answer[4][0])) for answer in answers)
     except (socket.gaierror, ValueError, UnicodeError):
         return False
 
@@ -76,8 +75,8 @@ async def research(query: str, chat_fn) -> str:
     if not results:
         return "No search results found for that query - can't do research without sources."
 
-    async with httpx.AsyncClient(timeout=FETCH_TIMEOUT, follow_redirects=True,
-                                   event_hooks={"request": [_block_unsafe_redirects]}) as client:
+    async with public_only_client(timeout=FETCH_TIMEOUT, follow_redirects=True,
+                                  event_hooks={"request": [_block_unsafe_redirects]}) as client:
         pages = [await _fetch_page(client, r["url"]) for r in results]
 
     sources_block = "\n\n".join(

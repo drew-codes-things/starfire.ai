@@ -9,10 +9,11 @@ sys.path.insert(0, os.path.join(ROOT, "server_configs"))
 import agent_loop
 import builtin_tools
 import shell_tool
+from host_sandbox import HostLimits
 
 
 def context(require_approval: bool, events=None):
-    ctx = SimpleNamespace(require_shell_approval=require_approval, events=events)
+    ctx = SimpleNamespace(require_shell_approval=require_approval, events=events, host_limits=HostLimits())
 
     async def emit(event):
         if events is not None:
@@ -152,7 +153,7 @@ def test_a_model_that_keeps_calling_tools_is_stopped_with_a_clear_answer(monkeyp
 
 
 def test_a_command_reports_its_exit_code_and_runs_in_the_folder_asked_for(tmp_path):
-    result = asyncio.run(shell_tool.run_shell("pwd; exit 3", str(tmp_path)))
+    result = asyncio.run(shell_tool.run_shell("pwd; exit 3", str(tmp_path), HostLimits(workspace=str(tmp_path))))
     assert result.splitlines() == ["(exit code 3)", str(tmp_path)]
 
 

@@ -32,6 +32,11 @@ Built on FastAPI with encrypted key storage, as a local chat app for you and the
 - Python 3.12+
 - [Ollama](https://ollama.com/download), installed and running, for local models (optional
   if you only plan to use hosted providers)
+- `prlimit` (util-linux, installed on most Linux systems) for code checks: every checker runs
+  under it, and without it every code check is reported as skipped
+- [bubblewrap](https://github.com/containers/bubblewrap) (`bwrap`, optional): C and C++ are only
+  checked inside it, and run_shell runs in it when it is installed and can start (without it, or
+  where it cannot start, run_shell runs unsandboxed and logs that)
 
 ## Setup
 
@@ -218,8 +223,10 @@ tokens (colours, radii, spacing, shadows) in `static/style.css`, with a dark and
   delete (with a confirmation). On phones the sidebar is a slide-over drawer with a scrim.
 - **Account menu** (bottom of the sidebar): Settings, Archived chats, Keyboard shortcuts and
   Log out, under your name and email.
-- **Model picker**: searchable; the star sets the default model. Presets show up under it as
-  workspace models. A chat reopens on the model it was last used with.
+- **Model picker**: searchable; **Arty Auto** first, then every model you may use, each listed
+  once. The **Arty Auto** / **Choose a model** switch at the top shows which way the chat's model
+  is picked. The star sets the default model. Presets are applied from Workspace → Models. A chat
+  reopens on the model it was last used with.
 - **Message box**: grows with its text up to a cap. `/` inserts a saved prompt, `#` attaches a
   Knowledge document, `@` sends the next message to a different model. **+** uploads files
   (text files are attached inline; PDFs are added to Knowledge and attached) and toggles tools
@@ -276,6 +283,43 @@ tokens (colours, radii, spacing, shadows) in `static/style.css`, with a dark and
 
 ## Chat
 
+### Arty Auto
+
+**Arty Auto** (Auto for short) is what a new account starts with. In the model picker it is the
+first entry, above one flat list of every model the account may use, with no headings. A model
+listed both by its own server and again through another server (for example `arty/<name>` on
+Arty's server next to `<name>` on the engine) is shown once, as the direct one; the same name on
+two servers is shown once too, preferring the one that is not Arty's (any server that lists an
+`OWN_TOOLS_MODELS` match). Picking a model there sets the chat to that model; picking Arty Auto
+(or **Arty Auto** at the top of the picker) goes back. For every
+message the server picks a model from simple fixed rules, without asking another model first:
+
+| The message | Goes to |
+|---|---|
+| has a picture or a video attached | the vision model (names with `vl`, `vision` or `llava`) |
+| has audio attached, or starts with "Arty" / "hey Arty" | the agent (the first `OWN_TOOLS_MODELS` match) |
+| has a code block, a stack trace or error name, a source file name, or asks about code | the code model (names with `code`) |
+| asks for a reminder, timer, the phone, calendar, inbox, lights, music, the web, weather or news | the agent |
+| anything else | the chat model (`TASK_MODEL` when it is listed, otherwise the first ordinary model) |
+
+An admin can name the model for each role under **Settings → Connections → Arty Auto**. A role
+with no model falls back to the chat model. Auto only ever picks from the models the account may
+use, so an ordinary account is never sent to a model matched by `RESTRICTED_MODELS` or left out
+of its own list, even when an admin named that model for a role; the one exception is a
+restricted model an admin put by its full name into that account's own list. A pattern such as
+`*` or `own/*`, or a name without its tag, never opens a restricted model. A guess never lands on a
+restricted model for anyone. Each reply names the model Auto picked and why
+(`qwen3:14b · Arty Auto: code`) in its header, in the status line and under **info**.
+
+Every chat keeps its own model (or Auto) on the server, so a refresh, another tab or another
+device opens it with the same choice. A new chat starts with the model you picked last (the star
+marks it), or Auto.
+
+A reply in a saved chat is written on the server: refreshing or closing the page while it streams
+does not stop it. Open the chat again and the page picks the reply up where it is (or shows it
+finished), and the server saves it into the chat when it ends. The stop button stops it on the
+server too. Temporary and side chats still stop when the page goes away.
+
 Every reply has a toolbar: **edit** (in place), **copy**, **listen**, **info** (model, time,
 estimated size), **+1 / -1** rating, **continue** (extends the reply), **regenerate** (with any
 model) and **delete**.
@@ -292,12 +336,44 @@ error** and the line number, so you know before you paste. The copy button is di
 block is being checked. Languages whose checker isn't installed on this machine are left
 unmarked. Switch the whole thing off under **Settings → General**.
 
+Every checker runs in its own process under `prlimit`: 512 MB of memory (1 GB for node), 10 s of
+CPU, files up to 8 MB, no core files, and inside bubblewrap at most 32 processes and no network.
+A check is stopped after 20 s. The server reads at most 64 KB of a checker's output, and the C
+compilers stop after 20 errors. C and C++ only compile code whose `#include` lines name system
+headers such as `<stdio.h>`. Two checks run at once on the whole server and one per account; a
+check beyond that is reported as busy.
+
 Your own messages have **edit**, **copy** and **delete**. Editing your
 message or regenerating branches the conversation - rather than mutating history in place,
 they create a new chat pointing back at the original up to that point (marked `↪` in the
 sidebar). The send button becomes a stop button while a reply is streaming (`Esc` stops it too). Every conversation autosaves
 as you go, and the history sent to the model is trimmed to the context length (8192 tokens
 unless set in controls).
+
+A status line under the message box shows the open chat at a glance and updates while a reply
+streams, for example `3 turns 10 steps · 27 tok/s | 108K tok · Cache hit 99% | ◔ 10%`:
+
+- **turns**: your messages in this chat.
+- **steps**: tool calls starfire ran for replies in this chat (counted from this version on; hidden
+  for models that run their own tools, such as Arty, because starfire cannot see those).
+- **tok/s**: speed of the latest reply. It is the model server's own timing when it reports one
+  (Ollama and ArtyEngine `eval_duration`, llama.cpp `timings`); otherwise it is measured from the
+  stream, leaving out time spent running tools. A `~` marks a figure estimated from characters
+  (about four per token) while the reply is still arriving.
+- **tok**: prompt plus reply tokens of the latest model call, as the server reported them.
+- **Cache hit**: the share of that prompt the server took from its prompt cache. Shown only when
+  the server reports cached prompt tokens (ArtyEngine `prompt_eval_cached_count`, OpenAI-style
+  `usage.prompt_tokens_details.cached_tokens`, llama.cpp `timings.cache_n`, Anthropic
+  `cache_read_input_tokens`); stock Ollama and Arty's brain do not, so it stays hidden there.
+- **ring**: how much of the context window those tokens fill. Shown only when the window is known,
+  which today means requests starfire sends straight to Ollama or ArtyEngine (`TASK_NUM_CTX` or the
+  chat's own context length).
+
+Anything the server did not report is left out rather than guessed. On a narrow screen the
+items drop off in this order: cache, steps, turns, speed, tokens; the ring stays. The figures are
+kept with each reply, so an old chat shows them again when opened. To get usage from
+OpenAI-style servers starfire asks for it (`stream_options.include_usage`); a server that
+refuses that option is asked again without it.
 
 If a model likely doesn't support tool-calling (or is small enough - under ~3B parameters -
 to be unreliable about *when* to use a tool rather than just answering directly), a banner
@@ -516,6 +592,13 @@ Every action opens a live IMAP/SMTP connection - there's no background inbox syn
 so listing a folder takes a moment each time rather than being instant from a local cache.
 That's the deliberate tradeoff for not needing a database or a background sync service.
 
+Mail runs on its own four threads. Each mail call has 60 seconds in total, connection and every
+reply included, and is cut off after that. An account may have two mail calls running at once and
+make `MAIL_REQUESTS_PER_MINUTE` (60) mail requests a minute, admins included; past either it gets
+a 429 with `Retry-After`. A mail server may send at most 32 MB for one request; a message larger
+than 25 MB is read up to 25 MB and says so at its end. Ordinary accounts can only use mail
+servers on public addresses.
+
 ## Compare
 
 The **compare** button (header) opens a side-by-side view: one prompt, sent to as many
@@ -531,7 +614,12 @@ Two more builtin tools in Settings → Tools:
   use it for open-ended questions, not quick lookups.
 - **GitHub (gh CLI)** - runs the `gh` binary only (not arbitrary shell), so the model can list
   issues, open PRs, check CI, etc. Needs `gh` installed and already authenticated
-  (`gh auth login`) - this tool doesn't manage credentials itself.
+  (`gh auth login`) - this tool doesn't manage credentials itself. It only runs issue, pr, repo,
+  release, run, workflow, label, gist, search, status, api, org, project, ruleset, cache, browse and
+  `auth status`; reads with known flags run straight away, everything else waits for an approval
+  card. Flags that can print the token (`--show-token`, `--jq`, `-q`, `--template`, `-t`) are
+  always refused, and `alias`, `extension`, `config`, `secret`, `codespace` and `auth token` never
+  run.
 
 ## Presets
 
@@ -657,9 +745,15 @@ rather use that instead)
 | `CLIENT_IP_HEADER` | `CF-Connecting-IP` | Header holding the visitor's address, read only when the request came through trusted proxies alone |
 | `MAX_DOCUMENT_MB` | `20` | Largest knowledge document one upload may be |
 | `MAX_ATTACHMENTS_MB` | `1024` | Total size of one account's chat attachments (each kept 30 days) |
+| `MAX_DOCUMENTS_MB` | `512` | Total size of one account's knowledge documents once their text is stored |
 | `MAX_RESTORE_MB` | `1024` | Largest backup zip Settings → Data will restore |
 | `MIN_FREE_DISK_MB` | `512` | Uploads, restores and backups are refused when they would leave less free disk than this next to `DATA_DIR` |
 | `PUBLIC_BASE_URL` | _(unset)_ | The one address everyone opens starfire at (for example `https://starfire.example.com`). When set, MCP browser sign-ins return there; when unset they return to the address the browser used. Leave it unset if people use more than one address, since a sign-in must finish on the host it started on |
+| `EDIT_ALLOWED_ROOTS` | _(none)_ | Comma-separated folders an admin's `edit_file` may write besides the account's own workspace (`<DATA_DIR>/users/<id>/workspace`). The data and app folders are never editable |
+| `RESTRICTED_MODELS` | `*-abl,*-abl-*,*abliterated*,*uncensored*` | Comma-separated model ids (`*` wildcards, any case) that ordinary accounts can neither see nor use. A model matches when its name does with or without its `:tag` or `@digest` and with any leading `namespace/` parts removed. Admins use every model; under Settings > Accounts > models an admin can instead give an account its own list. In that list, patterns and names without a tag still leave out every restricted model; only a restricted model's full name (with or without `:latest`) lets that account use it |
+| `GENERATIONS_PER_MINUTE` | `20` | Model replies an ordinary account may ask for in a minute (chats, helper calls, email AI actions); `0` turns the limit off. Admins are not limited |
+| `MAIL_REQUESTS_PER_MINUTE` | `60` | Mail requests (email pages and the email tool) one account may make in a minute, admins included; `0` turns the limit off. Two mail calls per account run at once, each cut off after 60 seconds |
+| `GENERATIONS_PER_DAY` | `400` | Model replies an ordinary account may use in a UTC day, scheduled automations and email rules included; `0` turns the limit off |
 | `SESSION_CHECK_HOSTS` | _(none)_ | Extra `host:port` names, comma-separated, on which `GET /api/auth/me` answers for a session made on any host. `127.0.0.1:<PORT>`, `localhost:<PORT>` and `[::1]:<PORT>` are always included, so a service on the same machine can ask who a browser's cookie belongs to. Every other request only accepts a session on the host it was signed in on |
 
 Hosted-provider API keys are **not** set via environment variables - add them through the

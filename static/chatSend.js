@@ -32,8 +32,6 @@ async function persistSession() {
     });
     try { localStorage.removeItem('sf_draft_messages'); } catch (_) {}
     refreshSidebar();
-
-    if (isNewSession && model && messages.length >= 2) describeNewSession(currentSessionId, model);
   } catch (_) {
 
   }
@@ -47,9 +45,10 @@ async function restoreSession() {
         const session = await r.json();
         messages = session.messages || [];
         showSessionControls(session);
-        selectModel(session.endpoint_id, session.model);
+        showModelChoice(session);
         rerenderAll();
         onChatChanged();
+        followRunningReply(session.running_reply);
         return;
       }
     } catch (_) {}
@@ -64,7 +63,7 @@ async function restoreSession() {
 }
 
 function warmModel(model) {
-  if (!model) return;
+  if (!model || isAutoModel(model)) return;
   fetch('/api/warm', {
     method:  'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -72,30 +71,65 @@ function warmModel(model) {
   }).catch(() => {});
 }
 
+function isAutoModel(model) {
+  return isAutoChoice(model);
+}
+
 function currentModel() {
   const opt = els.modelList.selectedOptions[0];
   if (!opt) return null;
+  if (isAutoChoice({ endpoint_id: opt.dataset.endpointId, id: opt.value })) return autoModelEntry();
   return models.find(m => m.endpoint_id === opt.dataset.endpointId && m.id === opt.value) || null;
+}
+
+function everydayModel() {
+  const pick = autoEverydayModel;
+  return pick ? models.find(m => m.endpoint_id === pick.endpoint_id && m.id === pick.model) || null : null;
+}
+
+function concreteModel() {
+  const model = currentModel();
+  return isAutoModel(model) ? everydayModel() : model;
+}
+
+function modelOption(m) {
+  const opt              = document.createElement('option');
+  opt.value              = m.id;
+  opt.dataset.endpointId = m.endpoint_id;
+  if (isAutoModel(m)) {
+    opt.textContent = AUTO_MODEL_NAME + ' - ' + AUTO_MODEL_HINT;
+    return opt;
+  }
+  const label            = window.providerLabel ? window.providerLabel(m.provider) : m.provider;
+  opt.textContent        = m.id + (m.size ? ' (' + (m.size / 1073741824).toFixed(1) + ' GB)' : '') + ' - ' + label;
+  return opt;
+}
+
+async function loadAccountModelChoice() {
+  try {
+    return await apiJson('/api/model-choice');
+  } catch (e) {
+    printLine('could not load your model choice, so Auto is used: ' + e.message, 'err');
+    return AUTO_CHOICE;
+  }
 }
 
 async function loadModels() {
   setStatus('loading', 'connecting...');
   try {
     const r                       = await fetch('/api/models');
-    const { models: list = [] }   = await r.json();
+    const { models: list = [], auto_everyday: everyday = null } = await r.json();
+    const shownBefore = currentModel();
     models = list;
+    autoEverydayModel = everyday;
+    accountModelChoice = await loadAccountModelChoice();
+    try { localStorage.removeItem('sf_default_model'); } catch (_) {}
 
     els.modelList.innerHTML = '';
-    for (const m of models) {
-      const opt            = document.createElement('option');
-      opt.value             = m.id;
-      opt.dataset.endpointId = m.endpoint_id;
-      const label           = window.providerLabel ? window.providerLabel(m.provider) : m.provider;
-      opt.textContent        = m.id + (m.size ? ' (' + (m.size / 1073741824).toFixed(1) + ' GB)' : '') + ' - ' + label;
-      els.modelList.appendChild(opt);
-    }
+    if (models.length) els.modelList.appendChild(modelOption(autoModelEntry()));
+    for (const m of models) els.modelList.appendChild(modelOption(m));
 
-    selectDefaultModel();
+    showModelChoice(shownBefore ? choiceOf(shownBefore) : null);
     renderModelPicker();
     if (!messages.length) renderWelcome();
 
@@ -106,7 +140,7 @@ async function loadModels() {
       return;
     }
 
-    setStatus('ready', els.modelList.value);
+    setStatus('ready', modelPickerText(currentModel()));
     setOffline(false);
     warmModel(currentModel());
     els.input.disabled   = false;
@@ -117,6 +151,12 @@ async function loadModels() {
     setOffline(true);
     printLine('error: ' + e.message, 'err');
   }
+}
+
+function assistantMessage(text, model, readUntrusted, record) {
+  const message = { role: 'assistant', content: text, model: model.id, created: new Date().toISOString(), ...record };
+  if (readUntrusted) message.untrustedRead = true;
+  return message;
 }
 
 function apiMessages(list) {
@@ -137,7 +177,6 @@ async function send(text, overrideModel, extra = {}) {
   els.sendBtn.disabled = true;
   els.input.disabled   = true;
   els.stopBtn.hidden    = false;
-  abortController       = new AbortController();
 
   const userIdx = messages.length;
   const userMessage = { role: 'user', content: extra.content || text, created: new Date().toISOString() };
@@ -154,28 +193,18 @@ async function send(text, overrideModel, extra = {}) {
     els.input.value = '';
     els.input.style.height = 'auto';
   }
-  const typing = showTypingIndicator(model.id);
 
-  let aiLine = null;
-  let aiActions = null;
-  let aiRow = null;
-  let renderer = null;
-  let gotToken = false;
+  const startsNewChat = !currentSessionId && !isTemporaryChat();
+  await persistSession();
+  const sessionId = isTemporaryChat() ? '' : currentSessionId || '';
   const aiIdx = messages.length;
-  stopServerSpeech();
-  const speaker = (callModeActive() || prefs.autoSpeak) && modelHasServerVoice(model)
-    ? createServerSpeaker(model, () => { if (callModeActive()) setCallState('speaking'); })
-    : null;
-  activeSpeaker = speaker;
 
-  setStatus('loading', 'waiting...');
-
-  try {
-
-    const r = await fetch('/api/chat_stream', {
+  await streamReply({
+    model, aiIdx, startsNewChat,
+    open: signal => fetch('/api/chat_stream', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
-      signal:  abortController.signal,
+      signal,
       body:    JSON.stringify({
         endpoint_id: model.endpoint_id,
         model:       model.id,
@@ -184,72 +213,164 @@ async function send(text, overrideModel, extra = {}) {
         options:     chatOptions(),
         enabled_mcp_servers: modelHasOwnTools(model) ? [] : [...enabledMcpServers],
         enabled_builtin_tools: modelHasOwnTools(model) ? [] : [...enabledBuiltinTools],
-        require_edit_approval: requireEditApproval,
-        require_shell_approval: requireShellApproval,
+        earlier_untrusted_content: sideChatContext(sideChat, messages).some(m => m.untrustedRead === true),
         memory_commands: !isTemporaryChat(),
+        ...(sessionId ? { session_id: sessionId, reply_index: aiIdx } : {}),
       }),
-    });
+    }),
+    giveBack: () => {
+      messages.splice(userIdx, 1);
+      rerenderAll();
+      if (sentFromComposer && !els.input.value) {
+        els.input.value = text;
+        els.input.style.height = Math.min(els.input.scrollHeight, COMPOSER_MAX_HEIGHT_PX) + 'px';
+      }
+      if (sessionId) persistSession();
+    },
+  });
+}
 
+function followRunningReply(running) {
+  if (busy || !running || running.reply_index !== messages.length) return;
+  busy = true;
+  els.sendBtn.disabled = true;
+  els.input.disabled   = true;
+  els.stopBtn.hidden    = false;
+  activeReplyId = running.id;
+  streamReply({
+    model: currentModel() || autoModelEntry(), aiIdx: running.reply_index, startsNewChat: running.reply_index === 1,
+    open: signal => fetch(`/api/chat/replies/${encodeURIComponent(running.id)}/events`, { signal }),
+    giveBack: () => printLine('this reply is no longer kept on the server; ask again', 'err'),
+  });
+}
+
+async function readReplyFrames(reader, onEvent) {
+  const dec = new TextDecoder();
+  let buf = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let sep;
+    while ((sep = buf.indexOf('\n\n')) >= 0) {
+      const frame = buf.slice(0, sep);
+      buf = buf.slice(sep + 2);
+      const line = frame.trim();
+      if (!line.startsWith('data:')) continue;
+      try {
+        onEvent(JSON.parse(line.slice(5).trim()));
+      } catch (_) {}
+    }
+  }
+}
+
+function showToolResult(toolResult) {
+  const toolName = toolResult.name;
+  if (toolName === 'edit_file') {
+    renderDiffCard(toolResult.result);
+  } else if (toolName === 'generate_image' || toolName === 'generate_audio' || toolName === 'generate_document' || toolName === 'find_image') {
+    renderGeneratedFileCard(toolName, toolResult.result);
+  } else if (toolName === 'generate_video') {
+    renderGeneratedVideoCard(toolResult.result);
+  } else if (toolName === 'run_shell') {
+    renderShellResultCard(toolResult.result);
+  } else {
+    const outcome = toolOutcomeLine(toolName, toolResult.result);
+    printLine(outcome.text, outcome.cls);
+  }
+}
+
+function pickedModel(choice) {
+  return models.find(m => m.endpoint_id === choice.endpoint_id && m.id === choice.model)
+    || { id: choice.model, endpoint_id: choice.endpoint_id, provider: '' };
+}
+
+async function streamReply({ model, aiIdx, startsNewChat, open, giveBack }) {
+  abortController = new AbortController();
+  const typing = showTypingIndicator(isAutoModel(model) ? AUTO_MODEL_NAME : model.id);
+
+  let replyModel = model;
+  let autoRole = null;
+  let aiLine = null;
+  let aiActions = null;
+  let aiRow = null;
+  let renderer = null;
+  let gotToken = false;
+  let replyStarted = false;
+  stopServerSpeech();
+  let speaker = null;
+  activeSpeaker = null;
+  const startSpeaker = chosen => {
+    if ((callModeActive() || prefs.autoSpeak) && modelHasServerVoice(chosen)) {
+      speaker = createServerSpeaker(chosen, () => { if (callModeActive()) setCallState('speaking'); });
+    }
+    activeSpeaker = speaker;
+  };
+  if (!isAutoModel(model)) startSpeaker(model);
+  const replyLabel = () => autoPickLabel(replyModel.id, autoRole);
+
+  setStatus('loading', 'waiting...');
+  const replyMeter = createReplyMeter({ countsSteps: !modelHasOwnTools(model) });
+  liveChatStats.follow(replyMeter);
+  liveChatStats.redraw();
+  let readUntrusted = false;
+  let streamError = null;
+
+  const onEvent = obj => {
+    if (obj.reply) {
+      activeReplyId = obj.reply.id;
+      replyStarted = true;
+    } else if (obj.model_choice) {
+      replyModel = pickedModel(obj.model_choice);
+      autoRole = obj.model_choice.role || null;
+      replyMeter.countsSteps = !modelHasOwnTools(replyModel);
+      if (!speaker) startSpeaker(replyModel);
+      setStatus('loading', replyLabel());
+    } else if (obj.delta) {
+      replyStarted = true;
+      if (!gotToken) { gotToken = true; setStatus('ready', replyLabel()); }
+      if (!aiLine) {
+        typing.remove();
+        const created = appendMessageRow('ai', aiIdx, replyLabel());
+        aiLine = created.content; aiActions = created.actions; aiRow = created.row;
+        aiRow.classList.add('fresh');
+        aiLine.classList.add('streaming');
+        renderer = createStreamRenderer(aiLine, { render: markdownRender });
+      }
+      renderer.push(obj.delta);
+      if (speaker) speaker.push(obj.delta);
+      els.output.scrollTop = els.output.scrollHeight;
+      noteText(replyMeter, obj.delta.length, performance.now());
+      liveChatStats.follow(replyMeter);
+    } else if (obj.tool_start) {
+      noteStep(replyMeter);
+      liveChatStats.follow(replyMeter);
+      printLine('» calling ' + obj.tool_start.replace(/^mcp__[^_]+__/, '') + '…', 'info');
+    } else if (obj.tool_result) {
+      showToolResult(obj.tool_result);
+    } else if (obj.shell_pending) {
+      renderShellApprovalCard(obj.shell_pending);
+    } else if (obj.usage) {
+      noteRoundUsage(replyMeter, obj.usage);
+      liveChatStats.follow(replyMeter);
+    } else if (obj.untrusted_read) {
+      readUntrusted = true;
+    } else if (obj.error) {
+      streamError = obj.error;
+    }
+  };
+  const replyRecordNow = () => ({ ...replyRecord(replyMeter), ...(autoRole ? { auto: autoRole } : {}) });
+
+  try {
+    const r = await open(abortController.signal);
     if (!r.ok) {
       const { detail } = await r.json().catch(() => ({}));
       throw new Error(detail || 'server error ' + r.status);
     }
+    await readReplyFrames(r.body.getReader(), onEvent);
+    if (leavingPage) return;
 
-    const reader = r.body.getReader();
-    const dec    = new TextDecoder();
-    let   buf    = '';
-    let   streamError = null;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      let sep;
-      while ((sep = buf.indexOf('\n\n')) >= 0) {
-        const frame = buf.slice(0, sep);
-        buf = buf.slice(sep + 2);
-        const line = frame.trim();
-        if (!line.startsWith('data:')) continue;
-        try {
-          const obj = JSON.parse(line.slice(5).trim());
-          if (obj.delta) {
-            if (!gotToken) { gotToken = true; setStatus('ready', model.id); }
-            if (!aiLine) {
-              typing.remove();
-              const created = appendMessageRow('ai', aiIdx, model.id);
-              aiLine = created.content; aiActions = created.actions; aiRow = created.row;
-              aiRow.classList.add('fresh');
-              aiLine.classList.add('streaming');
-              renderer = createStreamRenderer(aiLine, { render: markdownRender });
-            }
-            renderer.push(obj.delta);
-            if (speaker) speaker.push(obj.delta);
-            els.output.scrollTop = els.output.scrollHeight;
-          } else if (obj.tool_start) {
-            printLine('» calling ' + obj.tool_start.replace(/^mcp__[^_]+__/, '') + '…', 'info');
-          } else if (obj.tool_result) {
-            const toolName = obj.tool_result.name;
-            if (toolName === 'edit_file') {
-              renderDiffCard(obj.tool_result.result);
-            } else if (toolName === 'generate_image' || toolName === 'generate_audio' || toolName === 'generate_document' || toolName === 'find_image') {
-              renderGeneratedFileCard(toolName, obj.tool_result.result);
-            } else if (toolName === 'generate_video') {
-              renderGeneratedVideoCard(obj.tool_result.result);
-            } else if (toolName === 'run_shell') {
-              renderShellResultCard(obj.tool_result.result);
-            } else {
-              printLine('» ' + toolName.replace(/^mcp__[^_]+__/, '') + ' done', 'info');
-            }
-          } else if (obj.shell_pending) {
-            renderShellApprovalCard(obj.shell_pending);
-          } else if (obj.error) {
-            streamError = obj.error;
-          }
-        } catch (_) {}
-      }
-    }
-
-    if (streamError) throw new Error(streamError);
+    if (streamError) throw Object.assign(new Error(streamError), { fromServer: true });
 
     if (aiLine) {
       renderer.finish();
@@ -257,21 +378,29 @@ async function send(text, overrideModel, extra = {}) {
       decorateCodeBlocks(aiLine, renderer.text());
       showInlineMedia(aiLine);
     }
-    setStatus('ready', model.id);
+    setStatus('ready', replyLabel());
     const fullText = renderer ? renderer.text() : '';
     if (fullText) {
-      messages.push({ role: 'assistant', content: fullText, model: model.id, created: new Date().toISOString() });
+      messages[aiIdx] = assistantMessage(fullText, replyModel, readUntrusted, replyRecordNow());
       if (aiActions) addActionButtons('ai', aiRow, aiActions, aiIdx);
       if (speaker) speaker.finish().then(() => { if (callModeActive() && activeSpeaker === speaker) setTimeout(listenForCallTurn, 250); });
       else if (callModeActive()) speakThenListen(fullText);
       else if (prefs.autoSpeak) speakText(fullText);
-      if (prefs.followUps && aiRow && !callModeActive()) showFollowUps(aiRow, model);
+      if (prefs.followUps && aiRow && !callModeActive()) showFollowUps(aiRow, replyModel);
     }
-    persistSession();
-    if (aiLine && fullText) verifyCodeBlocks(aiLine, aiIdx, model);
+    await persistSession();
+    if (startsNewChat && fullText && currentSessionId) describeNewSession(currentSessionId, replyModel);
+    if (aiLine && fullText) verifyCodeBlocks(aiLine, aiIdx, replyModel);
   } catch (e) {
+    if (leavingPage) return;
     const aborted = e.name === 'AbortError';
     if (speaker && aborted) speaker.stop();
+    if (!aborted && !e.fromServer && replyStarted && activeReplyId) {
+      rerenderAll();
+      setStatus('error', 'connection lost');
+      printLine('the connection dropped, but the reply is still being written: open this chat again to see it', 'info');
+      return;
+    }
     if (gotToken && aiLine) {
       renderer.finish();
       aiLine.classList.remove('streaming');
@@ -279,19 +408,14 @@ async function send(text, overrideModel, extra = {}) {
       showInlineMedia(aiLine);
       const fullText = renderer.text();
       if (fullText) {
-        messages.push({ role: 'assistant', content: fullText, model: model.id, created: new Date().toISOString() });
+        messages[aiIdx] = assistantMessage(fullText, replyModel, readUntrusted, replyRecordNow());
         if (aiActions) addActionButtons('ai', aiRow, aiActions, aiIdx);
       }
     } else if (!aborted) {
-      messages.splice(userIdx, 1);
-      rerenderAll();
-      if (sentFromComposer && !els.input.value) {
-        els.input.value = text;
-        els.input.style.height = Math.min(els.input.scrollHeight, COMPOSER_MAX_HEIGHT_PX) + 'px';
-      }
+      giveBack();
     }
     if (aborted) {
-      setStatus('ready', model.id);
+      setStatus('ready', replyLabel());
       printLine('- stopped -', 'info');
       persistSession();
     } else {
@@ -301,8 +425,10 @@ async function send(text, overrideModel, extra = {}) {
     if (callModeActive()) setTimeout(() => speakThenListen("Sorry, that didn't work. Try again."), 0);
   } finally {
     typing.remove();
+    liveChatStats.stop();
     busy                   = false;
     abortController        = null;
+    activeReplyId          = null;
     els.input.disabled     = false;
     els.sendBtn.disabled   = false;
     els.stopBtn.hidden      = true;
@@ -314,9 +440,14 @@ const CONTINUE_INSTRUCTION = 'Continue your previous reply exactly where it stop
 const CHARS_PER_TOKEN_ESTIMATE = 4;
 const COMPOSER_MAX_HEIGHT_PX = 240;
 
+function modelThatWrote(message) {
+  return models.find(m => m.id === message.model) || concreteModel();
+}
+
 async function continueResponse(idx) {
   const target = messages[idx];
-  const model = currentModel();
+  const shown = currentModel();
+  const model = isAutoModel(shown) && target ? modelThatWrote(target) : shown;
   if (busy || !target || target.role !== 'assistant' || !model) return;
   const contentEl = els.output.querySelector(`[data-msg-index="${idx}"]`);
   if (!contentEl) return;
@@ -330,6 +461,8 @@ async function continueResponse(idx) {
   let streamError = null;
   const separator = /\s$/.test(target.content) ? '' : ' ';
   let added = '';
+  const continueMeter = createReplyMeter({ countsSteps: false });
+  liveChatStats.follow(continueMeter);
   try {
     const r = await fetch('/api/chat_stream', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -347,7 +480,10 @@ async function continueResponse(idx) {
     }
     await readProgressStream(r, obj => {
       if (obj.error) { streamError = obj.error; return; }
+      if (obj.usage) noteRoundUsage(continueMeter, obj.usage);
       if (!obj.delta) return;
+      noteText(continueMeter, obj.delta.length, performance.now());
+      liveChatStats.follow(continueMeter);
       added += obj.delta;
       contentEl.innerHTML = markdownRender(target.content + separator + added);
     });
@@ -365,7 +501,10 @@ async function continueResponse(idx) {
     if (added) {
       target.content += separator + added;
       delete target.code_checks;
+      const { usage } = replyRecord(continueMeter);
+      if (usage) target.usage = usage;
     }
+    liveChatStats.stop();
     busy = false;
     abortController = null;
     els.sendBtn.disabled = false;
@@ -404,6 +543,7 @@ function clearChat() {
   messages = [];
   currentSessionId = null;
   showChatControls(defaultChatControls());
+  showModelChoice(null);
   try {
     localStorage.removeItem('sf_current_session');
     localStorage.removeItem('sf_draft_messages');
@@ -466,18 +606,26 @@ function submitSideChatCommand(question) {
 
 $('sideChatCloseBtn').onclick = leaveSideChat;
 
-els.stopBtn.onclick = () => { if (abortController) abortController.abort(); };
+function stopReplyOnServer(replyId) {
+  fetch(`/api/chat/replies/${encodeURIComponent(replyId)}/stop`, { method: 'POST' })
+    .catch(e => printLine('could not stop the reply on the server: ' + e.message, 'err'));
+}
+
+els.stopBtn.onclick = () => {
+  if (activeReplyId) stopReplyOnServer(activeReplyId);
+  if (abortController) abortController.abort();
+};
 
 els.modelList.addEventListener('change', () => {
   warmModel(currentModel());
   renderModelPicker();
   if (!messages.length) renderWelcome();
-  setStatus('ready', els.modelList.value);
+  setStatus('ready', modelPickerText(currentModel()));
   checkModelToolCapability();
 });
 
 function modelHasOwnTools(model) {
-  return !!model && appConfig.own_tools_models.some(pattern => globMatch(model.id, pattern));
+  return !!model && model.own_tools === true;
 }
 
 async function checkModelToolCapability() {
@@ -485,7 +633,7 @@ async function checkModelToolCapability() {
   const ownTools = modelHasOwnTools(model);
   document.body.classList.toggle('own-tools', ownTools);
   const anyToolsEnabled = enabledMcpServers.size > 0 || enabledBuiltinTools.size > 0;
-  if (!model || ownTools || !anyToolsEnabled) {
+  if (!model || ownTools || isAutoModel(model) || !anyToolsEnabled) {
     els.capabilityWarning.hidden = true;
     return;
   }
@@ -553,10 +701,11 @@ async function openSession(id) {
     discardSideChat();
     messages = session.messages || [];
     showSessionControls(session);
-    selectModel(session.endpoint_id, session.model);
+    showModelChoice(session);
     rerenderAll();
     closeSettings();
     onChatChanged();
+    followRunningReply(session.running_reply);
   } catch (e) {
     printLine('error: could not open chat - ' + e.message, 'err');
   }

@@ -196,7 +196,7 @@ async function refreshNoteList() {
       const aiBtn = header.querySelector('[data-act="ai-improve"]');
       if (aiBtn) {
         aiBtn.onclick = async () => {
-          const model = currentModel();
+          const model = concreteModel();
           if (!model) { showToast('Select a model in the header first', 'error'); return; }
           aiBtn.textContent = 'improving…';
           aiBtn.disabled = true;

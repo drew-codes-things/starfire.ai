@@ -59,17 +59,67 @@ async function confirmRemove(what, ask = showDialog) {
   return !!(await ask(removalQuestion(what)));
 }
 
+const SHELL_TOOL = 'run_shell';
+const UNTRUSTED_APPROVAL_NOTE = 'Untrusted content (a web page, search result, email, document or tool result) ' +
+  'was read in this turn and may be trying to steer the model. Check this carefully before you approve it.';
+
 function pendingApprovalCards(commands, edits) {
   const isWaiting = item => item && typeof item.id === 'string' && item.id;
   const shellCards = (Array.isArray(commands) ? commands : []).filter(isWaiting).map(item => ({
     kind: 'shell', id: item.id,
-    data: { pending_id: item.id, command: item.command || '', cwd: item.cwd || '' },
+    data: {
+      pending_id: item.id, command: item.command || '', cwd: item.cwd || '',
+      tool: typeof item.tool === 'string' && item.tool ? item.tool : SHELL_TOOL, untrusted: item.untrusted === true,
+    },
   }));
   const editCards = (Array.isArray(edits) ? edits : []).filter(isWaiting).map(item => ({
     kind: 'edit', id: item.id,
-    data: { staged: true, pending_id: item.id, path: item.path || '', diff: item.diff || '' },
+    data: { staged: true, pending_id: item.id, path: item.path || '', diff: item.diff || '', untrusted: item.untrusted === true },
   }));
   return [...shellCards, ...editCards];
+}
+
+const CARD_HEADING_FIELDS = ['action', 'to', 'account_id'];
+const CARD_HEADING_VALUE_CHARS = 200;
+const TOP_LEVEL_CARD_FIELD = /^ {2}"([^"\\]+)": (.*)$/;
+const NESTED_CARD_LINE = /^ {2}/;
+
+function topLevelCallFields(command) {
+  const fields = {};
+  let current = null;
+  for (const line of String(command || '').split('\n')) {
+    const field = TOP_LEVEL_CARD_FIELD.exec(line);
+    if (field) {
+      current = field[1];
+      fields[current] = field[2];
+    } else if (current && NESTED_CARD_LINE.test(line)) {
+      fields[current] += ' ' + line.trim();
+    } else {
+      current = null;
+    }
+  }
+  return fields;
+}
+
+function shortCardValue(value) {
+  const shown = value.replace(/,$/, '').replace(/\s+/g, ' ');
+  if (shown.length <= CARD_HEADING_VALUE_CHARS) return shown;
+  const rest = shown.length - CARD_HEADING_VALUE_CHARS;
+  return `${shown.slice(0, CARD_HEADING_VALUE_CHARS)}… (${rest} more characters, see the full call below)`;
+}
+
+function approvalCallDetails(command) {
+  const fields = topLevelCallFields(command);
+  const named = CARD_HEADING_FIELDS.filter(name => Object.hasOwn(fields, name));
+  if (!named.length) return '';
+  return ` (${named.map(name => `${name}: ${shortCardValue(fields[name])}`).join(', ')})`;
+}
+
+function approvalHeading(data) {
+  const tool = data && typeof data.tool === 'string' && data.tool ? data.tool : SHELL_TOOL;
+  if (tool === SHELL_TOOL) return 'shell command - waiting for your approval';
+  const details = approvalCallDetails(data.command);
+  return `${tool.replace(/^mcp__[^_]+__/, '')}${details} - waiting for your approval to run with these details`;
 }
 
 function resolveChatControls(session, defaults) {
@@ -245,11 +295,157 @@ function backendStatusPlan(status) {
   return { headline: 'Ollama is not installed.', note: NO_LOCAL_OLLAMA, offerStart: false, showInstall: true };
 }
 
+const TOOL_ERROR_PREFIX = 'error:';
+const TOOL_REASON_CHARS = 200;
+const BLOCKED_TOOL_REASONS = [
+  /the user rejected/, /did not approve/, /nobody is there to ask/, /only an admin account can use/,
+  /can only change files/, /does not run 'gh/, /is not enabled for this chat/, /is not a public mail server/,
+];
+
+function shortToolName(name) {
+  return String(name || 'tool').replace(/^mcp__[^_]+__/, '');
+}
+
+function toolOutcome(result) {
+  const text = typeof result === 'string' ? result.trim() : '';
+  if (!text.startsWith(TOOL_ERROR_PREFIX)) return { state: 'done', reason: '' };
+  const reason = text.slice(TOOL_ERROR_PREFIX.length).trim();
+  const blocked = BLOCKED_TOOL_REASONS.some(pattern => pattern.test(reason));
+  return { state: blocked ? 'blocked' : 'failed', reason };
+}
+
+function toolOutcomeLine(name, result) {
+  const { state, reason } = toolOutcome(result);
+  const tool = shortToolName(name);
+  if (state === 'done') return { text: `» ${tool} done`, cls: 'info' };
+  const shown = reason.length > TOOL_REASON_CHARS ? reason.slice(0, TOOL_REASON_CHARS) + '…' : reason;
+  return { text: `» ${tool} ${state}: ${shown}`, cls: 'err' };
+}
+
+function modelPatternsFrom(text) {
+  const patterns = String(text || '').split(/[,\n]/).map(p => p.trim()).filter(Boolean);
+  return patterns.length ? patterns : null;
+}
+
+function modelAccessHint(restricted) {
+  const hidden = (restricted || []).join(', ') || 'none';
+  return 'Model names or patterns (* matches anything), separated by commas. Only these can be listed or used. ' +
+    'A restricted model is only opened by its full name here, never by a pattern or a name without its tag. ' +
+    `Leave it blank for every model except the restricted ones (${hidden}). Admins can always use every model.`;
+}
+
+function modelAccessSummary(models) {
+  return models === null ? 'every model except the restricted ones' : (models.join(', ') || 'no models');
+}
+
+const LOCAL_MEDIA_PROTOCOLS = ['data:', 'blob:'];
+const CODE_LANGUAGE_CLASS = /^language-[\w+#.-]+$/;
+
+function isLocalMediaUrl(src, origin) {
+  let url;
+  try {
+    url = new URL(String(src), origin);
+  } catch (_) {
+    return false;
+  }
+  return LOCAL_MEDIA_PROTOCOLS.includes(url.protocol) || url.origin === origin;
+}
+
+function isCodeLanguageClass(value) {
+  const names = String(value).split(/\s+/).filter(Boolean);
+  return names.length > 0 && names.every(name => CODE_LANGUAGE_CLASS.test(name));
+}
+
+const AUTO_MODEL_ID = 'auto';
+const AUTO_MODEL_NAME = 'Arty Auto';
+const AUTO_MODEL_HINT = 'picks the best model for each message';
+const AUTO_CHOICE = Object.freeze({ endpoint_id: AUTO_MODEL_ID, model: AUTO_MODEL_ID });
+
+function isAutoChoice(choice) {
+  return !!choice && choice.endpoint_id === AUTO_MODEL_ID && (choice.model ?? choice.id) === AUTO_MODEL_ID;
+}
+
+function isListedChoice(choice, listed) {
+  const name = choice && (choice.model ?? choice.id);
+  return !!name && listed.some(m => m.id === name && m.endpoint_id === choice.endpoint_id);
+}
+
+function modelChoiceToShow(chat, accountChoice, listed) {
+  for (const choice of [chat, accountChoice]) {
+    if (isAutoChoice(choice)) return AUTO_CHOICE;
+    if (isListedChoice(choice, listed)) return { endpoint_id: choice.endpoint_id, model: choice.model ?? choice.id };
+  }
+  return AUTO_CHOICE;
+}
+
+function autoPickLabel(modelName, role) {
+  return role ? `${modelName} \u00b7 ${AUTO_MODEL_NAME}: ${role}` : modelName;
+}
+
+function replyModelLabel(message) {
+  return autoPickLabel(message.model || '', message.auto);
+}
+
+const PICKER_MODE_AUTO = 'auto';
+const PICKER_MODE_CHOSEN = 'chosen';
+
+function autoModelEntry() {
+  return { id: AUTO_MODEL_ID, endpoint_id: AUTO_MODEL_ID, provider: AUTO_MODEL_ID };
+}
+
+function pickerMode(current) {
+  return !current || isAutoChoice(current) ? PICKER_MODE_AUTO : PICKER_MODE_CHOSEN;
+}
+
+function autoMatchesSearch(query) {
+  return !query || AUTO_MODEL_NAME.toLowerCase().includes(query) || AUTO_MODEL_HINT.includes(query);
+}
+
+function modelMatchesSearch(model, query) {
+  return !query || model.id.toLowerCase().includes(query) || (model.provider || '').toLowerCase().includes(query);
+}
+
+function artyServers(listed) {
+  return new Set(listed.filter(m => m.own_tools === true).map(m => m.endpoint_id));
+}
+
+function nameAfterServerPrefix(id) {
+  const cut = id.indexOf('/');
+  return cut > 0 ? id.slice(cut + 1) : '';
+}
+
+function sameModelName(model, listed) {
+  const inner = nameAfterServerPrefix(model.id);
+  const reachedDirectly = !!inner && listed.some(other => other.id === inner && other.endpoint_id !== model.endpoint_id);
+  return reachedDirectly ? inner : model.id;
+}
+
+function distinctModels(listed) {
+  const servedByArty = artyServers(listed);
+  const routeRank = m => (sameModelName(m, listed) !== m.id ? 2 : servedByArty.has(m.endpoint_id) ? 1 : 0);
+  const keptByName = new Map();
+  for (const m of listed) {
+    const name = sameModelName(m, listed);
+    const held = keptByName.get(name);
+    if (!held || routeRank(m) < routeRank(held)) keptByName.set(name, m);
+  }
+  const kept = new Set(keptByName.values());
+  return listed.filter(m => kept.has(m));
+}
+
+function modelMenuEntries(listed, query) {
+  const search = (query || '').trim().toLowerCase();
+  const autoShown = autoMatchesSearch(search) ? [autoModelEntry()] : [];
+  return [...autoShown, ...distinctModels(listed).filter(m => modelMatchesSearch(m, search))];
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
+    isLocalMediaUrl, isCodeLanguageClass, toolOutcome, toolOutcomeLine,
+    modelPatternsFrom, modelAccessHint, modelAccessSummary,
     DAY_MS, TOAST_MS, TOAST_ERROR_MS, TOAST_FADE_MS,
     sentenceCase, dateGroupLabel, themeChoiceFrom, themeIsLight, showToast, removalQuestion, confirmRemove,
-    pendingApprovalCards, resolveChatControls, isLastAssistantMessage,
+    pendingApprovalCards, UNTRUSTED_APPROVAL_NOTE, approvalHeading, resolveChatControls, isLastAssistantMessage,
     CHAT_TITLE_CHARS, submitOnEnter, closeOnEscape, chatTitleFrom, firstUnusedModel,
     MAX_SPOKEN_CHARS, takeSpokenSentences, speakableText, spokenPieces,
     REGENERATE_WITH, regenerateChoice,
@@ -257,6 +453,8 @@ if (typeof module !== 'undefined' && module.exports) {
     showListLoading,
     failureMessage,
     NO_EMAIL_ACCOUNTS, ruleAccountChoices,
+    AUTO_MODEL_ID, AUTO_MODEL_NAME, AUTO_MODEL_HINT, AUTO_CHOICE, isAutoChoice, modelChoiceToShow, autoPickLabel, replyModelLabel,
+    autoModelEntry, PICKER_MODE_AUTO, PICKER_MODE_CHOSEN, pickerMode, distinctModels, modelMenuEntries,
     BACKEND_RUNS_ON_ITS_OWN, NO_LOCAL_OLLAMA, FOUND_NOT_ADDED, backendStatusPlan, scanEndpointBody, scanSummary, addedLocalMessage,
   };
 }

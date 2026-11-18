@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.join(ROOT, "server_configs"))
 import model_endpoints
 import routes
 import shell_tool
+from approval_policy import ApprovalPolicyStore
 from chat_session_store import ChatSessionStore
 from folder_store import FolderStore
 from mcp_servers_store import McpServerStore
@@ -37,6 +38,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(routes, "prompts", PromptStore(data_dir))
     monkeypatch.setattr(routes, "memory", MemoryStore(data_dir))
     monkeypatch.setattr(routes, "mcp_servers", McpServerStore(data_dir))
+    monkeypatch.setattr(routes, "approval_policy", ApprovalPolicyStore(data_dir))
     app = FastAPI()
     app.include_router(routes.router)
     return TestClient(app)
@@ -155,9 +157,7 @@ def test_prompts_and_memory(client):
 
 def test_config_reports_version_and_model_patterns(client):
     data = client.get("/api/config").json()
-    assert data["version"] == VERSION
-    assert data["own_tools_models"] == ["Arty", "assistant-core", "arty/*"]
-    assert data["inline_media_prefixes"] == ["/arty-files/"]
+    assert data == {"version": VERSION, "inline_media_prefixes": ["/arty-files/"], "voice_models": []}
 
 
 def model_server_replies(monkeypatch, replies):
@@ -228,15 +228,20 @@ def test_config_names_the_stored_backend_without_probing(client, monkeypatch, tm
     monkeypatch.setattr(routes.config, "ollama_base_url", None)
     stored_endpoints(monkeypatch, tmp_path, "http://localhost:11434")
     asked = model_server_replies(monkeypatch, ENGINE_STAND_IN)
-    assert client.get("/api/config").json()["ollama_base_url"] == "http://localhost:11434"
+    assert local_server_address(client, monkeypatch) == "http://localhost:11434"
     assert asked == []
+
+
+def local_server_address(client, monkeypatch):
+    monkeypatch.setattr(routes, "_current_user_is_active_admin", lambda: True)
+    return client.get("/api/hardware/local-server").json()["ollama_base_url"]
 
 
 def test_config_offers_the_default_address_when_no_backend_is_stored(client, monkeypatch, tmp_path):
     monkeypatch.setattr(routes.config, "ollama_base_url", None)
     stored_endpoints(monkeypatch, tmp_path)
     asked = model_server_replies(monkeypatch, ENGINE_STAND_IN)
-    assert client.get("/api/config").json()["ollama_base_url"] == "http://localhost:11434"
+    assert local_server_address(client, monkeypatch) == "http://localhost:11434"
     assert asked == []
 
 

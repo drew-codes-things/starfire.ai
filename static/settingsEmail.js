@@ -147,13 +147,13 @@ async function openEmailMessage(folder, uid) {
       `</div>` +
       `<div class="email-ai-result" id="emailAiResult" hidden></div>`;
 
-    const aiResult = document.getElementById('emailAiResult');
+    const aiResult = settingsEls.emailReadingPane.querySelector('#emailAiResult');
     const showAi = text => { aiResult.hidden = false; aiResult.textContent = text; };
 
     settingsEls.emailReadingPane.querySelector('[data-act="summarize"]').onclick = () => runEmailAi('summarize', folder, uid, showAi);
     settingsEls.emailReadingPane.querySelector('[data-act="urgency"]').onclick = () => runEmailAi('check_urgency', folder, uid, showAi);
     settingsEls.emailReadingPane.querySelector('[data-act="draft"]').onclick = async () => {
-      await runEmailAi('draft_reply', folder, uid, text => { document.getElementById('emailReplyBox').value = text; });
+      await runEmailAi('draft_reply', folder, uid, text => { settingsEls.emailReadingPane.querySelector('#emailReplyBox').value = text; });
     };
     settingsEls.emailReadingPane.querySelector('[data-act="archive"]').onclick = async () => {
       await fetch(`/api/email/${currentEmailAccountId}/message/${uid}/archive?folder=${encodeURIComponent(folder)}`, { method: 'POST' });
@@ -166,7 +166,7 @@ async function openEmailMessage(folder, uid) {
       settingsEls.emailReadingPane.innerHTML = '<p class="settings-hint">select a message</p>';
     };
     settingsEls.emailReadingPane.querySelector('[data-act="reply"]').onclick = async () => {
-      const body = document.getElementById('emailReplyBox').value.trim();
+      const body = settingsEls.emailReadingPane.querySelector('#emailReplyBox').value.trim();
       if (!body) return;
       await fetch(`/api/email/${currentEmailAccountId}/message/${uid}/reply?folder=${encodeURIComponent(folder)}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body }),
@@ -179,7 +179,7 @@ async function openEmailMessage(folder, uid) {
 }
 
 async function runEmailAi(action, folder, uid, onResult) {
-  const model = currentModel();
+  const model = concreteModel();
   if (!model) { onResult('select a model in the header first'); return; }
   onResult('thinking…');
   try {

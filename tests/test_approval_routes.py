@@ -60,13 +60,19 @@ def sam(app):
     return login(app, "sam@example.com")
 
 
+def workspace_of(client, tmp_path):
+    folder = tmp_path / "data" / "users" / client.user_id / "workspace"
+    folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
 def stage_edit(owner, path, content="new content\n"):
     diff = file_edit_tool.make_diff(str(path), file_edit_tool.read_current(str(path)), content)
     return file_edit_tool.stage(str(path), content, diff, owner=owner.user_id)
 
 
 def test_approving_an_edit_writes_it_once(admin, tmp_path):
-    target = tmp_path / "notes" / "todo.txt"
+    target = workspace_of(admin, tmp_path) / "notes" / "todo.txt"
     edit_id = stage_edit(admin, target)
     assert [e["id"] for e in admin.get("/api/pending-edits").json()["edits"]] == [edit_id]
     assert admin.post(f"/api/pending-edits/{edit_id}/approve").json() == {"ok": True, "path": str(target)}
@@ -76,7 +82,7 @@ def test_approving_an_edit_writes_it_once(admin, tmp_path):
 
 
 def test_rejecting_an_edit_leaves_the_file_alone(admin, tmp_path):
-    target = tmp_path / "keep.txt"
+    target = workspace_of(admin, tmp_path) / "keep.txt"
     target.write_text("original\n")
     edit_id = stage_edit(admin, target)
     assert admin.post(f"/api/pending-edits/{edit_id}/reject").json() == {"ok": True}
@@ -96,7 +102,7 @@ def test_another_account_cannot_see_approve_or_reject_an_edit(admin, sam, tmp_pa
 
 
 def test_an_edit_that_cannot_be_written_reports_why_and_is_dropped(admin, tmp_path):
-    folder = tmp_path / "a-folder"
+    folder = workspace_of(admin, tmp_path) / "a-folder"
     folder.mkdir()
     edit_id = stage_edit(admin, folder)
     response = admin.post(f"/api/pending-edits/{edit_id}/approve")

@@ -3,9 +3,11 @@ import logging
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
-from auth import (ACCOUNT_LOCKOUT_SECONDS, ACCOUNT_MAX_FAILED_LOGINS, MAX_FIELD_CHARS, SESSION_COOKIE,
-                  SESSION_LIFETIME_SECONDS, AccountError, KnownAddresses, LoginLimiter, SessionStore, UserStore,
-                  client_address, current_user, normalise_email, parse_networks, request_host, require_admin)
+from auth import (ACCOUNT_LOCKOUT_SECONDS, ACCOUNT_MAX_FAILED_LOGINS, LOGIN_ATTEMPT_WINDOW_SECONDS,
+                  LOGIN_ATTEMPTS_PER_ADDRESS, MAX_FIELD_CHARS, SESSION_COOKIE, WRONG_CURRENT_PASSWORD,
+                  AccountError, KnownAddresses, LoginLimiter, SessionStore, UserStore, client_address,
+                  current_user, forget_legacy_cookie, normalise_email, parse_networks, request_host,
+                  require_admin, all_session_tokens, set_session_cookie)
 from config import config
 
 router = APIRouter(prefix="/api/auth")
@@ -13,6 +15,8 @@ users = UserStore(config.data_dir)
 sessions = SessionStore(config.data_dir, identity_check_hosts=config.identity_check_hosts())
 limiter = LoginLimiter()
 account_limiter = LoginLimiter(max_failures=ACCOUNT_MAX_FAILED_LOGINS, lockout_seconds=ACCOUNT_LOCKOUT_SECONDS)
+address_attempts = LoginLimiter(max_failures=LOGIN_ATTEMPTS_PER_ADDRESS, lockout_seconds=LOGIN_ATTEMPT_WINDOW_SECONDS)
+password_change_limiter = LoginLimiter()
 known_addresses = KnownAddresses(config.data_dir)
 logger = logging.getLogger(__name__)
 TRUSTED_PROXIES = parse_networks(config.trusted_proxies)
@@ -70,8 +74,7 @@ def _registry():
 
 def _start_session(request: Request, response: Response, user_id: str) -> None:
     token = sessions.create(user_id, request_host(request))
-    response.set_cookie(SESSION_COOKIE, token, max_age=SESSION_LIFETIME_SECONDS,
-                        httponly=True, secure=config.cookie_secure, samesite="lax", path="/")
+    set_session_cookie(response, token)
 
 
 def _already_signed_in_as(request: Request, email: str) -> bool:
@@ -90,6 +93,10 @@ def login(body: LoginRequest, request: Request, response: Response):
     if len(body.email) > MAX_FIELD_LENGTH or len(body.password) > MAX_FIELD_LENGTH:
         raise HTTPException(status_code=400, detail="email or password is too long")
     address = client_address(request, TRUSTED_PROXIES, config.client_ip_header)
+    busy = address_attempts.take_attempt(address)
+    if busy:
+        raise HTTPException(status_code=429, headers={"Retry-After": str(busy)},
+                            detail=f"too many sign-in attempts from this address - try again in {busy} s")
     email = normalise_email(body.email)
     limit_key = f"{address}|{email}"
     wait = limiter.seconds_locked(limit_key) or _account_wait(request, email, address)
@@ -102,6 +109,7 @@ def login(body: LoginRequest, request: Request, response: Response):
         logger.warning("failed sign-in for %s from %s", email, address)
         raise HTTPException(status_code=401, detail="wrong email or password")
     limiter.reset(limit_key)
+    address_attempts.reset(address)
     known_addresses.remember(email, address)
     _start_session(request, response, user.id)
     return user.public()
@@ -193,10 +201,17 @@ def change_password(body: PasswordRequest, request: Request, response: Response)
     user = current_user(request, users, sessions)
     if not user:
         raise HTTPException(status_code=401, detail="not logged in")
+    wait = password_change_limiter.seconds_locked(user.id)
+    if wait:
+        raise HTTPException(status_code=429, detail=f"too many wrong passwords - try again in {wait // 60 + 1} min",
+                            headers={"Retry-After": str(wait)})
     try:
         users.change_password(user.id, body.current, body.password, body.confirm)
     except AccountError as error:
+        if str(error) == WRONG_CURRENT_PASSWORD:
+            password_change_limiter.record_failure(user.id)
         raise HTTPException(status_code=400, detail=str(error))
+    password_change_limiter.reset(user.id)
     sessions.revoke_all_for(user.id)
     _start_session(request, response, user.id)
     return {"ok": True}
@@ -204,10 +219,10 @@ def change_password(body: PasswordRequest, request: Request, response: Response)
 
 @router.post("/logout")
 def logout(request: Request, response: Response):
-    token = request.cookies.get(SESSION_COOKIE, "")
-    if token:
+    for token in all_session_tokens(request):
         sessions.revoke(token)
-    response.delete_cookie(SESSION_COOKIE, path="/")
+    response.delete_cookie(SESSION_COOKIE, path="/", secure=config.cookie_secure)
+    forget_legacy_cookie(response)
     return {"ok": True}
 
 

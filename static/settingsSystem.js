@@ -99,7 +99,7 @@ async function refreshUsage() {
     if (models.length) {
       html += '<div class="settings-hint" style="margin-top:8px">By model:</div>';
       for (const [name, t] of models) {
-        html += `<div class="endpoint-row"><span class="endpoint-label">${name}</span>` +
+        html += `<div class="endpoint-row"><span class="endpoint-label">${escapeHtml(name)}</span>` +
           `<span class="endpoint-meta">${t.turns} turns · ${fmtCost(t.cost)}</span></div>`;
       }
     }
@@ -492,6 +492,22 @@ async function accountRequest(method, url, body) {
   return data;
 }
 
+async function chooseAccountModels(user) {
+  try {
+    const current = await accountRequest('GET', `/api/auth/users/${user.id}/models`);
+    const typed = await showDialog({
+      title: `models ${user.email} may use`, text: modelAccessHint(current.restricted),
+      input: (current.models || []).join(', '), allowEmpty: true, okLabel: 'save',
+      placeholder: 'blank: every model except the restricted ones',
+    });
+    if (typed === null) return;
+    const saved = await accountRequest('PUT', `/api/auth/users/${user.id}/models`, { models: modelPatternsFrom(typed) });
+    setAccountResult(`${user.email} may use: ${modelAccessSummary(saved.models)}`, 'ok');
+  } catch (e) {
+    setAccountResult(e.message, 'error');
+  }
+}
+
 async function refreshAccounts() {
   if (!currentUser || currentUser.role !== 'admin' || !accountEls.list) return;
   try {
@@ -505,6 +521,7 @@ async function refreshAccounts() {
       li.innerHTML =
         `<span class="endpoint-label">${escapeHtml(user.name)} <span class="endpoint-meta">${escapeHtml(user.email)}${isSelf ? ' · you' : ''}${user.disabled ? ' · disabled' : ''}${when ? ' · since ' + escapeHtml(when) : ''}</span></span>` +
         `<select class="account-role"><option value="user">user</option><option value="admin">admin</option></select>` +
+        `<button class="btn ghost account-models" type="button">models</button>` +
         `<button class="btn ghost account-reset" type="button">reset password</button>` +
         `<button class="btn ghost account-toggle" type="button">${user.disabled ? 'enable' : 'disable'}</button>` +
         `<button class="endpoint-remove" type="button" title="Delete this account and its data" aria-label="Delete this account and its data">×</button>`;
@@ -516,6 +533,9 @@ async function refreshAccounts() {
         catch (e) { setAccountResult(e.message, 'error'); }
         refreshAccounts();
       };
+      const models = li.querySelector('.account-models');
+      models.hidden = user.role === 'admin';
+      models.onclick = () => chooseAccountModels(user);
       li.querySelector('.account-reset').onclick = async () => {
         const password = await showDialog({ title: `new password for ${user.email}`, text: 'At least 10 characters. Every browser signed in to this account will be logged out.', input: '', inputType: 'password', placeholder: 'new password', okLabel: 'set password' });
         if (!password) return;

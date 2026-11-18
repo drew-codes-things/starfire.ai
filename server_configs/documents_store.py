@@ -42,12 +42,16 @@ def split_into_chunks(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CH
         chunks.append(current)
     return chunks
 
+MAX_PDF_PAGES = 2000
+
 def extract_text(filename: str, raw: bytes) -> str:
     ext = os.path.splitext(filename)[1].lower()
     if ext == ".pdf":
         from pypdf import PdfReader
         from io import BytesIO
         reader = PdfReader(BytesIO(raw))
+        if len(reader.pages) > MAX_PDF_PAGES:
+            raise ValueError(f"that PDF has more than {MAX_PDF_PAGES} pages")
         return "\n\n".join(page.extract_text() or "" for page in reader.pages)
     return raw.decode("utf-8", errors="replace")
 
@@ -93,6 +97,9 @@ class DocumentStore:
     def list(self) -> list[Document]:
         raw = self._load_raw()
         return [Document(**d) for d in raw["documents"]]
+
+    def stored_bytes(self) -> int:
+        return os.path.getsize(self.path) if os.path.exists(self.path) else 0
 
     @holds_file_lock()
     def add(self, filename: str, raw_bytes: bytes) -> Document:

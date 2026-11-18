@@ -49,7 +49,7 @@ def install(data_dir: str, monkeypatch, admin_email: str) -> FastAPI:
     monkeypatch.setattr(routes, "endpoints", ModelEndpointStore(data_dir))
     monkeypatch.setattr(routes, "mcp_servers", McpServerStore(data_dir))
     monkeypatch.setattr(auth, "hash_password", fast_hash)
-    monkeypatch.setattr(routes.email_client, "list_folders", lambda account, password: ["INBOX"])
+    monkeypatch.setattr(routes.email_client, "list_folders", lambda account, password, **options: ["INBOX"])
     users.upsert(admin_email, "Admin", "admin", fast_hash(PASSWORD))
     application = FastAPI()
     auth.install(application, users, sessions)

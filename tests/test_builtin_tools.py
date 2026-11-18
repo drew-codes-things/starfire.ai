@@ -16,6 +16,7 @@ import memory_store
 from api_key_manager import APIKeyManager
 from builtin_tools import ToolContext
 from documents_store import DocumentStore
+from host_sandbox import HostLimits
 from email_store import EmailAccountStore
 from local_gen_store import GeneratedFileStore
 from memory_store import MemoryStore
@@ -88,12 +89,14 @@ def test_incomplete_mail_actions_are_refused_without_touching_the_mailbox(ctx, a
 
 
 def test_a_mail_server_error_comes_back_as_a_tool_error(ctx, account, monkeypatch):
-    def refuse(*args):
+    def refuse(*args, **options):
         raise OSError("login refused")
 
     monkeypatch.setattr(email_client, "send_message", refuse)
-    result = call("manage_email", {"action": "send", "account_id": account.id, "to": "a@b.example", "body": "x"}, ctx)
-    assert result == "error: login refused"
+    sending = {"action": "send", "account_id": account.id, "to": "a@b.example", "body": "x"}
+    assert call("manage_email", sending, ctx) == f"error: {email_client.MAIL_SERVER_UNREACHABLE}"
+    ctx.may_use_host_tools = True
+    assert call("manage_email", sending, ctx) == "error: login refused"
 
 
 def test_the_model_manages_tasks_on_its_own_endpoint_and_model(ctx):
@@ -198,11 +201,14 @@ def test_bad_document_requests_make_no_file(ctx, arguments, expected):
 def test_an_edit_that_needs_approval_is_staged_not_written(ctx, tmp_path):
     ctx.may_use_host_tools = True
     ctx.require_edit_approval = True
+    ctx.host_limits = HostLimits(workspace=str(tmp_path))
     target = tmp_path / "config.txt"
     target.write_text("old\n")
     staged = json.loads(call("edit_file", {"path": str(target), "content": "new\n"}, ctx))
     try:
-        assert staged["staged"] is True and "-old" in staged["diff"] and "+new" in staged["diff"]
+        assert staged["staged"] is True and "diff" not in staged
+        pending = file_edit_tool.get_pending(staged["pending_id"], None)
+        assert "-old" in pending["diff"] and "+new" in pending["diff"]
         assert target.read_text() == "old\n"
     finally:
         file_edit_tool.remove_pending(staged["pending_id"], None)

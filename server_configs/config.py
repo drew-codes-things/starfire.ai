@@ -26,8 +26,14 @@ class AppConfig(BaseSettings):
     public_base_url: str = ""
     max_document_mb: int = 20
     max_attachments_mb: int = 1024
+    max_documents_mb: int = 512
     max_restore_mb: int = 1024
     min_free_disk_mb: int = 512
+    edit_allowed_roots: str = ""
+    restricted_models: str = "*-abl,*-abl-*,*abliterated*,*uncensored*"
+    generations_per_minute: int = 20
+    generations_per_day: int = 400
+    mail_requests_per_minute: int = 60
 
     def own_tools_patterns(self) -> list[str]:
         return [p.strip() for p in self.own_tools_models.split(",") if p.strip()]
@@ -38,6 +44,12 @@ class AppConfig(BaseSettings):
     def identity_check_hosts(self) -> list[str]:
         local = [f"127.0.0.1:{self.port}", f"localhost:{self.port}", f"[::1]:{self.port}"]
         return local + [host.strip() for host in self.session_check_hosts.split(",") if host.strip()]
+
+    def edit_roots(self) -> list[str]:
+        return [os.path.abspath(root.strip()) for root in self.edit_allowed_roots.split(",") if root.strip()]
+
+    def restricted_model_patterns(self) -> list[str]:
+        return [p.strip() for p in self.restricted_models.split(",") if p.strip()]
 
     def voices_folder(self) -> str:
         return self.model_voices_dir or os.path.join(self.data_dir, "voices")

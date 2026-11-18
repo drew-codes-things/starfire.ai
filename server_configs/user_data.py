@@ -7,6 +7,7 @@ import shutil
 from contextlib import contextmanager
 from types import SimpleNamespace
 
+from approval_policy import ApprovalPolicyStore
 from attachments import AttachmentStore
 from chat_session_store import ChatSessionStore
 from documents_store import DocumentStore
@@ -14,6 +15,7 @@ from email_store import EmailAccountStore, EmailRuleStore
 from folder_store import FolderStore
 from local_gen_store import GeneratedFileStore
 from memory_store import MemoryStore
+from model_choice import ModelChoiceStore
 from note_store import DEFAULT_TEMPLATES, NoteStore, NoteTemplateStore
 from preset_store import PresetStore
 from prompt_store import PromptStore
@@ -53,6 +55,8 @@ def build_stores(data_dir: str) -> SimpleNamespace:
         usage=UsageStore(data_dir),
         generated_files=GeneratedFileStore(data_dir),
         attachment_store=AttachmentStore(data_dir),
+        approval_policy=ApprovalPolicyStore(data_dir),
+        model_choice=ModelChoiceStore(data_dir),
     )
 
 

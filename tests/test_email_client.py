@@ -63,8 +63,9 @@ class FakeMailbox:
         self.calls = []
         self.logged_out = 0
 
-    def imap(self, host, port):
+    def imap(self, host, port, **options):
         mailbox = self
+        mailbox.options = options
 
         class Connection:
             selected = None
@@ -119,10 +120,25 @@ class FakeMailbox:
         return Connection()
 
 
+PUBLIC_ADDRESS = "93.184.215.14"
+
+
 @pytest.fixture
-def mailbox(monkeypatch):
+def public_dns(monkeypatch):
+    lookups = []
+
+    def resolve(host, port, *args, **kwargs):
+        lookups.append(host)
+        return [(2, 1, 6, "", (PUBLIC_ADDRESS, port))]
+
+    monkeypatch.setattr(email_client.socket, "getaddrinfo", resolve)
+    return lookups
+
+
+@pytest.fixture
+def mailbox(monkeypatch, public_dns):
     fake = FakeMailbox()
-    monkeypatch.setattr(email_client.imaplib, "IMAP4_SSL", fake.imap)
+    monkeypatch.setattr(email_client, "PinnedIMAP4SSL", fake.imap)
     return fake
 
 
@@ -134,18 +150,22 @@ class FakeSmtp:
         self.login_error = None
         self.send_error = None
         self.hangs_up_on_quit = False
+        self.options = []
+        self.starttls_contexts = []
 
     def factory(self, secure):
         smtp = self
 
         class Connection:
 
-            def __init__(self, host, port):
+            def __init__(self, host, port, **options):
                 self.events = [("connect", "ssl" if secure else "plain", host, port)]
                 smtp.connections.append(self.events)
+                smtp.options.append(options)
 
-            def starttls(self):
+            def starttls(self, context=None):
                 self.events.append(("starttls",))
+                smtp.starttls_contexts.append(context)
 
             def login(self, user, password):
                 self.events.append(("login", user))
@@ -169,10 +189,10 @@ class FakeSmtp:
 
 
 @pytest.fixture
-def smtp(monkeypatch):
+def smtp(monkeypatch, public_dns):
     fake = FakeSmtp()
-    monkeypatch.setattr(email_client.smtplib, "SMTP", fake.factory(secure=False))
-    monkeypatch.setattr(email_client.smtplib, "SMTP_SSL", fake.factory(secure=True))
+    monkeypatch.setattr(email_client, "PinnedSMTP", fake.factory(secure=False))
+    monkeypatch.setattr(email_client, "PinnedSMTPSSL", fake.factory(secure=True))
     return fake
 
 

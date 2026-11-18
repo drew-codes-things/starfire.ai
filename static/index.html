@@ -69,6 +69,8 @@
     <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4L7 17M17 7l1.4-1.4"/></symbol>
     <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></symbol>
     <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M9 20h6M12 16.5V20"/></symbol>
+    <symbol id="i-gauge" viewBox="0 0 24 24"><path d="M4.5 17.5a8.5 8.5 0 1 1 15 0"/><path d="M12 13.5l3.5-4"/><circle cx="12" cy="13.5" r="1"/></symbol>
+    <symbol id="i-database" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="2.75"/><path d="M5 6v12c0 1.5 3.1 2.75 7 2.75s7-1.25 7-2.75V6M5 12c0 1.5 3.1 2.75 7 2.75s7-1.25 7-2.75"/></symbol>
   </svg>
 
   <div class="app" id="app">
@@ -144,6 +146,10 @@
             <span id="modelPickerLabel">Select a model</span> <span class="caret"><svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></span>
           </button>
           <div class="model-menu" id="modelMenu" hidden>
+            <div class="segmented model-mode" role="group" aria-label="How the model is chosen">
+              <button type="button" id="modelModeAuto" aria-pressed="true">Arty Auto</button>
+              <button type="button" id="modelModeChosen" aria-pressed="false">Choose a model</button>
+            </div>
             <input id="modelSearch" type="search" placeholder="Search models" aria-label="Search models" autocomplete="off" spellcheck="false" />
             <ul id="modelMenuList" role="listbox" aria-label="Models"></ul>
           </div>
@@ -224,6 +230,7 @@
               <button class="send-btn" type="submit" id="sendBtn" title="Send" aria-label="Send message" disabled><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg></button>
             </div>
           </form>
+          <div class="chat-stats" id="chatStats" role="group" aria-label="Chat status" hidden></div>
           <div class="suggestions" id="suggestions"></div>
           <p class="composer-hint" id="composerHint">Enter to send &middot; Shift+Enter for a new line &middot; / prompts &middot; # knowledge &middot; @ model</p>
         </div>
@@ -383,6 +390,16 @@
               <h3>Configured endpoints</h3>
               <ul class="endpoint-list" id="endpointList"></ul>
             </div>
+
+            <div class="settings-card">
+              <h3>Arty Auto</h3>
+              <p class="settings-hint">Arty Auto picks a model for every message: pictures and video go to the vision model, code to the code model, reminders, phone and home tasks to the agent, and everything else to the chat model. Leave a role on automatic to let starfire choose; accounts only ever get models they are allowed to use.</p>
+              <div id="autoModelRoles"></div>
+              <div class="settings-row">
+                <button type="button" class="btn send" id="saveAutoModelBtn">Save</button>
+              </div>
+              <p class="settings-hint" id="autoModelResult"></p>
+            </div>
           </div>
 
           <div class="settings-panel" data-panel="chats" hidden>
@@ -511,7 +528,7 @@
               <div class="settings-row" id="editApprovalRow" hidden>
                 <label class="theme-toggle">
                   <input type="checkbox" id="toggleEditApproval" />
-                  <span>Require my approval before an edit is written (default: auto-apply)</span>
+                  <span>Require my approval before an edit is written (default: on, saved on the server)</span>
                 </label>
               </div>
               <div class="settings-row">
@@ -523,9 +540,10 @@
               <div class="settings-row" id="shellApprovalRow" hidden>
                 <label class="theme-toggle">
                   <input type="checkbox" id="toggleShellApproval" />
-                  <span>Ask me before each command runs - the command waits in the chat for approve/reject (recommended)</span>
+                  <span>Ask me before each command runs - the command waits in the chat for approve/reject (default: on, saved on the server)</span>
                 </label>
               </div>
+              <p class="settings-hint error" id="approvalPolicyResult" hidden></p>
               <p class="settings-hint">Add facts in the Memory tab, files in the Knowledge tab, jobs in Automations, accounts in Email, to-dos in Notes.</p>
             </div>
 
@@ -1146,6 +1164,7 @@
   <script src="streamingRenderer.js"></script>
   <script src="providers.js"></script>
   <script src="uiLogic.js"></script>
+  <script src="chatStatsLogic.js"></script>
   <script src="mcpSignInLogic.js"></script>
   <script src="answerGuard.js"></script>
   <script src="sideChat.js"></script>

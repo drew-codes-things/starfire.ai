@@ -13,6 +13,10 @@ function diffToHtml(diffText) {
 
 const openApprovals = new Map();
 
+function untrustedNoteHtml() {
+  return `<div class="diff-card-source approval-untrusted" role="note">${escapeHtml(UNTRUSTED_APPROVAL_NOTE)}</div>`;
+}
+
 function trackApproval(pendingId, card) {
   card.dataset.pendingId = pendingId;
   openApprovals.set(pendingId, card);
@@ -44,7 +48,13 @@ async function restorePendingApprovals() {
 
 function renderDiffCard(resultJson) {
   let data;
-  try { data = JSON.parse(resultJson); } catch (_) { printLine('» edit_file done', 'info'); return; }
+  try {
+    data = JSON.parse(resultJson);
+  } catch (_) {
+    const outcome = toolOutcomeLine('edit_file', resultJson);
+    printLine(outcome.text, outcome.cls);
+    return;
+  }
   const w = $('welcome');
   if (w) w.remove();
 
@@ -53,6 +63,7 @@ function renderDiffCard(resultJson) {
   const status = data.staged ? 'proposed edit - awaiting approval' : data.applied ? 'applied edit' : 'edit failed';
   card.innerHTML =
     `<div class="diff-card-header">${status} - ${escapeHtml(data.path || '')}${data.error ? ' - ' + escapeHtml(data.error) : ''}</div>` +
+    (data.staged && data.untrusted ? untrustedNoteHtml() : '') +
     `<pre>${diffToHtml(data.diff || '')}</pre>`;
 
   if (data.staged && data.pending_id) {
@@ -99,8 +110,9 @@ function renderShellApprovalCard(data) {
   card.className = 'diff-card shell-card';
   const where = data.cwd ? ` in ${escapeHtml(data.cwd)}` : '';
   card.innerHTML =
-    `<div class="diff-card-header">shell command - waiting for your approval${where}</div>` +
-    `<pre>${escapeHtml(data.command || '')}</pre>`;
+    `<div class="diff-card-header">${escapeHtml(approvalHeading(data))}${where}</div>` +
+    (data.untrusted ? untrustedNoteHtml() : '') +
+    `<pre class="approval-text">${escapeHtml(data.command || '')}</pre>`;
   const actionsRow = document.createElement('div');
   actionsRow.className = 'diff-card-actions';
   const approveBtn = document.createElement('button');
@@ -133,11 +145,12 @@ function renderShellResultCard(result) {
   const w = $('welcome');
   if (w) w.remove();
   const text = result || '';
-  const failed = text.startsWith('error:');
+  const { state } = toolOutcome(text);
+  const heading = { done: 'shell output', blocked: 'shell command blocked', failed: 'shell command not run' }[state];
   const card = document.createElement('div');
   card.className = 'diff-card shell-card';
   card.innerHTML =
-    `<div class="diff-card-header">${failed ? 'shell command not run' : 'shell output'}</div>` +
+    `<div class="diff-card-header">${heading}</div>` +
     `<pre>${escapeHtml(text)}</pre>`;
   els.output.appendChild(card);
   els.output.scrollTop = els.output.scrollHeight;

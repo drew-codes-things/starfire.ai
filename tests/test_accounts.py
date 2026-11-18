@@ -79,7 +79,8 @@ def test_users_cannot_manage_accounts_or_shared_settings(app, admin):
     assert sam.post("/api/model-endpoints", json={"base_url": "http://x", "kind": "openai"}).status_code == 403
     assert sam.post("/api/mcp/servers", json={"command": "npx"}).status_code == 403
     assert sam.get("/api/backup").status_code == 403
-    assert sam.get("/api/model-endpoints").status_code == 200
+    assert sam.get("/api/model-endpoints").status_code == 403
+    assert sam.get("/api/models").status_code == 200
     assert sam.get("/api/mcp/servers").status_code == 200
     assert sam.post("/api/notes", json={"title": "mine"}).status_code == 200
 

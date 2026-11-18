@@ -9,10 +9,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "server_configs"))
 
 import code_check
+import host_sandbox
 
 needs_node = pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
 needs_bash = pytest.mark.skipif(shutil.which("bash") is None, reason="bash is not installed")
 needs_cc = pytest.mark.skipif(code_check._c_compiler() is None, reason="no C compiler installed")
+needs_sandbox = pytest.mark.skipif(host_sandbox.working_sandbox_program() is None,
+                                   reason="bubblewrap is not installed or cannot start here")
 
 
 def test_language_aliases_map_to_one_checker():
@@ -82,11 +85,12 @@ def test_shell_syntax():
 
 
 def test_async_wrapper_returns_same_shape():
-    result = asyncio.run(code_check.check("python", "x = 1\n"))
+    result = asyncio.run(code_check.check("python", "x = 1\n", account="someone"))
     assert result["status"] == "ok"
 
 
 @needs_cc
+@needs_sandbox
 def test_c_with_system_headers_is_checked():
     assert code_check.check_sync("c", "#include <stdio.h>\nint main(void) { puts(\"hi\"); return 0; }\n")["status"] == "ok"
     assert code_check.check_sync("cpp", "#include <vector>\nint main() { std::vector<int> v; return 0; }\n")["status"] == "ok"

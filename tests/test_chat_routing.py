@@ -295,3 +295,25 @@ def test_a_chat_is_counted_in_that_accounts_usage_only(app, chat_model):
     assert "four words of reply" in reply.text
     assert sam.get("/api/usage").json()["today"]["turns"] == 1
     assert admin.get("/api/usage").json()["today"]["turns"] == 0
+
+
+def test_the_chat_route_passes_the_servers_usage_on_and_a_chat_keeps_it_with_the_reply(app, model_server):
+    _, reply = model_server
+    reply["body"] = "\n".join([
+        'data: {"choices": [{"delta": {"content": "Hi"}, "finish_reason": "stop"}], '
+        '"usage": {"prompt_tokens": 2006, "completion_tokens": 2, "prompt_tokens_details": {"cached_tokens": 1920}}}',
+        "data: [DONE]"])
+    endpoint = routes.endpoints.add("https://models.example.com/v1", kind="api-key")
+    routes.api_keys.save(endpoint.id, "sk-PLACEHOLDER")
+    admin = login(app, "admin@example.com")
+
+    response = chat(admin, endpoint.id, {"role": "user", "content": "hello"})
+    events = [json.loads(line[len("data:"):]) for line in response.text.splitlines() if line.startswith("data:")]
+    usage = {"prompt_tokens": 2006, "completion_tokens": 2, "cached_prompt_tokens": 1920}
+    assert events == [{"delta": "Hi"}, {"usage": usage}, {"done": True}]
+
+    session = admin.post("/api/chat/sessions", json={"title": "hello"}).json()
+    messages = [{"role": "user", "content": "hello"},
+                {"role": "assistant", "content": "Hi", "usage": {**usage, "tokens_per_second": 27.4}, "steps": 3}]
+    assert admin.put(f"/api/chat/sessions/{session['id']}", json={"messages": messages}).status_code == 200
+    assert admin.get(f"/api/chat/sessions/{session['id']}").json()["messages"] == messages

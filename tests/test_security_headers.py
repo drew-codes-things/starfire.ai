@@ -30,11 +30,25 @@ def test_every_page_refuses_framing_sniffing_and_cross_site_referrers():
     headers = build_app().get("/login.html").headers
     assert headers["x-content-type-options"] == "nosniff"
     assert headers["x-frame-options"] == "DENY"
-    assert headers["content-security-policy"] == "frame-ancestors 'none'"
+    assert "frame-ancestors 'none'" in headers["content-security-policy"]
     assert headers["referrer-policy"] == "same-origin"
 
 
-def test_a_route_that_sets_its_own_policy_keeps_it():
-    headers = build_app().get("/api/file").headers
-    assert headers["content-security-policy"] == "sandbox"
-    assert headers["x-frame-options"] == "DENY"
+def directives(policy):
+    return {part.split()[0]: part.split()[1:] for part in policy.split("; ")}
+
+
+def test_pages_may_only_load_scripts_images_and_connections_from_starfire_itself():
+    policy = directives(build_app().get("/login.html").headers["content-security-policy"])
+    assert policy["default-src"] == ["'self'"] and policy["connect-src"] == ["'self'"]
+    assert policy["img-src"] == ["'self'", "data:", "blob:"] and policy["object-src"] == ["'none'"]
+    assert policy["script-src"][0] == "'self'" and "'unsafe-inline'" not in policy["script-src"]
+    assert policy["base-uri"] == ["'none'"] and policy["form-action"] == ["'self'"]
+
+
+def test_the_inline_theme_scripts_are_allowed_by_their_exact_hash_and_nothing_else():
+    static = os.path.join(ROOT, "static")
+    hashes = security_headers.inline_script_hashes(static)
+    assert len(hashes) == len(set(hashes)) >= 1
+    policy = directives(security_headers.content_security_policy(static))
+    assert policy["script-src"] == ["'self'", *hashes]

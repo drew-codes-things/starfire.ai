@@ -25,7 +25,7 @@ const SETTINGS_TAB_LOADERS = {
   notes: () => { refreshNoteList(); refreshNoteTemplateList(); },
   automations: () => { refreshTaskEndpointOptions(); refreshTaskList(); refreshTaskRunList(); },
   email: () => { refreshEmailAccountList(); refreshEmailRules(); },
-  providers: () => { refreshEndpointList(); },
+  providers: () => { refreshEndpointList(); refreshAutoModelSettings(); },
   localgen: () => { refreshLocalGen(); },
   hardware: () => { refreshHardware(); refreshOllamaStatus(); },
   accounts: () => { refreshAccounts(); },
@@ -95,9 +95,69 @@ async function refreshEndpointList() {
   }
 }
 
+const AUTO_MODEL_ROLE_NAMES = {
+  vision: 'Pictures and video',
+  code: 'Code',
+  agent: 'Agent (reminders, phone, home)',
+  chat: 'Everything else',
+};
+
+function setAutoModelResult(text, cls = '') {
+  $('autoModelResult').textContent = text;
+  $('autoModelResult').className = 'settings-hint' + (cls ? ' ' + cls : '');
+}
+
+function automaticRoleText(pick) {
+  if (!pick) return 'automatic (no model found)';
+  return `automatic (now ${pick.model})`;
+}
+
+function autoModelRoleRow(role, view) {
+  const row = document.createElement('div');
+  row.className = 'settings-row';
+  const name = document.createElement('span');
+  name.className = 'grow';
+  name.textContent = AUTO_MODEL_ROLE_NAMES[role];
+  const select = document.createElement('select');
+  select.dataset.role = role;
+  select.setAttribute('aria-label', `Model Arty Auto uses for ${AUTO_MODEL_ROLE_NAMES[role].toLowerCase()}`);
+  select.append(new Option(automaticRoleText(view.picks[role]), ''));
+  const names = [...new Set(models.map(m => m.id))];
+  const configured = view.roles[role] || '';
+  if (configured && !names.includes(configured)) select.append(new Option(`${configured} (not found, so Auto falls back)`, configured));
+  for (const id of names) select.append(new Option(id, id));
+  select.value = configured;
+  row.append(name, select);
+  return row;
+}
+
+function showAutoModelRoles(view) {
+  $('autoModelRoles').replaceChildren(...Object.keys(AUTO_MODEL_ROLE_NAMES).map(role => autoModelRoleRow(role, view)));
+}
+
+async function refreshAutoModelSettings() {
+  try {
+    showAutoModelRoles(await apiJson('/api/auto-model'));
+  } catch (e) {
+    setAutoModelResult('could not load the Auto model settings: ' + e.message, 'error');
+  }
+}
+
+$('saveAutoModelBtn').onclick = async () => {
+  const roles = {};
+  $('autoModelRoles').querySelectorAll('select[data-role]').forEach(select => { roles[select.dataset.role] = select.value; });
+  try {
+    showAutoModelRoles(await apiJson('/api/auto-model', { method: 'PUT', body: { roles } }));
+    setAutoModelResult('saved', 'ok');
+    await loadModels();
+  } catch (e) {
+    setAutoModelResult('not saved: ' + e.message, 'error');
+  }
+};
+
 settingsEls.addOllamaBtn.onclick = async () => {
   try {
-    const r = await fetch('/api/config');
+    const r = await fetch('/api/hardware/local-server');
     const { ollama_base_url } = await r.json();
     settingsEls.localBaseUrl.value = ollama_base_url || 'http://localhost:11434';
   } catch (_) {
@@ -670,14 +730,6 @@ settingsEls.toggleEditFile.addEventListener('change', () => {
   saveEnabledBuiltinTools();
 });
 
-let requireEditApproval = false;
-try { requireEditApproval = localStorage.getItem('sf_edit_approval') === '1'; } catch (_) {}
-settingsEls.toggleEditApproval.checked = requireEditApproval;
-settingsEls.toggleEditApproval.addEventListener('change', () => {
-  requireEditApproval = settingsEls.toggleEditApproval.checked;
-  try { localStorage.setItem('sf_edit_approval', requireEditApproval ? '1' : '0'); } catch (_) {}
-});
-
 settingsEls.toggleRunShell.checked = enabledBuiltinTools.has('run_shell');
 settingsEls.shellApprovalRow.hidden = !settingsEls.toggleRunShell.checked;
 settingsEls.toggleRunShell.addEventListener('change', () => {
@@ -687,10 +739,50 @@ settingsEls.toggleRunShell.addEventListener('change', () => {
   saveEnabledBuiltinTools();
 });
 
-let requireShellApproval = true;
-try { requireShellApproval = localStorage.getItem('sf_shell_approval') !== '0'; } catch (_) {}
-settingsEls.toggleShellApproval.checked = requireShellApproval;
+const LEGACY_APPROVAL_KEYS = ['sf_edit_approval', 'sf_shell_approval'];
+try { LEGACY_APPROVAL_KEYS.forEach(key => localStorage.removeItem(key)); } catch (_) {}
+
+function showApprovalPolicy(policy) {
+  settingsEls.toggleShellApproval.checked = policy.require_shell_approval !== false;
+  settingsEls.toggleEditApproval.checked = policy.require_edit_approval !== false;
+}
+
+function showApprovalPolicyProblem(message) {
+  settingsEls.approvalPolicyResult.hidden = !message;
+  settingsEls.approvalPolicyResult.textContent = message;
+}
+
+async function loadApprovalPolicy() {
+  showApprovalPolicy({});
+  try {
+    const r = await fetch('/api/approval-policy');
+    if (!r.ok) throw new Error('server error ' + r.status);
+    showApprovalPolicy(await r.json());
+    showApprovalPolicyProblem('');
+  } catch (e) {
+    showApprovalPolicyProblem('could not load the approval settings, so both stay on: ' + e.message);
+  }
+}
+
+async function saveApprovalPolicy(change, toggle) {
+  try {
+    const r = await fetch('/api/approval-policy', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(change),
+    });
+    const answer = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(answer.detail || 'server error ' + r.status);
+    showApprovalPolicy(answer);
+    showApprovalPolicyProblem('');
+  } catch (e) {
+    toggle.checked = !toggle.checked;
+    showApprovalPolicyProblem('not saved: ' + e.message);
+  }
+}
+
 settingsEls.toggleShellApproval.addEventListener('change', () => {
-  requireShellApproval = settingsEls.toggleShellApproval.checked;
-  try { localStorage.setItem('sf_shell_approval', requireShellApproval ? '1' : '0'); } catch (_) {}
+  saveApprovalPolicy({ require_shell_approval: settingsEls.toggleShellApproval.checked }, settingsEls.toggleShellApproval);
 });
+settingsEls.toggleEditApproval.addEventListener('change', () => {
+  saveApprovalPolicy({ require_edit_approval: settingsEls.toggleEditApproval.checked }, settingsEls.toggleEditApproval);
+});
+loadApprovalPolicy();

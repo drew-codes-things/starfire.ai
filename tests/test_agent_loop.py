@@ -229,3 +229,36 @@ def test_a_collected_answer_with_tools_raises_a_model_error(model, tools):
 @pytest.mark.parametrize("chunk", [b"", b"event: ping\n\n", b"data: {not json}\n\n", b'data: {"tool_start": "x"}\n\n'])
 def test_stream_lines_that_are_not_answer_text_or_errors_are_left_out_of_a_collected_answer(chunk):
     assert list(agent_loop._parse_sse_bytes(chunk)) == []
+
+
+def test_a_tool_the_chat_did_not_enable_is_refused_and_not_run(monkeypatch):
+    ran = []
+    replies = iter([("tool_calls", [{"id": "c1", "name": "manage_notes", "arguments": {"action": "add", "title": "x"}}]),
+                    ("delta", "finished")])
+
+    async def fake_stream(base_url, api_key, model, messages, system, options, tools=None, **kwargs):
+        yield next(replies)
+
+    async def tool(name, arguments, ctx):
+        ran.append(name)
+        return "done"
+
+    monkeypatch.setattr(agent_loop, "stream_chat_once", fake_stream)
+    monkeypatch.setattr(agent_loop.builtin_tools, "call_builtin_tool", tool)
+
+    async def collect():
+        return [chunk async for chunk in agent_loop.run_chat_with_tools(
+            "http://model", None, "m", [{"role": "user", "content": "hi"}], None, None, set(), {"search_web"},
+            SimpleNamespace(may_use_host_tools=False, untrusted_read=False, events=None))]
+
+    events = [json.loads(chunk.decode()[len("data:"):]) for chunk in asyncio.run(collect())]
+    results = [event["tool_result"]["result"] for event in events if "tool_result" in event]
+    assert ran == [] and results == ["error: the tool manage_notes is not enabled for this chat, so it was not run"]
+
+
+@pytest.mark.parametrize("arguments", [{"action": ["send"]}, {"action": {"x": 1}}, ["send"]])
+def test_odd_argument_types_from_the_model_get_an_error_result_not_a_crash(arguments):
+    assert not agent_loop.builtin_tools.reads_untrusted_content("manage_email", arguments)
+    assert not agent_loop.builtin_tools.changes_state("manage_email", arguments)
+    result = asyncio.run(agent_loop.builtin_tools.call_builtin_tool("manage_email", arguments, None))
+    assert result.startswith("error:")

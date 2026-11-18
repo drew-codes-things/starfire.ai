@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import shlex
+import unicodedata
 from dataclasses import dataclass
 
 import comfyui_client
@@ -18,7 +20,10 @@ import shell_tool
 import user_data
 import web_search
 from api_key_manager import APIKeyManager
+from config import config
 from documents_store import DocumentStore
+from host_sandbox import HostLimits
+from mail_runner import mail_runner
 from email_store import EmailAccountStore
 from local_gen_store import (
     DEFAULT_COMFYUI_BASE_URL as COMFYUI_DEFAULT_BASE_URL,
@@ -305,7 +310,27 @@ TOOL_SCHEMAS = [
 ]
 
 _TOOL_NAMES = {t["function"]["name"] for t in TOOL_SCHEMAS}
+NO_ONE_TO_ASK = ("error: this needs the user's approval, and nobody is there to ask (a scheduled task cannot "
+                 "show an approval card), so it was not run")
 HOST_TOOLS = frozenset({"run_shell", "edit_file", "github_cli"})
+MCP_TOOL_PREFIX = "mcp__"
+UNTRUSTED_SOURCE_TOOLS = frozenset({"search_web", "deep_research", "find_image", "search_documents", "github_cli"})
+EMAIL_ACTIONS_THAT_READ_MAIL = frozenset({"list_messages", "search", "read_message", "summarize", "draft_reply",
+                                          "check_urgency"})
+STATE_CHANGING_ACTIONS = {
+    "manage_email": frozenset({"send", "reply", "mark_read", "archive", "delete"}),
+    "manage_tasks": frozenset({"create", "pause", "resume", "delete", "run_now"}),
+    "manage_memory": frozenset({"add", "edit", "delete"}),
+    "manage_notes": frozenset({"add", "update", "delete", "toggle_item"}),
+}
+TOOLS_THAT_ASK_FOR_THEMSELVES = frozenset({"run_shell", "edit_file", "github_cli"})
+MAX_APPROVAL_SUMMARY_CHARS = 20_000
+CARD_FIELDS_FIRST = ("action", "to", "account_id", "uid", "folder", "subject", "schedule", "scheduled_time",
+                     "cron_expression", "task_id", "note_id", "memory_id", "id", "endpoint_id", "model")
+HIDDEN_CHARACTER_CATEGORIES = frozenset({"Cc", "Cf", "Co", "Cs", "Cn", "Zl", "Zp"})
+BLANK_LOOKING_LETTERS = frozenset("\u115f\u1160\u2800\u3164\uffa0")
+SPACE_CATEGORY = "Zs"
+CARD_LINE_BREAK = "\n"
 
 @dataclass
 class ToolContext:
@@ -325,14 +350,90 @@ class ToolContext:
     api_key: str | None = None
     model: str = ""
     endpoint_id: str = ""
-    require_edit_approval: bool = False
-    require_shell_approval: bool = False
+    require_edit_approval: bool = True
+    require_shell_approval: bool = True
     may_use_host_tools: bool = False
+    untrusted_read: bool = False
+    host_limits: HostLimits = HostLimits()
     events: "asyncio.Queue | None" = None
 
     async def emit(self, event: dict) -> None:
         if self.events is not None:
             await self.events.put(event)
+
+def can_ask_the_user(ctx: ToolContext) -> bool:
+    return getattr(ctx, "events", None) is not None
+
+def is_mcp_tool(name: str) -> bool:
+    return name.startswith(MCP_TOOL_PREFIX)
+
+def _action(arguments) -> str:
+    action = arguments.get("action") if isinstance(arguments, dict) else None
+    return action if isinstance(action, str) else ""
+
+def reads_untrusted_content(name: str, arguments: dict) -> bool:
+    if is_mcp_tool(name) or name in UNTRUSTED_SOURCE_TOOLS:
+        return True
+    return name == "manage_email" and _action(arguments) in EMAIL_ACTIONS_THAT_READ_MAIL
+
+def changes_state(name: str, arguments: dict) -> bool:
+    if name in HOST_TOOLS or is_mcp_tool(name):
+        return True
+    return _action(arguments) in STATE_CHANGING_ACTIONS.get(name, frozenset())
+
+def has_read_untrusted_content(ctx: ToolContext) -> bool:
+    return bool(getattr(ctx, "untrusted_read", False))
+
+def mark_untrusted_content_read(ctx: ToolContext) -> bool:
+    if has_read_untrusted_content(ctx):
+        return False
+    ctx.untrusted_read = True
+    return True
+
+def _is_hidden_character(character: str) -> bool:
+    if character in (CARD_LINE_BREAK, " "):
+        return False
+    category = unicodedata.category(character)
+    return category in HIDDEN_CHARACTER_CATEGORIES or category == SPACE_CATEGORY or character in BLANK_LOOKING_LETTERS
+
+
+def _with_hidden_characters_shown(text: str) -> str:
+    return "".join(json.dumps(c)[1:-1] if _is_hidden_character(c) else c for c in text)
+
+
+def _approval_summary(name: str, arguments: dict) -> str | None:
+    first = [key for key in CARD_FIELDS_FIRST if key in arguments]
+    ordered = {key: arguments[key] for key in first + sorted(key for key in arguments if key not in first)}
+    shown = _with_hidden_characters_shown(json.dumps(ordered, indent=2, ensure_ascii=False))
+    return shown if len(shown) <= MAX_APPROVAL_SUMMARY_CHARS else None
+
+
+def _too_long_for_a_card(name: str) -> str:
+    return (f"error: this {name} call is too long to show in full on an approval card "
+            f"(over {MAX_APPROVAL_SUMMARY_CHARS} characters), so it was not run")
+
+async def wait_for_approval(ctx: ToolContext, tool: str, shown: str, what: str, cwd: str | None = None) -> str | None:
+    if not can_ask_the_user(ctx):
+        return NO_ONE_TO_ASK
+    untrusted = has_read_untrusted_content(ctx)
+    pending_id = shell_tool.stage(shown, cwd, owner=user_data.current_user_id.get(), tool=tool, untrusted=untrusted)
+    await ctx.emit({"shell_pending": {"pending_id": pending_id, "command": shown, "cwd": cwd or "",
+                                      "tool": tool, "untrusted": untrusted}})
+    decision = await shell_tool.wait_for_decision(pending_id)
+    if decision is None:
+        return (f"error: the user did not approve {what} within "
+                f"{shell_tool.APPROVAL_TIMEOUT_SECONDS // 60} minutes, so it was not run")
+    if not decision:
+        return f"error: the user rejected {what}, so it was not run"
+    return None
+
+async def approve_after_untrusted_content(name: str, arguments: dict, ctx: ToolContext) -> str | None:
+    if not has_read_untrusted_content(ctx) or not changes_state(name, arguments):
+        return None
+    shown = _approval_summary(name, arguments)
+    if shown is None:
+        return _too_long_for_a_card(name)
+    return await wait_for_approval(ctx, name, shown, f"this {name} call")
 
 def schemas_for(enabled: set[str]) -> list[dict]:
     return [t for t in TOOL_SCHEMAS if t["function"]["name"] in enabled]
@@ -340,9 +441,23 @@ def schemas_for(enabled: set[str]) -> list[dict]:
 def is_builtin_tool(name: str) -> bool:
     return name in _TOOL_NAMES
 
+def _malformed_arguments(arguments) -> str | None:
+    if not isinstance(arguments, dict):
+        return "error: the tool arguments must be a JSON object"
+    if "action" in arguments and not isinstance(arguments["action"], str):
+        return "error: action must be text"
+    return None
+
 async def call_builtin_tool(name: str, arguments: dict, ctx: ToolContext) -> str:
+    malformed = _malformed_arguments(arguments)
+    if malformed:
+        return malformed
     if name in HOST_TOOLS and not ctx.may_use_host_tools:
         return f"error: only an admin account can use {name}, because it acts directly on the server"
+    if name not in TOOLS_THAT_ASK_FOR_THEMSELVES:
+        refusal = await approve_after_untrusted_content(name, arguments, ctx)
+        if refusal:
+            return refusal
     if name == "manage_memory":
         return await _manage_memory(arguments, ctx.memory)
     if name == "search_documents":
@@ -356,7 +471,7 @@ async def call_builtin_tool(name: str, arguments: dict, ctx: ToolContext) -> str
     if name == "search_web":
         return await _search_web(arguments)
     if name == "github_cli":
-        return await github_tool.run_gh(arguments.get("args") or [])
+        return await _github_cli(arguments, ctx)
     if name == "deep_research":
         return await _deep_research(arguments, ctx)
     if name == "generate_image":
@@ -501,20 +616,30 @@ def _generate_document(args: dict, ctx: ToolContext) -> str:
                                       data, source=content[:200])
     return json.dumps({"kind": "document", "id": entry.id, "url": f"/api/generated/{entry.id}", "filename": filename})
 
+EDIT_AWAITS_APPROVAL = "the edit is waiting for the user to approve it; it has not been written yet"
+
+
 def _edit_file(args: dict, ctx: ToolContext) -> str:
     path = args.get("path")
     new_content = args.get("content", "")
     if not path:
         return "error: path is required"
 
-    old_content = file_edit_tool.read_current(path)
+    try:
+        target = file_edit_tool.resolve_target(path, ctx.host_limits)
+    except file_edit_tool.EditRefused as refused:
+        return f"error: {refused}"
+    old_content = file_edit_tool.read_current(target)
     diff_text = file_edit_tool.make_diff(path, old_content, new_content)
+    untrusted = has_read_untrusted_content(ctx)
 
-    if ctx.require_edit_approval:
-        pending_id = file_edit_tool.stage(path, new_content, diff_text, owner=user_data.current_user_id.get())
-        return json.dumps({"staged": True, "pending_id": pending_id, "path": path, "diff": diff_text})
+    if ctx.require_edit_approval or untrusted:
+        pending_id = file_edit_tool.stage(target, new_content, diff_text, owner=user_data.current_user_id.get(),
+                                          untrusted=untrusted)
+        return json.dumps({"staged": True, "pending_id": pending_id, "path": path, "untrusted": untrusted,
+                           "status": EDIT_AWAITS_APPROVAL})
 
-    result = file_edit_tool.apply_edit(path, new_content)
+    result = file_edit_tool.apply_edit(target, new_content, ctx.host_limits)
     return json.dumps({"applied": result["ok"], "path": path, "diff": diff_text,
                         **({"error": result["error"]} if not result["ok"] else {})})
 
@@ -535,16 +660,23 @@ async def _run_shell(args: dict, ctx: ToolContext) -> str:
     cwd = args.get("cwd")
     if not command:
         return "error: command is required"
-    if ctx.require_shell_approval:
-        pending_id = shell_tool.stage(command, cwd, owner=user_data.current_user_id.get())
-        await ctx.emit({"shell_pending": {"pending_id": pending_id, "command": command, "cwd": cwd or ""}})
-        decision = await shell_tool.wait_for_decision(pending_id)
-        if decision is None:
-            return ("error: the user did not approve this command within "
-                    f"{shell_tool.APPROVAL_TIMEOUT_SECONDS // 60} minutes, so it was not run")
-        if not decision:
-            return "error: the user rejected this command, so it was not run"
-    return await shell_tool.run_shell(command, cwd)
+    if ctx.require_shell_approval or has_read_untrusted_content(ctx):
+        refusal = await wait_for_approval(ctx, "run_shell", command, "this command", cwd)
+        if refusal:
+            return refusal
+    return await shell_tool.run_shell(command, cwd, ctx.host_limits)
+
+async def _github_cli(arguments: dict, ctx: ToolContext) -> str:
+    gh_args = arguments.get("args") or []
+    refused = github_tool.refusal(gh_args)
+    if refused:
+        return refused
+    asks_first = ctx.require_shell_approval or has_read_untrusted_content(ctx)
+    if asks_first and not github_tool.is_read_only(gh_args):
+        refusal = await wait_for_approval(ctx, "github_cli", shlex.join(["gh", *gh_args]), "this gh command")
+        if refusal:
+            return refusal
+    return await github_tool.run_gh(gh_args)
 
 async def _find_image(args: dict, ctx: ToolContext) -> str:
     query = (args.get("query") or "").strip()
@@ -681,58 +813,67 @@ async def _manage_email(args: dict, ctx: ToolContext) -> str:
         return "error: a valid account_id is required"
     password = ctx.api_keys.load().get(account_id) if account else None
     folder = args.get("folder") or "INBOX"
+    private_hosts = bool(getattr(ctx, "may_use_host_tools", False))
+
+    def mail(action, *action_args, **options):
+        return mail_runner.run(user_data.current_user_id.get() or "", config.mail_requests_per_minute, action,
+                               account, password, *action_args, allow_private_hosts=private_hosts, **options)
 
     try:
         if action == "list_messages":
-            return json.dumps(email_client.list_messages(account, password, folder))
+            return json.dumps(await mail(email_client.list_messages, folder))
         if action == "search":
             query = args.get("query", "")
             if not query:
                 return "error: query is required"
-            return json.dumps(email_client.search_messages(account, password, query, folder))
+            return json.dumps(await mail(email_client.search_messages, query, folder))
         if action == "read_message":
             uid = args.get("uid")
             if not uid:
                 return "error: uid is required"
-            return json.dumps(email_client.read_message(account, password, folder, uid))
+            return json.dumps(await mail(email_client.read_message, folder, uid))
         if action == "send":
             to, subject, body = args.get("to"), args.get("subject", ""), args.get("body", "")
             if not to or not body:
                 return "error: to and body are required"
-            email_client.send_message(account, password, to, subject, body)
+            await mail(email_client.send_message, to, subject, body)
             return "sent"
         if action == "reply":
             uid, body = args.get("uid"), args.get("body", "")
             if not uid or not body:
                 return "error: uid and body are required"
-            email_client.reply_message(account, password, folder, uid, body)
+            await mail(email_client.reply_message, folder, uid, body)
             return "sent"
         if action == "mark_read":
             uid = args.get("uid")
             if not uid:
                 return "error: uid is required"
-            email_client.mark_read(account, password, folder, uid)
+            await mail(email_client.mark_read, folder, uid)
             return "marked read"
         if action == "archive":
             uid = args.get("uid")
             if not uid:
                 return "error: uid is required"
-            email_client.archive_message(account, password, folder, uid)
+            await mail(email_client.archive_message, folder, uid)
             return "archived"
         if action == "delete":
             uid = args.get("uid")
             if not uid:
                 return "error: uid is required"
-            email_client.delete_message(account, password, folder, uid)
+            await mail(email_client.delete_message, folder, uid)
             return "deleted"
         if action in ("summarize", "draft_reply", "check_urgency"):
             uid = args.get("uid")
             if not uid:
                 return "error: uid is required"
-            message = email_client.read_message(account, password, folder, uid, mark_seen=False)
-            return await email_ai_action(action, message, args.get("instruction", ""), ctx)
+            message = await mail(email_client.read_message, folder, uid, mark_seen=False)
     except Exception as e:
-        return f"error: {e}"
+        return f"error: {email_client.describe_failure(e, show_details=private_hosts)}"
+    if action in ("summarize", "draft_reply", "check_urgency"):
+        try:
+            return await email_ai_action(action, message, args.get("instruction", ""), ctx)
+        except Exception as e:
+            return f"error: {e}"
     return f"error: unknown action '{action}'"
 
 async def email_ai_action(action: str, message: dict, instruction: str, ctx: ToolContext) -> str:

@@ -7,9 +7,62 @@ from providers import _detect_provider, build_chat_url, build_headers, build_too
 
 MAX_ERROR_CHARS = 500
 NO_ERROR_DETAILS = "the model server gave no details"
+NANOSECONDS_PER_SECOND = 1_000_000_000
+MILLISECONDS_PER_SECOND = 1000
+STREAM_OPTIONS_FIELD = "stream_options"
+USAGE_IN_STREAM = {"include_usage": True}
 
 def _sse_line(payload: dict) -> bytes:
     return f"data: {json.dumps(payload)}\n\n".encode()
+
+def _token_count(value) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+        return None
+    return int(value)
+
+def _seconds(value, units_per_second: int) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        return None
+    return value / units_per_second
+
+def _usage(prompt_tokens=None, completion_tokens=None, cached_prompt_tokens=None,
+           generation_seconds: float | None = None, context_window=None) -> dict | None:
+    counts = {"prompt_tokens": _token_count(prompt_tokens), "completion_tokens": _token_count(completion_tokens),
+              "cached_prompt_tokens": _token_count(cached_prompt_tokens),
+              "context_window": _token_count(context_window) or None}
+    reported = {name: value for name, value in counts.items() if value is not None}
+    if "prompt_tokens" not in reported and "completion_tokens" not in reported:
+        return None
+    if generation_seconds and reported.get("completion_tokens"):
+        reported["generation_seconds"] = round(generation_seconds, 4)
+    return reported
+
+def _ollama_usage(done: dict, payload: dict) -> dict | None:
+    return _usage(prompt_tokens=done.get("prompt_eval_count"), completion_tokens=done.get("eval_count"),
+                  cached_prompt_tokens=done.get("prompt_eval_cached_count"),
+                  generation_seconds=_seconds(done.get("eval_duration"), NANOSECONDS_PER_SECOND),
+                  context_window=(payload.get("options") or {}).get("num_ctx"))
+
+def _openai_usage(usage, timings) -> dict | None:
+    usage = usage if isinstance(usage, dict) else {}
+    timings = timings if isinstance(timings, dict) else {}
+    details = usage.get("prompt_tokens_details")
+    prompt_tokens = usage.get("prompt_tokens")
+    cached_prompt_tokens = details.get("cached_tokens") if isinstance(details, dict) else None
+    if _token_count(timings.get("prompt_n")) is not None:
+        cached_prompt_tokens = _token_count(timings.get("cache_n"))
+        prompt_tokens = timings["prompt_n"] + (cached_prompt_tokens or 0)
+    return _usage(prompt_tokens=prompt_tokens,
+                  completion_tokens=usage.get("completion_tokens", timings.get("predicted_n")),
+                  cached_prompt_tokens=cached_prompt_tokens,
+                  generation_seconds=_seconds(timings.get("predicted_ms"), MILLISECONDS_PER_SECOND))
+
+def _anthropic_usage(started: dict, output_tokens) -> dict | None:
+    written = _token_count(started.get("cache_creation_input_tokens")) or 0
+    cached = _token_count(started.get("cache_read_input_tokens"))
+    fresh = _token_count(started.get("input_tokens"))
+    prompt_tokens = None if fresh is None else fresh + written + (cached or 0)
+    return _usage(prompt_tokens=prompt_tokens, completion_tokens=output_tokens, cached_prompt_tokens=cached)
 
 def _build_messages(messages: list[dict], system: str | None) -> list[dict]:
     return ([{"role": "system", "content": system}] + messages) if system else messages
@@ -98,6 +151,9 @@ async def _iter_ollama(client: httpx.AsyncClient, url: str, headers: dict, paylo
                                   "arguments": args or {}})
                 yield ("tool_calls", calls)
             if obj.get("done"):
+                usage = _ollama_usage(obj, payload)
+                if usage:
+                    yield ("usage", usage)
                 return
 
 async def _iter_anthropic(client: httpx.AsyncClient, url: str, headers: dict, payload: dict):
@@ -109,6 +165,8 @@ async def _iter_anthropic(client: httpx.AsyncClient, url: str, headers: dict, pa
 
         event_type = None
         tool_blocks: dict[int, dict] = {}
+        prompt_usage: dict = {}
+        output_tokens = None
 
         async for raw in r.aiter_lines():
             line = raw.strip()
@@ -126,7 +184,11 @@ async def _iter_anthropic(client: httpx.AsyncClient, url: str, headers: dict, pa
             except json.JSONDecodeError:
                 continue
 
-            if event_type == "content_block_start":
+            if event_type == "message_start":
+                started = (obj.get("message") or {}).get("usage")
+                prompt_usage = started if isinstance(started, dict) else {}
+                output_tokens = prompt_usage.get("output_tokens", output_tokens)
+            elif event_type == "content_block_start":
                 block = obj.get("content_block") or {}
                 if block.get("type") == "tool_use":
                     tool_blocks[obj.get("index", 0)] = {
@@ -144,6 +206,7 @@ async def _iter_anthropic(client: httpx.AsyncClient, url: str, headers: dict, pa
                 yield ("error", message)
                 return
             elif event_type == "message_delta":
+                output_tokens = (obj.get("usage") or {}).get("output_tokens", output_tokens)
                 if (obj.get("delta") or {}).get("stop_reason") == "tool_use" and tool_blocks:
                     calls = []
                     for block in tool_blocks.values():
@@ -154,7 +217,11 @@ async def _iter_anthropic(client: httpx.AsyncClient, url: str, headers: dict, pa
                         calls.append({"id": block["id"], "name": block["name"], "arguments": args})
                     yield ("tool_calls", calls)
             elif event_type == "message_stop":
-                return
+                break
+
+        usage = _anthropic_usage(prompt_usage, output_tokens)
+        if usage:
+            yield ("usage", usage)
 
 def _error_message(error) -> str:
     if isinstance(error, dict):
@@ -180,6 +247,8 @@ async def _iter_openai(client: httpx.AsyncClient, url: str, headers: dict, paylo
 
         call_acc: dict[int, dict] = {}
         finish_reason = None
+        reported_usage = None
+        reported_timings = None
 
         async for raw in r.aiter_lines():
             line = raw.strip()
@@ -195,6 +264,8 @@ async def _iter_openai(client: httpx.AsyncClient, url: str, headers: dict, paylo
             if obj.get("error"):
                 yield ("error", _error_message(obj["error"]))
                 return
+            reported_usage = obj.get("usage") or reported_usage
+            reported_timings = obj.get("timings") or reported_timings
             choices = obj.get("choices") or []
             if not choices:
                 continue
@@ -225,6 +296,23 @@ async def _iter_openai(client: httpx.AsyncClient, url: str, headers: dict, paylo
                     args = {}
                 calls.append({"id": slot["id"] or f"call-{i}", "name": slot["name"], "arguments": args})
             yield ("tool_calls", calls)
+
+        usage = _openai_usage(reported_usage, reported_timings)
+        if usage:
+            yield ("usage", usage)
+
+async def _iter_openai_asking_for_usage(client: httpx.AsyncClient, url: str, headers: dict, payload: dict):
+    refused_the_usage_option = False
+    said_anything = False
+    async for kind, item in _iter_openai(client, url, headers, {**payload, STREAM_OPTIONS_FIELD: USAGE_IN_STREAM}):
+        if kind == "error" and not said_anything and STREAM_OPTIONS_FIELD in item:
+            refused_the_usage_option = True
+            continue
+        said_anything = True
+        yield kind, item
+    if refused_the_usage_option:
+        async for each in _iter_openai(client, url, headers, payload):
+            yield each
 
 _HOSTED_PARAM_NAMES = {
     "anthropic": {"temperature": "temperature", "top_p": "top_p", "top_k": "top_k"},
@@ -273,7 +361,7 @@ async def stream_chat_once(base_url: str, api_key: str | None, model: str, messa
                     **_hosted_params("openai", options),
                     **({"tools": tools_param} if tools_param else {}),
                 }
-                async for item in _iter_openai(client, url, headers, payload):
+                async for item in _iter_openai_asking_for_usage(client, url, headers, payload):
                     yield item
         except httpx.HTTPError as e:
             yield ("error", str(e))
@@ -283,6 +371,8 @@ async def stream_chat(base_url: str, api_key: str | None, model: str, messages: 
     async for kind, payload in stream_chat_once(base_url, api_key, model, messages, system, options):
         if kind == "delta":
             yield _sse_line({"delta": payload})
+        elif kind == "usage":
+            yield _sse_line({"usage": payload})
         elif kind == "error":
             yield _sse_line({"error": payload})
             return

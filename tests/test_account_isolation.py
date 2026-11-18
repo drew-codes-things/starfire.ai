@@ -222,8 +222,8 @@ def test_deleting_an_email_account_also_forgets_its_password(owned, owner):
 
 
 def test_an_email_account_that_cannot_connect_is_not_kept_and_its_password_is_dropped(owner, monkeypatch):
-    def refuse(account, password):
-        raise OSError("connection refused")
+    def refuse(account, password, **options):
+        raise RuntimeError("connection refused")
 
     monkeypatch.setattr(email_client, "list_folders", refuse)
     response = owner.post("/api/email/accounts", json={"email_address": "x@mail.example", "password": "pw-123",

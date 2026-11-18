@@ -150,7 +150,7 @@ async def revalidate_app_files(request: Request, call_next):
 
 upload_limits.install(app, config)
 auth.install(app, auth_routes.users, auth_routes.sessions)
-security_headers.install(app)
+security_headers.install(app, os.path.join(os.path.dirname(os.path.abspath(__file__)), "static"))
 
 @app.get("/api/health")
 async def health():

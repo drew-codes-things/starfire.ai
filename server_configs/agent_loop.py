@@ -2,10 +2,14 @@ import asyncio
 import json
 
 import builtin_tools
+import file_edit_tool
+import user_data
 from chat_stream import _sse_line, stream_chat_once
 from mcp_manager import mcp_manager
 
 MAX_TOOL_ROUNDS = 5
+EDIT_TOOL = "edit_file"
+UNTRUSTED_READ_EVENT = {"untrusted_read": True}
 TOOL_RESULT_DISPLAY_CHARS = 2000
 
 async def run_chat_with_tools(base_url: str, api_key: str | None, model: str, messages: list[dict],
@@ -16,7 +20,10 @@ async def run_chat_with_tools(base_url: str, api_key: str | None, model: str, me
     tools = builtin_tools.schemas_for(enabled_builtin_tools) + mcp_manager.get_all_openai_schemas(usable_server_ids)
     if max_tools is not None:
         tools = tools[:max_tools]
+    offered = frozenset(tool["function"]["name"] for tool in tools)
     working_messages = list(messages)
+    if builtin_tools.has_read_untrusted_content(ctx):
+        yield _sse_line(UNTRUSTED_READ_EVENT)
 
     for round_number in range(MAX_TOOL_ROUNDS + 1):
         text = ""
@@ -30,6 +37,8 @@ async def run_chat_with_tools(base_url: str, api_key: str | None, model: str, me
                 yield _sse_line({"delta": payload})
             elif kind == "tool_calls":
                 tool_calls = payload
+            elif kind == "usage":
+                yield _sse_line({"usage": payload})
             elif kind == "error":
                 yield _sse_line({"error": payload})
                 had_error = True
@@ -59,12 +68,19 @@ async def run_chat_with_tools(base_url: str, api_key: str | None, model: str, me
         for call in tool_calls:
             yield _sse_line({"tool_start": call["name"]})
             result = ""
-            async for kind, payload in _execute_tool(call, ctx, usable_server_ids):
-                if kind == "event":
-                    yield _sse_line(payload)
-                else:
-                    result = payload
+            refusal = _refuse_tool_not_offered(call["name"], offered)
+            if refusal:
+                result = refusal
+            else:
+                async for kind, payload in _execute_tool(call, ctx, usable_server_ids):
+                    if kind == "event":
+                        yield _sse_line(payload)
+                    else:
+                        result = payload
             yield _sse_line({"tool_result": {"name": call["name"], "result": _result_for_page(call["name"], result)}})
+            if (builtin_tools.reads_untrusted_content(call["name"], call["arguments"])
+                    and builtin_tools.mark_untrusted_content_read(ctx)):
+                yield _sse_line(UNTRUSTED_READ_EVENT)
             working_messages.append({
                 "role": "tool", "tool_call_id": call["id"], "content": result,
             })
@@ -80,10 +96,24 @@ def _is_json_object(text: str) -> bool:
     except ValueError:
         return False
 
+def _with_staged_diff(result: str) -> str:
+    staged = json.loads(result)
+    if not (staged.get("staged") and staged.get("pending_id")):
+        return result
+    pending = file_edit_tool.get_pending(staged["pending_id"], user_data.current_user_id.get())
+    if pending is None:
+        return result
+    return json.dumps({**staged, "diff": pending["diff"]})
+
 def _result_for_page(tool_name: str, result: str) -> str:
     if builtin_tools.is_builtin_tool(tool_name) and _is_json_object(result):
-        return result
+        return _with_staged_diff(result) if tool_name == EDIT_TOOL else result
     return result[:TOOL_RESULT_DISPLAY_CHARS]
+
+def _refuse_tool_not_offered(tool_name: str, offered: frozenset[str]) -> str | None:
+    if tool_name in offered or builtin_tools.is_mcp_tool(tool_name):
+        return None
+    return f"error: the tool {tool_name} is not enabled for this chat, so it was not run"
 
 def _mcp_server_id(tool_name: str) -> str:
     return tool_name.split("__", 2)[1] if tool_name.count("__") >= 2 else ""
@@ -99,7 +129,8 @@ def _refuse_mcp_call(tool_name: str, ctx: "builtin_tools.ToolContext", usable_se
 async def _call_tool(call: dict, ctx: "builtin_tools.ToolContext", usable_server_ids: frozenset[str]) -> str:
     try:
         if call["name"].startswith("mcp__"):
-            refusal = _refuse_mcp_call(call["name"], ctx, usable_server_ids)
+            refusal = (_refuse_mcp_call(call["name"], ctx, usable_server_ids)
+                       or await builtin_tools.approve_after_untrusted_content(call["name"], call["arguments"], ctx))
             if refusal:
                 return refusal
             return await mcp_manager.call_tool(call["name"], call["arguments"])

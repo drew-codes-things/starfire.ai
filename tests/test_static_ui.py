@@ -206,11 +206,10 @@ def test_text_colours_meet_wcag_aa_on_every_surface(selector):
     assert contrast(tokens["--on-accent"], tokens["--accent-fill"]) >= minimum
 
 
-def test_the_offline_fallback_treats_arty_and_its_old_name_as_bringing_their_own_tools():
-    fallback = re.search(r"own_tools_models: \[([^\]]*)\]", read_app())
-    assert fallback, "app.js has no own_tools_models fallback"
-    names = re.findall(r"'([^']+)'", fallback.group(1))
-    assert {"Arty", "assistant-core", "arty/*"} == set(names)
+def test_whether_a_model_brings_its_own_tools_comes_from_the_servers_model_list():
+    app = read_app()
+    assert "return !!model && model.own_tools === true;" in app
+    assert "own_tools_models" not in app
 
 
 NARROW_BLOCK = re.compile(r"@media \(max-width: 860px\) \{(.*?)^\}", re.S | re.M)

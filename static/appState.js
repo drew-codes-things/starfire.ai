@@ -116,6 +116,7 @@ const els = {
   dot:         $('dot'),
   statusText:  $('statusText'),
   sysPrompt:   $('sysPrompt'),
+  chatStats:   $('chatStats'),
 };
 
 const settingsEls = {
@@ -223,6 +224,7 @@ const settingsEls = {
   toggleRunShell: $('toggleRunShell'),
   shellApprovalRow: $('shellApprovalRow'),
   toggleShellApproval: $('toggleShellApproval'),
+  approvalPolicyResult: $('approvalPolicyResult'),
   toggleFindImage: $('toggleFindImage'),
   mcpTransport: $('mcpTransport'),
   mcpCommandRow: $('mcpCommandRow'),
@@ -303,6 +305,12 @@ const settingsEls = {
 let messages = [];
 let busy     = false;
 let models   = [];
+let accountModelChoice = AUTO_CHOICE;
+let autoEverydayModel = null;
+let activeReplyId = null;
+let leavingPage = false;
+window.addEventListener('pagehide', () => { leavingPage = true; });
+window.addEventListener('pageshow', () => { leavingPage = false; });
 let abortController = null;
 let currentSessionId = null;
 try { currentSessionId = localStorage.getItem('sf_current_session') || null; } catch (_) {}

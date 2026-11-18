@@ -292,7 +292,7 @@ def test_a_page_asked_for_before_login_opens_again_after_it(users, sessions):
 def test_the_arty_devices_api_is_admin_only_even_to_read():
     assert auth.is_admin_only("GET", "/api/arty-devices")
     assert auth.is_admin_only("GET", "/api/arty-devices/pending")
-    assert not auth.is_admin_only("GET", "/api/model-endpoints")
+    assert not auth.is_admin_only("GET", "/api/models")
 
 
 def test_only_admins_can_list_the_server_folders():
