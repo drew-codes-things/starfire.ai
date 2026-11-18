@@ -28,6 +28,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "preload-web.js",
       "src/**/*",
       "pages/**/*",
       "assets/**/*"

@@ -105,10 +105,20 @@ test('the preload exposes only channels that the main process handles', () => {
   }
 });
 
+test('the page bridge preload uses only channels the web bridge answers, and the starfire window has no other bridge', () => {
+  const preload = fs.readFileSync(path.join(ROOT, 'preload-web.js'), 'utf8');
+  const bridge = fs.readFileSync(path.join(ROOT, 'src', 'webBridge.js'), 'utf8');
+  const used = [...preload.matchAll(/'(starfire-web:[a-z-]+)'/g)].map((match) => match[1]);
+  const handled = new Set([...bridge.matchAll(/'(starfire-web:[a-z-]+)'/g)].map((match) => match[1]));
+  assert.deepEqual([...new Set(used)].sort(), [...handled].sort());
+  assert.doesNotMatch(preload, /starfire:[a-z-]+/);
+});
+
 test('the packaged files list covers every module the app requires', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   assert.ok(pkg.build.files.includes('src/**/*'));
   assert.ok(pkg.build.files.includes('pages/**/*'));
   assert.ok(pkg.build.files.includes('main.js'));
   assert.ok(pkg.build.files.includes('preload.js'));
+  assert.ok(pkg.build.files.includes('preload-web.js'));
 });

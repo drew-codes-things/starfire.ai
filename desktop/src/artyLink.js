@@ -8,6 +8,14 @@ const STATUS_TIMEOUT_MS = 3000;
 const PAIR_TIMEOUT_MS = 8000;
 const STEP_TIMEOUT_MS = 200000;
 const MAX_RESPONSE_BYTES = 1000000;
+const MAX_PICTURE_RESPONSE_BYTES = 8000000;
+const MAX_PICTURE_BASE64_CHARS = 6000000;
+const MAX_APP_CHARS = 80;
+const MAX_SHOWN_CHARS = 300;
+const PICTURE_SIGNATURES = { 'image/jpeg': [0xff, 0xd8, 0xff], 'image/png': [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] };
+const BASE64_FORMAT = /^[A-Za-z0-9+/]+={0,2}$/;
+const HIDDEN_CHARACTER = /[\p{C}\p{Z}]/u;
+const LOOK_REASONS = new Set(['declined', 'timed_out', 'not_found', 'cannot_see', 'off_limits', 'unavailable', 'busy', 'bad_request', 'failed']);
 const PAIRING_CODE_FORMAT = /^[0-9]{6}$/;
 const COMPUTER_TOOL_FORMAT = /^computer_[a-z_]{1,40}$/;
 const NETWORK_FAILURES = ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EPIPE'];
@@ -17,7 +25,7 @@ function requestFailure(message, code) {
   return Object.assign(new Error(message), { code });
 }
 
-function requestArty({ method, path: urlPath, token, body, port, timeoutMs }) {
+function requestArty({ method, path: urlPath, token, body, port, timeoutMs, maxBytes = MAX_RESPONSE_BYTES }) {
   return new Promise((resolve, reject) => {
     const payload = body === undefined ? null : JSON.stringify(body);
     const headers = { Accept: 'application/json' };
@@ -35,7 +43,7 @@ function requestArty({ method, path: urlPath, token, body, port, timeoutMs }) {
       let received = 0;
       response.on('data', (chunk) => {
         received += chunk.length;
-        if (received > MAX_RESPONSE_BYTES) {
+        if (received > maxBytes) {
           request.destroy(requestFailure('Arty Desktop sent an answer that is too large.', 'ETOOLARGE'));
           return;
         }
@@ -67,6 +75,31 @@ function refuse(error, extra = {}) {
 
 function bodyOf(answer) {
   return answer.body !== null && typeof answer.body === 'object' ? answer.body : {};
+}
+
+function isPlainAppName(app) {
+  return typeof app === 'string' && app.length <= MAX_APP_CHARS && ![...app].some((character) => character !== ' ' && HIDDEN_CHARACTER.test(character));
+}
+
+function shownText(value) {
+  return typeof value === 'string' ? [...value].filter((character) => character === ' ' || !HIDDEN_CHARACTER.test(character)).join('').slice(0, MAX_SHOWN_CHARS) : '';
+}
+
+function isPicture(body) {
+  const signature = PICTURE_SIGNATURES[body.mime];
+  if (!signature || typeof body.image !== 'string' || body.image === '' || body.image.length > MAX_PICTURE_BASE64_CHARS || !BASE64_FORMAT.test(body.image)) return false;
+  const start = Buffer.from(body.image.slice(0, 16), 'base64');
+  return signature.every((byte, index) => start[index] === byte);
+}
+
+function lookFailure(reason, error) {
+  return { ok: false, reason, error };
+}
+
+function describeLookRefusal(answer) {
+  const body = bodyOf(answer);
+  const reason = LOOK_REASONS.has(body.reason) ? body.reason : 'failed';
+  return lookFailure(reason, typeof body.error === 'string' ? shownText(body.error) : `Arty Desktop answered ${answer.status}.`);
 }
 
 function createArtyLink({ getSettings, setToken, request = requestArty }) {
@@ -138,7 +171,24 @@ function createArtyLink({ getSettings, setToken, request = requestArty }) {
     return body.declined === true ? refuse(message, { declined: true }) : refuse(message);
   }
 
-  return { status, pair, unpair, runComputer };
+  async function lookAtScreen(app) {
+    const settings = getSettings();
+    if (!settings.artyLink) return lookFailure('not_linked', 'The link to Arty Desktop is off.');
+    if (settings.artyToken === '') return lookFailure('not_linked', 'Pair with Arty Desktop first.');
+    if (!isPlainAppName(app)) return lookFailure('bad_request', 'That is not an app name that can be shown on the Allow card.');
+    let answer;
+    try {
+      answer = await request({ method: 'POST', path: '/link/screenshot', token: settings.artyToken, body: { app }, port: settings.artyPort, timeoutMs: STEP_TIMEOUT_MS, maxBytes: MAX_PICTURE_RESPONSE_BYTES });
+    } catch (error) {
+      return lookFailure(NETWORK_FAILURES.includes(error.code) ? 'not_running' : 'failed', describeFailure(error));
+    }
+    const body = bodyOf(answer);
+    if (answer.status !== 200 || body.ok !== true) return describeLookRefusal(answer);
+    if (!isPicture(body)) return lookFailure('failed', 'Arty Desktop sent something that is not a picture, so it was not used.');
+    return { ok: true, image: body.image, mime: body.mime, target: shownText(body.target), window: shownText(body.window), note: shownText(body.note) };
+  }
+
+  return { status, pair, unpair, runComputer, lookAtScreen };
 }
 
 module.exports = { createArtyLink, requestArty, LOOPBACK_HOST };
