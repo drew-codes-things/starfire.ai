@@ -113,9 +113,10 @@
   core files, 32 processes inside bubblewrap) and inside bubblewrap with no network when it can
   start; without `prlimit` every check is skipped. Parsers (Python, JSON, YAML, TOML, XML) run in a
   child process with no fork. The server reads at most 64 KB of a checker's output, gcc and clang
-  stop after 20 errors, one account runs one check at a time, and the C include filter now also
-  sees includes after a form feed, a vertical tab or a bare carriage return and removes comments
-  with a plain scan, so a hostile snippet cannot stall the server.
+  stop after 20 errors, one account runs one check at a time and at most 20 seconds of checks a
+  minute, and the C include filter now also sees includes after a form feed, a vertical tab or a
+  bare carriage return and removes comments with a plain scan, so a hostile snippet cannot stall
+  the server.
 - Mail calls run on four threads of their own, each cut off after 60 seconds; an account may run
   two at once and make `MAIL_REQUESTS_PER_MINUTE` (60) mail requests a minute. An IMAP server may
   send at most 32 MB per request, each line counted with 256 bytes more for what it costs to keep,

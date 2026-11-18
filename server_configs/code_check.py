@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from dataclasses import dataclass
 
 from host_sandbox import sandboxed_argv, scrubbed_env, system_folders_argv, working_sandbox_program
@@ -389,6 +390,8 @@ def check_sync(language: str, code: str, hidden_dirs: tuple[str, ...] = ()) -> d
 
 MAX_CHECKS_AT_ONCE = 2
 MAX_CHECKS_PER_ACCOUNT = 1
+MAX_CHECK_SECONDS_PER_ACCOUNT_PER_MINUTE = 20.0
+MINUTE_SECONDS = 60.0
 CHECKS_BUSY = "the code checker is busy - try again in a moment"
 ACCOUNT_CHECK_RUNNING = "this account already has a code check running - try again when it finishes"
 
@@ -404,30 +407,46 @@ class CheckSlots:
         self.per_account = per_account
         self._lock = threading.Lock()
         self._running: dict[str, int] = {}
+        self._used: dict[str, list[tuple[float, float]]] = {}
+
+    def _seconds_used_this_minute(self, account: str, now: float) -> float:
+        recent = [(ended, seconds) for ended, seconds in self._used.get(account, []) if now - ended < MINUTE_SECONDS]
+        if recent:
+            self._used[account] = recent
+        else:
+            self._used.pop(account, None)
+        return sum(seconds for _, seconds in recent)
 
     def take(self, account: str) -> None:
         with self._lock:
             if self._running.get(account, 0) >= self.per_account:
                 raise ChecksBusy(ACCOUNT_CHECK_RUNNING)
+            if self._seconds_used_this_minute(account, time.monotonic()) >= MAX_CHECK_SECONDS_PER_ACCOUNT_PER_MINUTE:
+                raise ChecksBusy(f"this account used {MAX_CHECK_SECONDS_PER_ACCOUNT_PER_MINUTE:g} seconds of code "
+                                 "checks in the last minute - try again in a moment")
             if sum(self._running.values()) >= self.size:
                 raise ChecksBusy(CHECKS_BUSY)
             self._running[account] = self._running.get(account, 0) + 1
 
-    def give_back(self, account: str) -> None:
+    def give_back(self, account: str, seconds_used: float = 0.0) -> None:
         with self._lock:
             self._running[account] -= 1
             if self._running[account] <= 0:
                 del self._running[account]
+            now = time.monotonic()
+            self._used.setdefault(account, []).append((now, seconds_used))
+            self._seconds_used_this_minute(account, now)
 
 
 check_slots = CheckSlots()
 
 
 def _check_in_slot(language: str, code: str, hidden_dirs: tuple[str, ...], account: str) -> dict:
+    started = time.monotonic()
     try:
         return check_sync(language, code, hidden_dirs)
     finally:
-        check_slots.give_back(account)
+        check_slots.give_back(account, time.monotonic() - started)
 
 
 async def check(language: str, code: str, hidden_dirs: tuple[str, ...] = (), *, account: str) -> dict:

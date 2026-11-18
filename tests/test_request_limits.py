@@ -3,6 +3,7 @@ import io
 import os
 import sys
 import threading
+import time
 
 import bcrypt
 import pytest
@@ -178,3 +179,27 @@ def test_documents_stop_at_the_per_account_total(admin, monkeypatch):
     assert first.status_code == 200
     second = admin.post("/api/documents", files={"file": ("b.txt", b"word " * 150_000)})
     assert second.status_code == 413 and "limited to 1 MB" in second.json()["detail"]
+
+
+SLOW_CHECK_SECONDS = 0.3
+
+
+def test_an_account_that_used_its_checker_time_for_the_minute_waits_while_others_still_check(monkeypatch):
+    monkeypatch.setattr(code_check, "check_slots", code_check.CheckSlots())
+    monkeypatch.setattr(code_check, "MAX_CHECK_SECONDS_PER_ACCOUNT_PER_MINUTE", SLOW_CHECK_SECONDS / 2, raising=False)
+
+    def slow_check(language, code, hidden_dirs=()):
+        time.sleep(SLOW_CHECK_SECONDS)
+        return code_check._result("python", "ok", "test", "")
+
+    monkeypatch.setattr(code_check, "check_sync", slow_check)
+
+    async def checks():
+        first = await code_check.check("python", "x = 1", account="busy")
+        again = await code_check.check("python", "x = 1", account="busy")
+        other = await code_check.check("python", "x = 1", account="other")
+        return first, again, other
+
+    first, again, other = asyncio.run(checks())
+    assert first["status"] == "ok" and other["status"] == "ok"
+    assert again["status"] == "skipped" and "minute" in again["message"], again

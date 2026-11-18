@@ -344,8 +344,9 @@ compilers stop after 20 errors. C and C++ only compile code whose `#include` lin
 headers such as `<stdio.h>` (comments and string literals are read the way the compiler reads
 them, and a comment right after `#` is refused), and the compiler's sandbox holds only the system
 program folders (`/usr`, `/bin`, `/lib*`, `/etc/alternatives`), a private `/tmp` and the snippet,
-so an include that gets past the filter finds no other file. Two checks run at once on the whole server and one per account; a
-check beyond that is reported as busy.
+so an include that gets past the filter finds no other file. Two checks run at once on the whole
+server and one per account, and one account may use 20 seconds of checking in a minute, so two
+accounts cannot keep the checker busy for everyone else; a check beyond that is reported as busy.
 
 Your own messages have **edit**, **copy** and **delete**. Editing your
 message or regenerating branches the conversation - rather than mutating history in place,
