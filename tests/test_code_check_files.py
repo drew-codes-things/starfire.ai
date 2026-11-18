@@ -1,6 +1,7 @@
 import os
 import sys
 import tempfile
+import time
 
 import pytest
 
@@ -60,7 +61,7 @@ def test_a_runner_that_needs_the_sandbox_refuses_to_start_without_it(monkeypatch
     monkeypatch.setattr(code_check, "working_sandbox_program", lambda: None)
     with pytest.raises(code_check.RunnerUnavailable, match="bubblewrap"):
         code_check.runner_argv(["cc", "-fsyntax-only", "a.c"], str(tmp_path), (), code_check.RUNNER_LIMITS,
-                               needs_sandbox=True)
+                               system_folders_only=True)
     assert code_check.runner_argv(["node", "--check", "a.js"], str(tmp_path), (), code_check.RUNNER_LIMITS)[0] == \
         "/usr/bin/prlimit"
 
@@ -118,3 +119,78 @@ def test_compiler_messages_quoting_another_file_are_dropped_from_a_real_check(se
                                    (str(server["data"]),))
     assert result["status"] == "error" and result["message"].endswith(code_check.INCLUDED_FILE_NOTE)
     assert SECRET not in result["message"] and "other_file_marker" not in result["message"]
+
+
+TOKEN_IN_A_FILE = "tok_example_not_a_real_value"
+LITERALS_HOLDING_A_COMMENT_OPENER = {
+    "string": 'const char *s = "/*";',
+    "character": "int c = '/*';",
+    "raw string": 'const char *s = R"x(/*)x";',
+    "wide raw string": 'const wchar_t *s = LR"(/*)";',
+}
+INCLUDE_AFTER_A_LITERAL = "{literal}\nenum E {{\n{directive} \"{path}\"\n}};\ntemplate<E e> struct T;\nT<(E)0> t;\n"
+
+
+@pytest.mark.parametrize("literal", LITERALS_HOLDING_A_COMMENT_OPENER)
+@pytest.mark.parametrize("directive", ["#/**/include", "/**/#include", "%:/**/include", "/**/ # include"])
+def test_a_comment_opener_inside_a_literal_does_not_hide_an_include_from_the_filter(literal, directive):
+    code = INCLUDE_AFTER_A_LITERAL.format(literal=LITERALS_HOLDING_A_COMMENT_OPENER[literal], directive=directive,
+                                          path="/opt/app/token")
+    assert code_check._reads_files_outside_system_headers(code)
+
+
+@pytest.mark.parametrize("code", [
+    "int a = 1'000'000; /* it's fine */\nint main() { return a; }\n",
+    'const char *s = "/* not a comment */";\nint main() { return 0; }\n',
+    "#include <stdio.h>\nchar c = '\"'; /* it's a comment */\nint main(void) { return 0; }\n",
+])
+def test_ordinary_code_with_quotes_and_comments_is_still_checked(code):
+    assert not code_check._reads_files_outside_system_headers(code)
+
+
+@pytest.fixture
+def token_outside_the_hidden_folders():
+    with tempfile.TemporaryDirectory(dir=ROOT, prefix=".outside-check-") as folder:
+        path = os.path.join(folder, "token")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(TOKEN_IN_A_FILE + "\n")
+        yield path
+
+
+@needs_cc
+@needs_sandbox
+@pytest.mark.parametrize("language", ["c", "cpp"])
+def test_the_compiler_sees_only_its_own_folders(token_outside_the_hidden_folders, include_filter_off, language):
+    code = INCLUDE_AFTER_A_LITERAL.format(literal='const char *s = "/*";', directive="#include",
+                                          path=token_outside_the_hidden_folders)
+    result = code_check.check_sync(language, code)
+    assert TOKEN_IN_A_FILE not in result["message"], result
+    assert "No such file" in result["message"] or "file not found" in result["message"], result
+
+
+def test_the_c_sandbox_binds_only_system_folders(monkeypatch, tmp_path):
+    monkeypatch.setattr(code_check.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(code_check, "working_sandbox_program", lambda: "/usr/bin/bwrap")
+    argv = code_check.runner_argv(["gcc", "-fsyntax-only", "a.c"], str(tmp_path), (), code_check.RUNNER_LIMITS,
+                                  system_folders_only=True)
+    sandbox_part = argv[:argv.index("--")]
+    read_only = [sandbox_part[index + 1] for index, flag in enumerate(sandbox_part) if flag == "--ro-bind"]
+    writable = [sandbox_part[index + 1] for index, flag in enumerate(sandbox_part) if flag == "--bind"]
+    assert "/" not in read_only and "/usr" in read_only
+    assert all(path in host_sandbox.SYSTEM_FOLDERS + host_sandbox.SYSTEM_FILES for path in read_only), read_only
+    assert writable == [str(tmp_path)]
+    assert "--unshare-net" in sandbox_part and sandbox_part[sandbox_part.index("--tmpfs") + 1] == "/tmp"
+
+
+SECONDS_FOR_THE_LITERAL_SCAN = 0.5
+LITERAL_FLOODS = {"quote and backslash": '"\\', "empty character literals": "''", "raw string openers": 'R"(',
+                  "numbers with separators": "1'"}
+
+
+@pytest.mark.parametrize("label", LITERAL_FLOODS)
+def test_the_literal_aware_filter_takes_time_in_step_with_the_snippet_length(label):
+    unit = LITERAL_FLOODS[label]
+    code = unit * (code_check.MAX_CODE_CHARS // len(unit))
+    started = time.perf_counter()
+    code_check._reads_files_outside_system_headers(code)
+    assert time.perf_counter() - started < SECONDS_FOR_THE_LITERAL_SCAN

@@ -9,7 +9,7 @@ import tempfile
 import threading
 from dataclasses import dataclass
 
-from host_sandbox import sandboxed_argv, scrubbed_env, working_sandbox_program
+from host_sandbox import sandboxed_argv, scrubbed_env, system_folders_argv, working_sandbox_program
 from syntax_parsers import PARSERS, first_int as _first_int, result as _result
 
 CHECK_TIMEOUT_S = 20
@@ -73,22 +73,24 @@ def limited_argv(limiter: str, argv: list[str], limits: RunnerLimits, count_proc
 
 
 def runner_argv(argv: list[str], cwd: str, hidden_dirs: tuple[str, ...], limits: RunnerLimits,
-                needs_sandbox: bool = False) -> list[str]:
+                system_folders_only: bool = False) -> list[str]:
     limiter = shutil.which(LIMITER_PROGRAM)
     if limiter is None:
         raise RunnerUnavailable(NEEDS_LIMITER)
     program = working_sandbox_program()
     if program is None:
-        if needs_sandbox:
+        if system_folders_only:
             raise RunnerUnavailable(NEEDS_SANDBOX)
         return limited_argv(limiter, argv, limits, count_processes=False)
     inner = limited_argv(limiter, argv, limits, count_processes=True)
+    if system_folders_only:
+        return system_folders_argv(program, inner, cwd, scrubbed_env())
     return sandboxed_argv(program, inner, cwd, cwd, hidden_dirs, scrubbed_env(), share_network=False)
 
 
 def _run(cmd: list[str], cwd: str, hidden_dirs: tuple[str, ...] = (), limits: RunnerLimits = RUNNER_LIMITS,
-         needs_sandbox: bool = False) -> tuple[int, str]:
-    argv = runner_argv(cmd, cwd, hidden_dirs, limits, needs_sandbox)
+         system_folders_only: bool = False) -> tuple[int, str]:
+    argv = runner_argv(cmd, cwd, hidden_dirs, limits, system_folders_only)
     with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
         try:
             proc = subprocess.run(argv, stdout=stdout_file, stderr=stderr_file, timeout=CHECK_TIMEOUT_S, cwd=cwd,
@@ -243,28 +245,39 @@ def _is_system_header(directive: str, argument: str) -> bool:
     return bool(match) and ".." not in match.group(1)
 
 
-BLOCK_COMMENT_START, BLOCK_COMMENT_END, LINE_COMMENT_START = "/*", "*/", "//"
+COMMENT = r"(?P<comment>/\*.*?(?:\*/|\Z)|//[^\n]*)"
+QUOTED = r"""(?P<literal>"(?:[^"\\\n]|\\[^\n]?)*+(?:"|(?=\n)|\Z)|'(?:[^'\\\n]|\\[^\n]?)*+(?:'|(?=\n)|\Z))"""
+RAW_STRING = r'(?P<raw>(?<![A-Za-z0-9_])(?:u8|[uUL])?R"(?P<delimiter>[^ ()\\\t\v\f\n"]{0,16})\(.*?(?:\)(?P=delimiter)"|\Z))'
+NUMBER_WITH_SEPARATORS = r"(?P<number>(?<![A-Za-z0-9_])\.?[0-9](?:[eEpP][+-]|'[A-Za-z0-9_]|[A-Za-z0-9_.])*+)"
 
 
-def _next_comment_start(text: str, position: int) -> int:
-    slash = text.find("/", position)
-    while slash >= 0 and not text.startswith((BLOCK_COMMENT_START, LINE_COMMENT_START), slash):
-        slash = text.find("/", slash + 1)
-    return slash
+def _c_reading(literals: bool, raw_strings: bool, digit_separators: bool) -> re.Pattern:
+    pieces = [COMMENT]
+    if raw_strings:
+        pieces.append(RAW_STRING)
+    if digit_separators:
+        pieces.append(NUMBER_WITH_SEPARATORS)
+    if literals:
+        pieces.append(QUOTED)
+    return re.compile("|".join(pieces), re.S)
 
 
-def _without_c_comments(text: str) -> str:
-    pieces, position = [], 0
-    while (start := _next_comment_start(text, position)) >= 0:
-        pieces.append(text[position:start] + " ")
-        if text.startswith(BLOCK_COMMENT_START, start):
-            end = text.find(BLOCK_COMMENT_END, start + len(BLOCK_COMMENT_START))
-            position = end + len(BLOCK_COMMENT_END) if end >= 0 else len(text)
-        else:
-            end = text.find("\n", start)
-            position = end if end >= 0 else len(text)
-    pieces.append(text[position:])
-    return "".join(pieces)
+C_READINGS = (
+    _c_reading(literals=False, raw_strings=False, digit_separators=False),
+    _c_reading(literals=True, raw_strings=False, digit_separators=False),
+    _c_reading(literals=True, raw_strings=True, digit_separators=False),
+    _c_reading(literals=True, raw_strings=False, digit_separators=True),
+    _c_reading(literals=True, raw_strings=True, digit_separators=True),
+)
+COMMENT_NEXT_TO_DIRECTIVE_SIGN = re.compile(r"^[ \t\f\v]*(?:#|%:)[ \t\f\v]*/[*/]", re.M)
+
+
+def _comment_as_space(token: re.Match) -> str:
+    return " " if token.group("comment") else token.group(0)
+
+
+def _without_c_comments(text: str, reading: re.Pattern = C_READINGS[-1]) -> str:
+    return reading.sub(_comment_as_space, text)
 
 
 def _names_files_outside_system_headers(text: str) -> bool:
@@ -273,8 +286,9 @@ def _names_files_outside_system_headers(text: str) -> bool:
 
 def _reads_files_outside_system_headers(code: str) -> bool:
     spliced = LINE_SPLICE.sub("", LINE_ENDS.sub("\n", code))
-    without_comments = _without_c_comments(spliced)
-    return _names_files_outside_system_headers(spliced) or _names_files_outside_system_headers(without_comments)
+    if COMMENT_NEXT_TO_DIRECTIVE_SIGN.search(spliced) or _names_files_outside_system_headers(spliced):
+        return True
+    return any(_names_files_outside_system_headers(_without_c_comments(spliced, reading)) for reading in C_READINGS)
 
 
 MAX_COMPILER_ERRORS = 20
@@ -323,7 +337,7 @@ def _check_c_family(language: str, code: str, hidden_dirs: tuple[str, ...] = ())
         return _result(language, "skipped", checker, NEEDS_SANDBOX)
     directory, path = _write_temp(code, ".c" if language == "c" else ".cpp")
     try:
-        rc, output = _run(_compiler_argv(tool, path), directory, hidden_dirs, needs_sandbox=True)
+        rc, output = _run(_compiler_argv(tool, path), directory, hidden_dirs, system_folders_only=True)
         if rc == 0:
             return _result(language, "ok", checker)
         message = _snippet_messages_only(_tidy(output, path, directory))

@@ -29,9 +29,12 @@
   file, so a refused path never shows up in a diff.
 - The C and C++ code check could be made to read any file the server can read (`#/**/include`,
   `/**/#include`, a form feed or vertical tab around `#include`) and gcc's error text quoted it.
-  C and C++ are now only compiled inside bubblewrap with no network, a private /tmp and the data,
-  app and home folders hidden, and only the snippet's own messages are shown; without bubblewrap
-  they are not compiled at all. Every checker runs with a scrubbed environment.
+  C and C++ are now only compiled inside bubblewrap with no network, a private /tmp and only the
+  system program folders (`/usr`, `/bin`, `/lib*`, `/etc/alternatives`) and the snippet in view, so
+  no other file on the server can be included; only the snippet's own messages are shown, and
+  without bubblewrap they are not compiled at all. The include filter reads string, character and
+  raw string literals the way the compiler does and refuses a comment right after `#`. Every
+  checker runs with a scrubbed environment.
 - Mail no longer blocks the server. Every IMAP and SMTP call from the email pages, the email
   tool and the email rules runs off the event loop with a 20 second timeout on the connection and
   every command, so a mail server that never answers (or starfire's own port given as one) cannot

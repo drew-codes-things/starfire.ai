@@ -17,6 +17,10 @@ SANDBOX_PROGRAM = "bwrap"
 SHELL = "/bin/sh"
 READ_CHUNK_BYTES = 4096
 SANDBOX_PROBE_TIMEOUT_SECONDS = 10
+SYSTEM_FOLDERS = ("/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32", "/etc/alternatives")
+SYSTEM_FILES = ("/etc/ld.so.cache",)
+ISOLATION_FLAGS = ("--unshare-user", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try",
+                   "--die-with-parent", "--new-session", "--clearenv")
 
 
 @dataclass(frozen=True)
@@ -67,6 +71,15 @@ def _existing(paths) -> list[str]:
     return [path for path in dict.fromkeys(os.path.abspath(p) for p in paths if p) if os.path.isdir(path)]
 
 
+def _isolated(wrapped: list[str], argv: list[str], cwd: str, env: dict[str, str], share_network: bool) -> list[str]:
+    wrapped = [*wrapped, *ISOLATION_FLAGS]
+    if not share_network:
+        wrapped.append("--unshare-net")
+    for name, value in env.items():
+        wrapped += ["--setenv", name, value]
+    return wrapped + ["--chdir", cwd, "--", *argv]
+
+
 def sandboxed_argv(program: str, argv: list[str], cwd: str, writable: str, hidden_dirs, env: dict[str, str],
                    share_network: bool = True) -> list[str]:
     wrapped = [program, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp"]
@@ -74,13 +87,26 @@ def sandboxed_argv(program: str, argv: list[str], cwd: str, writable: str, hidde
         wrapped += ["--tmpfs", hidden]
     if writable:
         wrapped += ["--bind", writable, writable]
-    wrapped += ["--unshare-user", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try",
-                "--die-with-parent", "--new-session", "--clearenv"]
-    if not share_network:
-        wrapped.append("--unshare-net")
-    for name, value in env.items():
-        wrapped += ["--setenv", name, value]
-    return wrapped + ["--chdir", cwd, "--", *argv]
+    return _isolated(wrapped, argv, cwd, env, share_network)
+
+
+def _system_folder_binds() -> list[str]:
+    binds = []
+    for folder in SYSTEM_FOLDERS:
+        if os.path.islink(folder):
+            binds += ["--symlink", os.readlink(folder), folder]
+        elif os.path.isdir(folder):
+            binds += ["--ro-bind", folder, folder]
+    for file in SYSTEM_FILES:
+        if os.path.isfile(file):
+            binds += ["--ro-bind", file, file]
+    return binds
+
+
+def system_folders_argv(program: str, argv: list[str], cwd: str, env: dict[str, str]) -> list[str]:
+    wrapped = [program, *_system_folder_binds(), "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp",
+               "--bind", cwd, cwd]
+    return _isolated(wrapped, argv, cwd, env, share_network=False)
 
 
 def sandboxed_shell_argv(program: str, command: str, cwd: str, limits: HostLimits, env: dict[str, str]) -> list[str]:

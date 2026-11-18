@@ -340,7 +340,10 @@ Every checker runs in its own process under `prlimit`: 512 MB of memory (1 GB fo
 CPU, files up to 8 MB, no core files, and inside bubblewrap at most 32 processes and no network.
 A check is stopped after 20 s. The server reads at most 64 KB of a checker's output, and the C
 compilers stop after 20 errors. C and C++ only compile code whose `#include` lines name system
-headers such as `<stdio.h>`. Two checks run at once on the whole server and one per account; a
+headers such as `<stdio.h>` (comments and string literals are read the way the compiler reads
+them, and a comment right after `#` is refused), and the compiler's sandbox holds only the system
+program folders (`/usr`, `/bin`, `/lib*`, `/etc/alternatives`), a private `/tmp` and the snippet,
+so an include that gets past the filter finds no other file. Two checks run at once on the whole server and one per account; a
 check beyond that is reported as busy.
 
 Your own messages have **edit**, **copy** and **delete**. Editing your
