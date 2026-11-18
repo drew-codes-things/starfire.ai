@@ -140,6 +140,12 @@
   file.
 
 ### Added
+- **Look at my screen** (starfire Desktop with the Arty link connected, admin accounts only): a `look_at_screen` chat tool
+  so "look at my discord" really looks. The page asks starfire Desktop through a narrow bridge, which sends only a
+  screenshot request to Arty Desktop; you click Allow in Arty, the picture goes back as the tool result for a vision model, and
+  the chat shows each step plus a clickable thumbnail. Refused, Arty not running, no such window and timed out each show a
+  clear line and the model answers that it could not look. The tool is not offered in a browser, to ordinary accounts or in
+  scheduled tasks, and what the screenshot shows is treated as untrusted content.
 - **starfire Desktop** (`desktop/`): an Electron app that opens your own starfire in its own window on Debian (AppImage). The first run asks for the address and only saves one that
   answers `/api/health` like starfire; `http` is accepted only for localhost and local network addresses with an explicit
   tick box. It stays signed in, has a tray icon (Open, Quick ask, Settings, Quit), an optional start with the PC, a global

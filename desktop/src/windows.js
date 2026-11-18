@@ -13,7 +13,7 @@ const BACKGROUND = '#19191c';
 const ABORTED_LOAD_CODE = -3;
 const SIGN_IN_HINT = 'Sign in to starfire, then ask again.';
 
-function createWindowManager({ electron, controller, pagesDir, preloadPath, iconPath }) {
+function createWindowManager({ electron, controller, pagesDir, preloadPath, webPreloadPath, iconPath }) {
   const { BrowserWindow, Notification, screen, shell } = electron;
   let main = null;
   let connect = null;
@@ -53,7 +53,7 @@ function createWindowManager({ electron, controller, pagesDir, preloadPath, icon
       icon: iconPath,
       backgroundColor: BACKGROUND,
       autoHideMenuBar: true,
-      webPreferences: secureWebPreferences({ partition: STARFIRE_PARTITION, spellcheck: true }),
+      webPreferences: secureWebPreferences({ partition: STARFIRE_PARTITION, preload: webPreloadPath, spellcheck: true }),
     });
     const guard = { decide: (url) => createNavigationGuard(controller.get().address).decide(url) };
     guardWebContents(main.webContents, guard, {
@@ -232,6 +232,14 @@ function createWindowManager({ electron, controller, pagesDir, preloadPath, icon
     return !main || !main.isVisible() || main.isMinimized();
   }
 
+  function isMainContents(contents) {
+    return Boolean(main) && contents === main.webContents;
+  }
+
+  function reloadMain() {
+    if (main) main.webContents.reload();
+  }
+
   function mainIsFocused() {
     return Boolean(main) && main.isFocused();
   }
@@ -253,6 +261,8 @@ function createWindowManager({ electron, controller, pagesDir, preloadPath, icon
     markQuitting,
     mainIsHidden,
     mainIsFocused,
+    isMainContents,
+    reloadMain,
     allWindows,
     isMainVisible: () => !mainIsHidden(),
   };

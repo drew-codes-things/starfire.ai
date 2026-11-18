@@ -3,9 +3,11 @@ import json
 
 import builtin_tools
 import file_edit_tool
+import screen_look
 import user_data
 from chat_stream import _sse_line, stream_chat_once
 from mcp_manager import mcp_manager
+from providers import _detect_provider
 
 MAX_TOOL_ROUNDS = 5
 EDIT_TOOL = "edit_file"
@@ -84,6 +86,8 @@ async def run_chat_with_tools(base_url: str, api_key: str | None, model: str, me
             working_messages.append({
                 "role": "tool", "tool_call_id": call["id"], "content": result,
             })
+        for image in builtin_tools.take_screen_images(ctx):
+            working_messages.append(screen_look.image_message(_detect_provider(base_url), image))
 
 def _round_limit_note(unrun_calls: list[dict]) -> str:
     names = ", ".join(sorted({call.get("name") or "a tool" for call in unrun_calls}))

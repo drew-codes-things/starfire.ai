@@ -6,6 +6,7 @@ const { loadSettings } = require('./src/settings');
 const { applyAutostart } = require('./src/autostart');
 const { acceleratorFromKeyEvent } = require('./src/shortcut');
 const { registerIpc } = require('./src/ipc');
+const { isBridgeOffered, registerWebBridge } = require('./src/webBridge');
 const { isLocalPageUrl, isPermissionAllowed } = require('./src/navigation');
 const { isReplyFinished, shouldNotify, replyNotification } = require('./src/notify');
 const { parseLaunchArgs } = require('./src/launch');
@@ -18,6 +19,7 @@ const { app, Menu, Notification, Tray, nativeImage, globalShortcut, ipcMain, ses
 const APP_ID = 'app.starfire.desktop';
 const PAGES_DIR = path.join(__dirname, 'pages');
 const PRELOAD_PATH = path.join(__dirname, 'preload.js');
+const WEB_PRELOAD_PATH = path.join(__dirname, 'preload-web.js');
 const ICON_PATH = path.join(__dirname, 'assets', 'icon.png');
 const TRAY_ICON_PATH = path.join(__dirname, 'assets', 'tray.png');
 const CONNECTED_PAUSE_MS = 700;
@@ -104,12 +106,13 @@ function startApp() {
     globalShortcut,
     onQuickAsk: () => windows.toggleQuickAsk(),
     setAutostart,
-    onChange: () => {
+    onChange: (current, previous) => {
       if (trayHandle) trayHandle.refresh();
+      if (windows && isBridgeOffered(current) !== isBridgeOffered(previous)) windows.reloadMain();
     },
   });
   artyLink = createArtyLink({ getSettings: () => controller.get(), setToken: (token) => controller.setArtyToken(token) });
-  windows = createWindowManager({ electron, controller, pagesDir: PAGES_DIR, preloadPath: PRELOAD_PATH, iconPath: ICON_PATH });
+  windows = createWindowManager({ electron, controller, pagesDir: PAGES_DIR, preloadPath: PRELOAD_PATH, webPreloadPath: WEB_PRELOAD_PATH, iconPath: ICON_PATH });
 
   installStarfireSession();
   installLocalSession();
@@ -135,6 +138,8 @@ function startApp() {
       }, CONNECTED_PAUSE_MS),
     },
   });
+
+  registerWebBridge({ ipcMain, controller, artyLink, isMainWindow: (event) => windows.isMainContents(event.sender) });
 
   const registered = controller.start();
   if (!registered.ok) console.error(registered.error);
