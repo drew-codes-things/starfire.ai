@@ -15,11 +15,12 @@ APPROVAL_TIMEOUT_SECONDS = 300
 _pending: dict[str, dict] = {}
 
 
-def stage(command: str, cwd: str | None, owner: str | None, tool: str = "run_shell", untrusted: bool = False) -> str:
+def stage(command: str, cwd: str | None, owner: str | None, tool: str = "run_shell", untrusted: bool = False,
+          unsandboxed: bool = False) -> str:
     pending_id = uuid.uuid4().hex[:12]
     _pending[pending_id] = {
         "id": pending_id, "owner": owner, "command": command, "cwd": cwd or "", "tool": tool, "untrusted": untrusted,
-        "created": time.time(), "future": asyncio.get_running_loop().create_future(),
+        "unsandboxed": unsandboxed, "created": time.time(), "future": asyncio.get_running_loop().create_future(),
     }
     return pending_id
 

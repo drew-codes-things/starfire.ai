@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import functools
 import logging
 import os
 import shutil
 import signal
 import subprocess
+import threading
+import time
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,7 @@ SANDBOX_PROGRAM = "bwrap"
 SHELL = "/bin/sh"
 READ_CHUNK_BYTES = 4096
 SANDBOX_PROBE_TIMEOUT_SECONDS = 10
+SANDBOX_RETRY_SECONDS = 300
 SYSTEM_FOLDERS = ("/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32", "/etc/alternatives")
 SYSTEM_FILES = ("/etc/ld.so.cache",)
 ISOLATION_FLAGS = ("--unshare-user", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try",
@@ -47,8 +49,7 @@ def sandbox_program() -> str | None:
     return shutil.which(SANDBOX_PROGRAM)
 
 
-@functools.cache
-def sandbox_starts(program: str) -> bool:
+def _probe_sandbox(program: str) -> bool:
     probe = [program, "--ro-bind", "/", "/", "--unshare-user", "--unshare-pid", "--unshare-net", "--die-with-parent",
              "--", SHELL, "-c", "exit 0"]
     try:
@@ -60,6 +61,31 @@ def sandbox_starts(program: str) -> bool:
     if finished.returncode != 0:
         logger.warning("the %s sandbox could not be started: %s", program, finished.stderr.decode(errors="replace"))
     return finished.returncode == 0
+
+
+_probe_lock = threading.Lock()
+_programs_that_start: set[str] = set()
+_failed_probe_at: dict[str, float] = {}
+
+
+def _failed_recently(program: str) -> bool:
+    failed_at = _failed_probe_at.get(program)
+    return failed_at is not None and time.monotonic() - failed_at < SANDBOX_RETRY_SECONDS
+
+
+def sandbox_starts(program: str) -> bool:
+    with _probe_lock:
+        if program in _programs_that_start:
+            return True
+        if _failed_recently(program):
+            return False
+        starts = _probe_sandbox(program)
+        if starts:
+            _programs_that_start.add(program)
+            _failed_probe_at.pop(program, None)
+        else:
+            _failed_probe_at[program] = time.monotonic()
+        return starts
 
 
 def working_sandbox_program() -> str | None:

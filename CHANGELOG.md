@@ -130,6 +130,9 @@
 - Approval cards show the action, recipient and mailbox of the call in their heading and keep the
   call text in its own scroll area, so the recipient and the run button are on screen together.
   Wide and blank-looking spaces are shown as `\u` escapes on the card.
+- When bubblewrap is missing or cannot start, the run_shell approval card says the command runs
+  without a sandbox, and a failed start is tried again after five minutes instead of being kept
+  until the server restarts.
 - Finished background replies are kept within 64 MB in total, and the reply of an account that is
   disabled or removed stops at its next chunk without being saved. A branch, a clone or an import
   of a chat that read untrusted content keeps that mark, and so does a chat whose turn carried a

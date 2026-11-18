@@ -62,6 +62,15 @@ async function confirmRemove(what, ask = showDialog) {
 const SHELL_TOOL = 'run_shell';
 const UNTRUSTED_APPROVAL_NOTE = 'Untrusted content (a web page, search result, email, document or tool result) ' +
   'was read in this turn and may be trying to steer the model. Check this carefully before you approve it.';
+const UNSANDBOXED_SHELL_NOTE = 'This command runs without a sandbox: bubblewrap is not installed or cannot start on ' +
+  'this server, so the command can read and change every file the server can.';
+
+function shellApprovalNotes(data) {
+  const notes = [];
+  if (data && data.untrusted === true) notes.push(UNTRUSTED_APPROVAL_NOTE);
+  if (data && data.unsandboxed === true) notes.push(UNSANDBOXED_SHELL_NOTE);
+  return notes;
+}
 
 function pendingApprovalCards(commands, edits) {
   const isWaiting = item => item && typeof item.id === 'string' && item.id;
@@ -70,6 +79,7 @@ function pendingApprovalCards(commands, edits) {
     data: {
       pending_id: item.id, command: item.command || '', cwd: item.cwd || '',
       tool: typeof item.tool === 'string' && item.tool ? item.tool : SHELL_TOOL, untrusted: item.untrusted === true,
+      unsandboxed: item.unsandboxed === true,
     },
   }));
   const editCards = (Array.isArray(edits) ? edits : []).filter(isWaiting).map(item => ({
@@ -445,7 +455,7 @@ if (typeof module !== 'undefined' && module.exports) {
     modelPatternsFrom, modelAccessHint, modelAccessSummary,
     DAY_MS, TOAST_MS, TOAST_ERROR_MS, TOAST_FADE_MS,
     sentenceCase, dateGroupLabel, themeChoiceFrom, themeIsLight, showToast, removalQuestion, confirmRemove,
-    pendingApprovalCards, UNTRUSTED_APPROVAL_NOTE, approvalHeading, resolveChatControls, isLastAssistantMessage,
+    pendingApprovalCards, UNTRUSTED_APPROVAL_NOTE, UNSANDBOXED_SHELL_NOTE, shellApprovalNotes, approvalHeading, resolveChatControls, isLastAssistantMessage,
     CHAT_TITLE_CHARS, submitOnEnter, closeOnEscape, chatTitleFrom, firstUnusedModel,
     MAX_SPOKEN_CHARS, takeSpokenSentences, speakableText, spokenPieces,
     REGENERATE_WITH, regenerateChoice,

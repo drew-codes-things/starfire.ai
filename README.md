@@ -36,7 +36,8 @@ Built on FastAPI with encrypted key storage, as a local chat app for you and the
   under it, and without it every code check is reported as skipped
 - [bubblewrap](https://github.com/containers/bubblewrap) (`bwrap`, optional): C and C++ are only
   checked inside it, and run_shell runs in it when it is installed and can start (without it, or
-  where it cannot start, run_shell runs unsandboxed and logs that)
+  where it cannot start, run_shell runs unsandboxed, logs that and says so on its approval card; a
+  failed start is tried again after five minutes)
 
 ## Setup
 
