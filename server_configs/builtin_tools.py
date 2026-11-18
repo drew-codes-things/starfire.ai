@@ -314,7 +314,8 @@ TOOL_SCHEMAS = [
         "function": {
             "name": "look_at_screen",
             "description": "Look at what is on the user's own PC right now, through starfire Desktop and Arty "
-                            "Desktop: it takes a screenshot of their whole screen and you see the picture. The "
+                            "Desktop: it takes a picture of that app's window (or of their whole screen when no app "
+                            "is named or the desktop cannot find just that window) and you see the picture. The "
                             "user is asked to allow it first. Use it when they ask you to look at their screen, "
                             "or at one of their apps such as Discord. If it fails, say plainly that you could "
                             "not look; never guess what is on their screen.",

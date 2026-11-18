@@ -463,3 +463,10 @@ def test_an_answer_cannot_carry_extra_fields_or_huge_text(app):
     request_id = stage_for(admin)
     assert admin.post(f"/api/screen-looks/{request_id}/result", json={**failure("failed"), "command": "id"}).status_code == 422
     assert admin.post(f"/api/screen-looks/{request_id}/result", json={**failure("failed"), "detail": "x" * 5000}).status_code == 422
+
+
+def test_the_model_is_told_a_named_app_is_looked_at_through_its_window_only():
+    schema = next(tool for tool in builtin_tools.TOOL_SCHEMAS if tool["function"]["name"] == builtin_tools.SCREEN_TOOL)
+    description = schema["function"]["description"]
+    assert "that app's window" in description
+    assert "it takes a screenshot of their whole screen and" not in description
