@@ -13,7 +13,7 @@ const CHANNELS = {
   linkStatus: 'starfire:link-status',
   linkPair: 'starfire:link-pair',
   linkUnpair: 'starfire:link-unpair',
-  linkComputer: 'starfire:link-computer',
+  linkTry: 'starfire:link-try',
 };
 const SHOWN_EVENT = 'starfire:shown';
 const KEY_EVENT_FIELDS = ['code', 'ctrlKey', 'altKey', 'shiftKey', 'metaKey'];
@@ -29,11 +29,17 @@ function asObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
-function registerIpc({ ipcMain, controller, isLocalSender, actions, describeKey }) {
+function registerIpc({ ipcMain, controller, isLocalSender, isSettingsSender, actions, describeKey }) {
   function handle(channel, handler) {
     ipcMain.handle(channel, async (event, ...args) => {
       if (!isLocalSender(event)) throw new Error(`Refused ${channel}: it did not come from one of the app's own pages.`);
       return handler(...args);
+    });
+  }
+  function handleFromSettings(channel, handler) {
+    ipcMain.handle(channel, async (event, ...args) => {
+      if (!isSettingsSender(event)) throw new Error(`Refused ${channel}: only the settings page uses the Arty Desktop link.`);
+      return handler(event, ...args);
     });
   }
   handle(CHANNELS.getSettings, () => ({ settings: publicSettings(controller.get()), shortcutProblem: actions.shortcutProblem() }));
@@ -53,13 +59,10 @@ function registerIpc({ ipcMain, controller, isLocalSender, actions, describeKey 
   handle(CHANNELS.changeAddress, () => actions.openConnect('change'));
   handle(CHANNELS.retry, () => actions.retry());
   handle(CHANNELS.cancelConnect, () => actions.closeConnect());
-  handle(CHANNELS.linkStatus, () => actions.linkStatus());
-  handle(CHANNELS.linkPair, (request) => actions.linkPair(asObject(request).code));
-  handle(CHANNELS.linkUnpair, () => actions.linkUnpair());
-  handle(CHANNELS.linkComputer, (request) => {
-    const step = asObject(request);
-    return actions.linkComputer(step.tool, step.arguments);
-  });
+  handleFromSettings(CHANNELS.linkStatus, () => actions.linkStatus());
+  handleFromSettings(CHANNELS.linkPair, (event, request) => actions.linkPair(asObject(request).code));
+  handleFromSettings(CHANNELS.linkUnpair, () => actions.linkUnpair());
+  handleFromSettings(CHANNELS.linkTry, (event) => actions.linkTry(event.sender));
 }
 
 module.exports = { registerIpc, CHANNELS, SHOWN_EVENT, pickKeyEvent };

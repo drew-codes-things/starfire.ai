@@ -115,6 +115,7 @@ kbd {
 .light[data-state="off"] { background: var(--line-strong); }
 .light[data-state="unpaired"] { background: #e0a93b; }
 .light[data-state="unreachable"] { background: #e0a93b; }
+.light[data-state="unproven"] { background: var(--accent); }
 .light[data-state="connected"] { background: var(--ok); box-shadow: 0 0 0 3px rgba(95, 217, 144, 0.25); }
 .light-label { font-weight: 400; font-size: 0.85rem; color: var(--muted); }
 .pair-actions { display: flex; gap: 8px; flex: none; }

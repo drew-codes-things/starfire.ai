@@ -1,5 +1,6 @@
 const http = require('node:http');
-const { isArtyToken } = require('./settings');
+const { createHash, createHmac, randomBytes, timingSafeEqual } = require('node:crypto');
+const spake2 = require('./spake2');
 
 const LOOPBACK_HOST = '127.0.0.1';
 const TOKEN_HEADER = 'X-Arty-Link';
@@ -17,7 +18,12 @@ const BASE64_FORMAT = /^[A-Za-z0-9+/]+={0,2}$/;
 const HIDDEN_CHARACTER = /[\p{C}\p{Z}]/u;
 const LOOK_REASONS = new Set(['declined', 'timed_out', 'not_found', 'cannot_see', 'off_limits', 'unavailable', 'busy', 'bad_request', 'failed']);
 const PAIRING_CODE_FORMAT = /^[0-9]{6}$/;
-const COMPUTER_TOOL_FORMAT = /^computer_[a-z_]{1,40}$/;
+const SESSION_FORMAT = /^[0-9a-f]{32}$/;
+const PROOF_CONTEXT = 'arty-link-proof';
+const NONCE_BYTES = 16;
+const TRY_STEP = Object.freeze({ tool: 'computer_apps', arguments: Object.freeze({}) });
+const NOT_PROVEN = 'Arty Desktop did not prove it is the app you paired with, so nothing was sent.';
+const NOT_ARTY_WHILE_PAIRING = 'Whatever answered did not prove it is Arty Desktop holding that code, so nothing was sent or saved. Check the 6 digits and try again.';
 const NETWORK_FAILURES = ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EPIPE'];
 const NOT_RUNNING = 'Arty Desktop is not running on this computer, or it has not finished starting.';
 
@@ -92,6 +98,19 @@ function isPicture(body) {
   return signature.every((byte, index) => start[index] === byte);
 }
 
+function isSameHex(given, expected) {
+  return typeof given === 'string' && given.length === expected.length && timingSafeEqual(Buffer.from(given), Buffer.from(expected));
+}
+
+function expectedProof(token, port, nonce) {
+  const fingerprint = createHash('sha256').update(token, 'utf8').digest('hex');
+  return createHmac('sha256', fingerprint).update(`${PROOF_CONTEXT}:${port}:${nonce}`).digest('hex');
+}
+
+function isPairingAnswer(body) {
+  return SESSION_FORMAT.test(String(body.session)) && typeof body.share === 'string' && typeof body.proof === 'string';
+}
+
 function lookFailure(reason, error) {
   return { ok: false, reason, error };
 }
@@ -103,6 +122,12 @@ function describeLookRefusal(answer) {
 }
 
 function createArtyLink({ getSettings, setToken, request = requestArty }) {
+  async function isProvenArty(settings) {
+    const nonce = randomBytes(NONCE_BYTES).toString('hex');
+    const answer = await request({ method: 'GET', path: `/link/proof?nonce=${nonce}`, port: settings.artyPort, timeoutMs: STATUS_TIMEOUT_MS });
+    return answer.status === 200 && isSameHex(bodyOf(answer).proof, expectedProof(settings.artyToken, settings.artyPort, nonce));
+  }
+
   async function status() {
     const settings = getSettings();
     const paired = settings.artyToken !== '';
@@ -110,16 +135,29 @@ function createArtyLink({ getSettings, setToken, request = requestArty }) {
     if (!paired) return { state: 'unpaired', paired: false };
     let answer;
     try {
+      if (!(await isProvenArty(settings))) return { state: 'unproven', paired: true };
       answer = await request({ method: 'GET', path: '/link/status', token: settings.artyToken, port: settings.artyPort, timeoutMs: STATUS_TIMEOUT_MS });
     } catch (error) {
       return { state: 'unreachable', paired: true };
     }
-    if (answer.status === 403) {
-      setToken('');
-      return { state: 'unpaired', paired: false };
-    }
+    if (answer.status === 403) return { state: 'unproven', paired: true };
     if (answer.status !== 200 || bodyOf(answer).ok !== true) return { state: 'unreachable', paired: true };
     return { state: 'connected', paired: true, computer: bodyOf(answer).computer === true };
+  }
+
+  async function finishPairing(settings, code, secret, share, started) {
+    let key;
+    try {
+      key = spake2.sharedKey(secret, code, spake2.APP, share, started.share);
+    } catch (error) {
+      return refuse(NOT_ARTY_WHILE_PAIRING);
+    }
+    if (!isSameHex(started.proof, spake2.proof(key, spake2.ARTY))) return refuse(NOT_ARTY_WHILE_PAIRING);
+    const answer = await request({ method: 'POST', path: '/link/pair/finish', body: { session: started.session, proof: spake2.proof(key, spake2.APP) }, port: settings.artyPort, timeoutMs: PAIR_TIMEOUT_MS });
+    const body = bodyOf(answer);
+    if (answer.status !== 200 || body.ok !== true) return refuse(typeof body.error === 'string' ? shownText(body.error) : 'Arty Desktop did not finish the pairing.');
+    const saved = setToken(spake2.linkToken(key));
+    return saved.ok ? { ok: true } : saved;
   }
 
   async function pair(rawCode) {
@@ -127,47 +165,46 @@ function createArtyLink({ getSettings, setToken, request = requestArty }) {
     if (!settings.artyLink) return refuse('Switch the link to Arty Desktop on first.');
     const code = typeof rawCode === 'string' ? rawCode.replace(/\s+/g, '') : '';
     if (!PAIRING_CODE_FORMAT.test(code)) return refuse('The code from Arty Desktop is 6 digits.');
-    let answer;
+    const secret = spake2.newSecret();
+    const share = spake2.shareHex(secret, code, spake2.APP);
     try {
-      answer = await request({ method: 'POST', path: '/link/pair', body: { code, name: APP_NAME }, port: settings.artyPort, timeoutMs: PAIR_TIMEOUT_MS });
+      const answer = await request({ method: 'POST', path: '/link/pair/start', body: { name: APP_NAME, share }, port: settings.artyPort, timeoutMs: PAIR_TIMEOUT_MS });
+      const body = bodyOf(answer);
+      if (answer.status !== 200) return refuse(typeof body.error === 'string' ? shownText(body.error) : 'Arty Desktop did not accept that code.');
+      if (!isPairingAnswer(body)) return refuse(NOT_ARTY_WHILE_PAIRING);
+      return await finishPairing(settings, code, secret, share, body);
     } catch (error) {
       return refuse(describeFailure(error));
     }
-    const body = bodyOf(answer);
-    if (answer.status !== 200) return refuse(typeof body.error === 'string' ? body.error : 'Arty Desktop did not accept that code.');
-    if (!isArtyToken(body.token)) return refuse('Arty Desktop sent something that is not a token, so nothing was saved.');
-    const saved = setToken(body.token);
-    return saved.ok ? { ok: true } : saved;
   }
 
   async function unpair() {
     const settings = getSettings();
-    if (settings.artyToken !== '') {
-      try {
+    if (settings.artyToken === '') return setToken('');
+    try {
+      if (await isProvenArty(settings)) {
         await request({ method: 'POST', path: '/link/unlink', token: settings.artyToken, body: {}, port: settings.artyPort, timeoutMs: PAIR_TIMEOUT_MS });
-      } catch (error) {
-        setToken('');
-        return { ok: true };
       }
+    } catch (error) {
+      return setToken('');
     }
     return setToken('');
   }
 
-  async function runComputer(tool, args) {
+  async function tryLink() {
     const settings = getSettings();
     if (!settings.artyLink) return refuse('The link to Arty Desktop is off.');
     if (settings.artyToken === '') return refuse('Pair with Arty Desktop first.');
-    const isPlainObject = args !== null && typeof args === 'object' && !Array.isArray(args);
-    if (typeof tool !== 'string' || !COMPUTER_TOOL_FORMAT.test(tool) || !isPlainObject) return refuse('That is not a computer step Arty Desktop can take.');
     let answer;
     try {
-      answer = await request({ method: 'POST', path: '/link/computer', token: settings.artyToken, body: { tool, arguments: args }, port: settings.artyPort, timeoutMs: STEP_TIMEOUT_MS });
+      if (!(await isProvenArty(settings))) return refuse(NOT_PROVEN);
+      answer = await request({ method: 'POST', path: '/link/computer', token: settings.artyToken, body: TRY_STEP, port: settings.artyPort, timeoutMs: STEP_TIMEOUT_MS });
     } catch (error) {
       return refuse(describeFailure(error));
     }
     const body = bodyOf(answer);
     if (answer.status === 200 && body.ok === true) return { ok: true, result: String(body.result) };
-    const message = typeof body.error === 'string' ? body.error : `Arty Desktop answered ${answer.status}.`;
+    const message = typeof body.error === 'string' ? shownText(body.error) : `Arty Desktop answered ${answer.status}.`;
     return body.declined === true ? refuse(message, { declined: true }) : refuse(message);
   }
 
@@ -178,6 +215,7 @@ function createArtyLink({ getSettings, setToken, request = requestArty }) {
     if (!isPlainAppName(app)) return lookFailure('bad_request', 'That is not an app name that can be shown on the Allow card.');
     let answer;
     try {
+      if (!(await isProvenArty(settings))) return lookFailure('not_linked', NOT_PROVEN);
       answer = await request({ method: 'POST', path: '/link/screenshot', token: settings.artyToken, body: { app }, port: settings.artyPort, timeoutMs: STEP_TIMEOUT_MS, maxBytes: MAX_PICTURE_RESPONSE_BYTES });
     } catch (error) {
       return lookFailure(NETWORK_FAILURES.includes(error.code) ? 'not_running' : 'failed', describeFailure(error));
@@ -188,7 +226,7 @@ function createArtyLink({ getSettings, setToken, request = requestArty }) {
     return { ok: true, image: body.image, mime: body.mime, target: shownText(body.target), window: shownText(body.window), note: shownText(body.note) };
   }
 
-  return { status, pair, unpair, runComputer, lookAtScreen };
+  return { status, pair, unpair, tryLink, lookAtScreen };
 }
 
 module.exports = { createArtyLink, requestArty, LOOPBACK_HOST };

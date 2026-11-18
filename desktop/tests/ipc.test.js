@@ -24,9 +24,9 @@ function setup({ local = true, connectResult = { ok: true, origin: 'https://a.ex
     linkStatus: async () => { calls.push(['linkStatus']); return { state: 'connected', paired: true }; },
     linkPair: async (code) => { calls.push(['linkPair', code]); return { ok: true }; },
     linkUnpair: async () => { calls.push(['linkUnpair']); return { ok: true }; },
-    linkComputer: async (tool, args) => { calls.push(['linkComputer', tool, args]); return { ok: true, result: 'x' }; },
+    linkTry: async (sender) => { calls.push(['linkTry', sender]); return { ok: true, result: 'x' }; },
   };
-  registerIpc({ ipcMain, controller, isLocalSender: () => local, actions, describeKey: (event) => ({ ok: true, accelerator: event.code }) });
+  registerIpc({ ipcMain, controller, isLocalSender: () => local, isSettingsSender: () => local, actions, describeKey: (event) => ({ ok: true, accelerator: event.code }) });
   return { handlers, calls };
 }
 
@@ -79,14 +79,14 @@ test('the link channels hand plain values to the link', async () => {
   await handlers.get(CHANNELS.linkPair)({}, { code: '123456', extra: 1 });
   await handlers.get(CHANNELS.linkPair)({}, null);
   await handlers.get(CHANNELS.linkUnpair)({});
-  await handlers.get(CHANNELS.linkComputer)({}, { tool: 'computer_apps', arguments: { a: 1 }, extra: 1 });
-  await handlers.get(CHANNELS.linkComputer)({}, 'nonsense');
+  await handlers.get(CHANNELS.linkTry)({ sender: 'settings' }, { tool: 'computer_apps', arguments: { a: 1 }, extra: 1 });
+  await handlers.get(CHANNELS.linkTry)({ sender: 'settings' }, 'nonsense');
   assert.deepEqual(calls, [
     ['linkStatus'],
     ['linkPair', '123456'],
     ['linkPair', undefined],
     ['linkUnpair'],
-    ['linkComputer', 'computer_apps', { a: 1 }],
-    ['linkComputer', undefined, undefined],
+    ['linkTry', 'settings'],
+    ['linkTry', 'settings'],
   ]);
 });

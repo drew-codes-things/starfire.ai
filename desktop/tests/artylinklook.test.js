@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const http = require('node:http');
 const { createArtyLink, requestArty, LOOPBACK_HOST } = require('../src/artyLink');
 const { DEFAULT_SETTINGS } = require('../src/settings');
+const { isProofCall, proofAnswer } = require('./fakeProof');
 
 const TOKEN = 'abcdefghijklmnopqrstuvwxyz0123456789_-ABCDE';
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]).toString('base64');
@@ -17,6 +18,7 @@ function build({ settings = {}, replies = [] } = {}) {
     getSettings: () => current,
     setToken: () => ({ ok: true }),
     request: async (call) => {
+      if (isProofCall(call)) return proofAnswer(call, current);
       calls.push(call);
       const next = queue.shift();
       if (next instanceof Error) throw next;

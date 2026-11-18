@@ -13,7 +13,7 @@
   const linkDetail = document.getElementById('link-detail');
   const linkCode = document.getElementById('link-code');
   const linkPairButton = document.getElementById('link-pair');
-  const LINK_LABELS = { off: 'Off', unpaired: 'Not paired', unreachable: 'Arty Desktop is not running', connected: 'Connected' };
+  const LINK_LABELS = { off: 'Off', unpaired: 'Not paired', unreachable: 'Arty Desktop is not running', unproven: 'Arty Desktop did not prove itself', connected: 'Connected' };
   const LINK_POLL_MS = 3000;
   const STEP_PREVIEW_CHARS = 300;
   const DEFAULT_HELP = shortcutHelp.textContent;
@@ -33,6 +33,7 @@
 
   function linkDetailFor(state) {
     if (state.state === 'unreachable') return 'Open Arty Desktop on this PC to use the link.';
+    if (state.state === 'unproven') return 'Nothing was sent. If you unlinked in Arty Desktop, Unpair here and pair again. If not, something else may be answering on its port.';
     return state.computer ? 'Arty Desktop computer control is on.' : 'Computer control is off in Arty Desktop, so it will refuse steps.';
   }
 
@@ -64,7 +65,7 @@
 
   async function tryTheLink() {
     say('Waiting for your OK in Arty Desktop...', '');
-    const result = await bridge.linkComputer('computer_apps', {});
+    const result = await bridge.linkTry();
     if (result.ok) say(`Arty Desktop says: ${result.result.slice(0, STEP_PREVIEW_CHARS)}`, 'good');
     else say(result.declined ? 'You said no in Arty Desktop.' : result.error, 'bad');
   }
