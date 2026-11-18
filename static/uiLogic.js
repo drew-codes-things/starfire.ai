@@ -62,6 +62,15 @@ async function confirmRemove(what, ask = showDialog) {
 const SHELL_TOOL = 'run_shell';
 const UNTRUSTED_APPROVAL_NOTE = 'Untrusted content (a web page, search result, email, document or tool result) ' +
   'was read in this turn and may be trying to steer the model. Check this carefully before you approve it.';
+const UNSANDBOXED_SHELL_NOTE = 'This command runs without a sandbox: bubblewrap is not installed or cannot start on ' +
+  'this server, so the command can read and change every file the server can.';
+
+function shellApprovalNotes(data) {
+  const notes = [];
+  if (data && data.untrusted === true) notes.push(UNTRUSTED_APPROVAL_NOTE);
+  if (data && data.unsandboxed === true) notes.push(UNSANDBOXED_SHELL_NOTE);
+  return notes;
+}
 
 function pendingApprovalCards(commands, edits) {
   const isWaiting = item => item && typeof item.id === 'string' && item.id;
@@ -70,6 +79,7 @@ function pendingApprovalCards(commands, edits) {
     data: {
       pending_id: item.id, command: item.command || '', cwd: item.cwd || '',
       tool: typeof item.tool === 'string' && item.tool ? item.tool : SHELL_TOOL, untrusted: item.untrusted === true,
+      unsandboxed: item.unsandboxed === true,
     },
   }));
   const editCards = (Array.isArray(edits) ? edits : []).filter(isWaiting).map(item => ({
@@ -414,23 +424,25 @@ function nameAfterServerPrefix(id) {
   return cut > 0 ? id.slice(cut + 1) : '';
 }
 
-function sameModelName(model, listed) {
-  const inner = nameAfterServerPrefix(model.id);
-  const reachedDirectly = !!inner && listed.some(other => other.id === inner && other.endpoint_id !== model.endpoint_id);
-  return reachedDirectly ? inner : model.id;
+function isArtyRouteToADirectModel(model, listed, servedByArty) {
+  if (!servedByArty.has(model.endpoint_id)) return false;
+  const names = [model.id, nameAfterServerPrefix(model.id)].filter(Boolean);
+  return listed.some(other => !servedByArty.has(other.endpoint_id) && names.includes(other.id));
+}
+
+function serverNumbers(listed) {
+  const numbers = new Map();
+  for (const m of listed) if (!numbers.has(m.endpoint_id)) numbers.set(m.endpoint_id, numbers.size + 1);
+  return numbers;
 }
 
 function distinctModels(listed) {
   const servedByArty = artyServers(listed);
-  const routeRank = m => (sameModelName(m, listed) !== m.id ? 2 : servedByArty.has(m.endpoint_id) ? 1 : 0);
-  const keptByName = new Map();
-  for (const m of listed) {
-    const name = sameModelName(m, listed);
-    const held = keptByName.get(name);
-    if (!held || routeRank(m) < routeRank(held)) keptByName.set(name, m);
-  }
-  const kept = new Set(keptByName.values());
-  return listed.filter(m => kept.has(m));
+  const kept = listed.filter(m => !isArtyRouteToADirectModel(m, listed, servedByArty));
+  const numbers = serverNumbers(listed);
+  const serversPerName = new Map();
+  for (const m of kept) serversPerName.set(m.id, (serversPerName.get(m.id) || 0) + 1);
+  return kept.map(m => (serversPerName.get(m.id) > 1 ? { ...m, server_note: `server ${numbers.get(m.endpoint_id)}` } : m));
 }
 
 function modelMenuEntries(listed, query) {
@@ -439,13 +451,27 @@ function modelMenuEntries(listed, query) {
   return [...autoShown, ...distinctModels(listed).filter(m => modelMatchesSearch(m, search))];
 }
 
+function artyMemoryRows(entities, query) {
+  const search = String(query || '').trim().toLowerCase();
+  const rows = [];
+  for (const entity of Array.isArray(entities) ? entities : []) {
+    if (!entity || typeof entity.name !== 'string') continue;
+    const type = typeof entity.type === 'string' ? entity.type : '';
+    const facts = Array.isArray(entity.facts) ? entity.facts.filter(fact => typeof fact === 'string') : [];
+    const entityMatches = !search || entity.name.toLowerCase().includes(search) || type.toLowerCase().includes(search);
+    const shownFacts = entityMatches ? facts : facts.filter(fact => fact.toLowerCase().includes(search));
+    if (entityMatches || shownFacts.length) rows.push({ name: entity.name, type, facts: shownFacts });
+  }
+  return rows;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     isLocalMediaUrl, isCodeLanguageClass, toolOutcome, toolOutcomeLine,
     modelPatternsFrom, modelAccessHint, modelAccessSummary,
     DAY_MS, TOAST_MS, TOAST_ERROR_MS, TOAST_FADE_MS,
     sentenceCase, dateGroupLabel, themeChoiceFrom, themeIsLight, showToast, removalQuestion, confirmRemove,
-    pendingApprovalCards, UNTRUSTED_APPROVAL_NOTE, approvalHeading, resolveChatControls, isLastAssistantMessage,
+    pendingApprovalCards, UNTRUSTED_APPROVAL_NOTE, UNSANDBOXED_SHELL_NOTE, shellApprovalNotes, approvalHeading, resolveChatControls, isLastAssistantMessage,
     CHAT_TITLE_CHARS, submitOnEnter, closeOnEscape, chatTitleFrom, firstUnusedModel,
     MAX_SPOKEN_CHARS, takeSpokenSentences, speakableText, spokenPieces,
     REGENERATE_WITH, regenerateChoice,
@@ -456,5 +482,6 @@ if (typeof module !== 'undefined' && module.exports) {
     AUTO_MODEL_ID, AUTO_MODEL_NAME, AUTO_MODEL_HINT, AUTO_CHOICE, isAutoChoice, modelChoiceToShow, autoPickLabel, replyModelLabel,
     autoModelEntry, PICKER_MODE_AUTO, PICKER_MODE_CHOSEN, pickerMode, distinctModels, modelMenuEntries,
     BACKEND_RUNS_ON_ITS_OWN, NO_LOCAL_OLLAMA, FOUND_NOT_ADDED, backendStatusPlan, scanEndpointBody, scanSummary, addedLocalMessage,
+    artyMemoryRows,
   };
 }

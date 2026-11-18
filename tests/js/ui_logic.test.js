@@ -128,7 +128,7 @@ test('waiting approvals become cards the chat can draw', () => {
     [{ id: 'def456', path: '/srv/app.yaml', diff: '--- a\n+++ b', content: 'secret file body' }],
   );
   assert.deepEqual(cards, [
-    { kind: 'shell', id: 'abc123', data: { pending_id: 'abc123', command: 'df -h', cwd: '/srv', tool: 'run_shell', untrusted: false } },
+    { kind: 'shell', id: 'abc123', data: { pending_id: 'abc123', command: 'df -h', cwd: '/srv', tool: 'run_shell', untrusted: false, unsandboxed: false } },
     { kind: 'edit', id: 'def456', data: { staged: true, pending_id: 'def456', path: '/srv/app.yaml', diff: '--- a\n+++ b', untrusted: false } },
   ]);
 });
@@ -525,4 +525,35 @@ test('the models an admin types for an account become a list, and blank means th
   assert.equal(logic.modelAccessSummary([]), 'no models');
   assert.match(logic.modelAccessHint(['*-abl', '*uncensored*']), /restricted ones \(\*-abl, \*uncensored\*\)/);
   assert.match(logic.modelAccessHint([]), /only opened by its full name/);
+});
+
+test('a shell approval card warns when the command would run without a sandbox', () => {
+  assert.deepEqual(logic.shellApprovalNotes({ untrusted: false, unsandboxed: false }), []);
+  assert.deepEqual(logic.shellApprovalNotes({ unsandboxed: true }), [logic.UNSANDBOXED_SHELL_NOTE]);
+  assert.deepEqual(logic.shellApprovalNotes({ untrusted: true, unsandboxed: true }),
+    [logic.UNTRUSTED_APPROVAL_NOTE, logic.UNSANDBOXED_SHELL_NOTE]);
+  assert.match(logic.UNSANDBOXED_SHELL_NOTE, /without a sandbox/);
+  const [card] = logic.pendingApprovalCards([{ id: 'p1', command: 'ls', unsandboxed: true }], []);
+  assert.equal(card.data.unsandboxed, true);
+});
+
+const ARTY_MEMORY = [
+  { name: 'Rowan', type: 'person', facts: ['Lives in Bath', 'Likes tea'] },
+  { name: 'Garden', type: 'topic', facts: ['Has a pond', 'Rowan planted the roses'] },
+  { name: 7, type: 'topic', facts: ['dropped'] },
+];
+
+test('the Arty memory list is searched by name, type or fact and keeps the matching facts', () => {
+  assert.deepEqual(logic.artyMemoryRows(ARTY_MEMORY, ''), [
+    { name: 'Rowan', type: 'person', facts: ['Lives in Bath', 'Likes tea'] },
+    { name: 'Garden', type: 'topic', facts: ['Has a pond', 'Rowan planted the roses'] },
+  ]);
+  assert.deepEqual(logic.artyMemoryRows(ARTY_MEMORY, '  ROWAN '), [
+    { name: 'Rowan', type: 'person', facts: ['Lives in Bath', 'Likes tea'] },
+    { name: 'Garden', type: 'topic', facts: ['Rowan planted the roses'] },
+  ]);
+  assert.deepEqual(logic.artyMemoryRows(ARTY_MEMORY, 'person').map(row => row.name), ['Rowan']);
+  assert.deepEqual(logic.artyMemoryRows(ARTY_MEMORY, 'nothing like this'), []);
+  assert.deepEqual(logic.artyMemoryRows(null, ''), []);
+  assert.deepEqual(logic.artyMemoryRows([{ name: 'Odd', facts: [3, 'kept'] }], ''), [{ name: 'Odd', type: '', facts: ['kept'] }]);
 });

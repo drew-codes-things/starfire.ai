@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import functools
 import logging
 import os
 import shutil
 import signal
 import subprocess
+import threading
+import time
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -17,6 +18,11 @@ SANDBOX_PROGRAM = "bwrap"
 SHELL = "/bin/sh"
 READ_CHUNK_BYTES = 4096
 SANDBOX_PROBE_TIMEOUT_SECONDS = 10
+SANDBOX_RETRY_SECONDS = 300
+SYSTEM_FOLDERS = ("/usr", "/bin", "/sbin", "/lib", "/lib32", "/lib64", "/libx32", "/etc/alternatives")
+SYSTEM_FILES = ("/etc/ld.so.cache",)
+ISOLATION_FLAGS = ("--unshare-user", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try",
+                   "--die-with-parent", "--new-session", "--clearenv")
 
 
 @dataclass(frozen=True)
@@ -43,8 +49,7 @@ def sandbox_program() -> str | None:
     return shutil.which(SANDBOX_PROGRAM)
 
 
-@functools.cache
-def sandbox_starts(program: str) -> bool:
+def _probe_sandbox(program: str) -> bool:
     probe = [program, "--ro-bind", "/", "/", "--unshare-user", "--unshare-pid", "--unshare-net", "--die-with-parent",
              "--", SHELL, "-c", "exit 0"]
     try:
@@ -58,6 +63,31 @@ def sandbox_starts(program: str) -> bool:
     return finished.returncode == 0
 
 
+_probe_lock = threading.Lock()
+_programs_that_start: set[str] = set()
+_failed_probe_at: dict[str, float] = {}
+
+
+def _failed_recently(program: str) -> bool:
+    failed_at = _failed_probe_at.get(program)
+    return failed_at is not None and time.monotonic() - failed_at < SANDBOX_RETRY_SECONDS
+
+
+def sandbox_starts(program: str) -> bool:
+    with _probe_lock:
+        if program in _programs_that_start:
+            return True
+        if _failed_recently(program):
+            return False
+        starts = _probe_sandbox(program)
+        if starts:
+            _programs_that_start.add(program)
+            _failed_probe_at.pop(program, None)
+        else:
+            _failed_probe_at[program] = time.monotonic()
+        return starts
+
+
 def working_sandbox_program() -> str | None:
     program = sandbox_program()
     return program if program and sandbox_starts(program) else None
@@ -67,6 +97,15 @@ def _existing(paths) -> list[str]:
     return [path for path in dict.fromkeys(os.path.abspath(p) for p in paths if p) if os.path.isdir(path)]
 
 
+def _isolated(wrapped: list[str], argv: list[str], cwd: str, env: dict[str, str], share_network: bool) -> list[str]:
+    wrapped = [*wrapped, *ISOLATION_FLAGS]
+    if not share_network:
+        wrapped.append("--unshare-net")
+    for name, value in env.items():
+        wrapped += ["--setenv", name, value]
+    return wrapped + ["--chdir", cwd, "--", *argv]
+
+
 def sandboxed_argv(program: str, argv: list[str], cwd: str, writable: str, hidden_dirs, env: dict[str, str],
                    share_network: bool = True) -> list[str]:
     wrapped = [program, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp"]
@@ -74,13 +113,26 @@ def sandboxed_argv(program: str, argv: list[str], cwd: str, writable: str, hidde
         wrapped += ["--tmpfs", hidden]
     if writable:
         wrapped += ["--bind", writable, writable]
-    wrapped += ["--unshare-user", "--unshare-pid", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try",
-                "--die-with-parent", "--new-session", "--clearenv"]
-    if not share_network:
-        wrapped.append("--unshare-net")
-    for name, value in env.items():
-        wrapped += ["--setenv", name, value]
-    return wrapped + ["--chdir", cwd, "--", *argv]
+    return _isolated(wrapped, argv, cwd, env, share_network)
+
+
+def _system_folder_binds() -> list[str]:
+    binds = []
+    for folder in SYSTEM_FOLDERS:
+        if os.path.islink(folder):
+            binds += ["--symlink", os.readlink(folder), folder]
+        elif os.path.isdir(folder):
+            binds += ["--ro-bind", folder, folder]
+    for file in SYSTEM_FILES:
+        if os.path.isfile(file):
+            binds += ["--ro-bind", file, file]
+    return binds
+
+
+def system_folders_argv(program: str, argv: list[str], cwd: str, env: dict[str, str]) -> list[str]:
+    wrapped = [program, *_system_folder_binds(), "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp",
+               "--bind", cwd, cwd]
+    return _isolated(wrapped, argv, cwd, env, share_network=False)
 
 
 def sandboxed_shell_argv(program: str, command: str, cwd: str, limits: HostLimits, env: dict[str, str]) -> list[str]:

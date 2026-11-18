@@ -181,3 +181,32 @@ def test_long_output_is_cut_and_says_so(monkeypatch):
 
 def test_waiting_on_a_command_that_was_never_staged_gives_no_decision():
     assert asyncio.run(shell_tool.wait_for_decision("never-staged")) is None
+
+
+def first_shell_card(monkeypatch, sandbox: str | None) -> tuple[dict, list[dict]]:
+    import host_sandbox
+    monkeypatch.setattr(host_sandbox, "working_sandbox_program", lambda: sandbox)
+    monkeypatch.setattr(shell_tool, "APPROVAL_TIMEOUT_SECONDS", 5)
+
+    async def run():
+        events = asyncio.Queue()
+        ctx = context(True, events)
+        task = asyncio.ensure_future(builtin_tools._run_shell({"command": "true"}, ctx))
+        card = (await events.get())["shell_pending"]
+        listed = shell_tool.list_pending(None)
+        shell_tool.resolve(card["pending_id"], False, owner=None)
+        await task
+        return card, listed
+
+    return asyncio.run(run())
+
+
+def test_the_approval_card_says_when_the_command_runs_without_a_sandbox(monkeypatch):
+    card, listed = first_shell_card(monkeypatch, None)
+    assert card.get("unsandboxed") is True, card
+    assert listed[0]["unsandboxed"] is True
+
+
+def test_the_approval_card_does_not_warn_when_the_sandbox_works(monkeypatch):
+    card, listed = first_shell_card(monkeypatch, "/usr/bin/bwrap")
+    assert card.get("unsandboxed") is False and listed[0]["unsandboxed"] is False

@@ -13,8 +13,12 @@ function diffToHtml(diffText) {
 
 const openApprovals = new Map();
 
+function approvalNoteHtml(note) {
+  return `<div class="diff-card-source approval-untrusted" role="note">${escapeHtml(note)}</div>`;
+}
+
 function untrustedNoteHtml() {
-  return `<div class="diff-card-source approval-untrusted" role="note">${escapeHtml(UNTRUSTED_APPROVAL_NOTE)}</div>`;
+  return approvalNoteHtml(UNTRUSTED_APPROVAL_NOTE);
 }
 
 function trackApproval(pendingId, card) {
@@ -111,7 +115,7 @@ function renderShellApprovalCard(data) {
   const where = data.cwd ? ` in ${escapeHtml(data.cwd)}` : '';
   card.innerHTML =
     `<div class="diff-card-header">${escapeHtml(approvalHeading(data))}${where}</div>` +
-    (data.untrusted ? untrustedNoteHtml() : '') +
+    shellApprovalNotes(data).map(approvalNoteHtml).join('') +
     `<pre class="approval-text">${escapeHtml(data.command || '')}</pre>`;
   const actionsRow = document.createElement('div');
   actionsRow.className = 'diff-card-actions';

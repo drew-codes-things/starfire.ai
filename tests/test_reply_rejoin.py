@@ -233,3 +233,45 @@ def test_a_reply_outside_a_saved_chat_streams_as_before(app, held_replies):
                                                     "messages": [{"role": "user", "content": "hi"}]})
     assert [e for e in events(answer.text) if "reply" in e] == []
     assert "".join(e.get("delta", "") for e in events(answer.text)) == "first part, second part"
+
+
+@pytest.mark.parametrize("closing", ["disable", "delete"])
+def test_a_reply_in_a_chat_without_an_id_stops_when_its_account_is_disabled_or_removed(app, monkeypatch, closing):
+    monkeypatch.setattr(routes, "ACCOUNT_RECHECK_SECONDS", 0, raising=False)
+    started, release = threading.Event(), threading.Event()
+
+    async def fake_stream(base_url, api_key, model, messages, system, options):
+        yield line({"delta": "first part"})
+        started.set()
+        while not release.is_set():
+            await asyncio.sleep(POLL_SECONDS)
+        yield line({"delta": ", second part"})
+        yield line({"done": True})
+
+    monkeypatch.setattr(routes, "stream_chat", fake_stream)
+    endpoint = routes.endpoints.add("https://models.example.com/v1", kind="api-key")
+    sam_id = auth_routes.users.find_by_email("sam@example.com").id
+    auth_routes.users.upsert("boss@example.com", "Boss", "admin", auth_routes.users.find_by_id(sam_id).password_hash)
+    with TestClient(app, base_url="https://testserver", headers=HEADERS) as sam:
+        signed_in(sam, "sam@example.com")
+        answer = {}
+
+        def ask():
+            answer["response"] = sam.post("/api/chat_stream", json={
+                "endpoint_id": endpoint.id, "model": MODEL, "messages": [{"role": "user", "content": "hi"}]})
+
+        asking = threading.Thread(target=ask)
+        asking.start()
+        try:
+            assert started.wait(WAIT_SECONDS)
+            if closing == "disable":
+                auth_routes.users.update(sam_id, disabled=True)
+            else:
+                auth_routes.users.delete(sam_id)
+        finally:
+            release.set()
+            asking.join(WAIT_SECONDS)
+
+    streamed = events(answer["response"].text)
+    assert ", second part" not in [event.get("delta") for event in streamed]
+    assert routes.CLOSED_ACCOUNT_STOPPED_REPLY in [event.get("error") for event in streamed]

@@ -13,6 +13,7 @@ import deep_research
 import email_client
 import file_edit_tool
 import github_tool
+import host_sandbox
 import image_search
 import media_generation
 import piper_tts
@@ -412,13 +413,15 @@ def _too_long_for_a_card(name: str) -> str:
     return (f"error: this {name} call is too long to show in full on an approval card "
             f"(over {MAX_APPROVAL_SUMMARY_CHARS} characters), so it was not run")
 
-async def wait_for_approval(ctx: ToolContext, tool: str, shown: str, what: str, cwd: str | None = None) -> str | None:
+async def wait_for_approval(ctx: ToolContext, tool: str, shown: str, what: str, cwd: str | None = None,
+                            unsandboxed: bool = False) -> str | None:
     if not can_ask_the_user(ctx):
         return NO_ONE_TO_ASK
     untrusted = has_read_untrusted_content(ctx)
-    pending_id = shell_tool.stage(shown, cwd, owner=user_data.current_user_id.get(), tool=tool, untrusted=untrusted)
+    pending_id = shell_tool.stage(shown, cwd, owner=user_data.current_user_id.get(), tool=tool, untrusted=untrusted,
+                                  unsandboxed=unsandboxed)
     await ctx.emit({"shell_pending": {"pending_id": pending_id, "command": shown, "cwd": cwd or "",
-                                      "tool": tool, "untrusted": untrusted}})
+                                      "tool": tool, "untrusted": untrusted, "unsandboxed": unsandboxed}})
     decision = await shell_tool.wait_for_decision(pending_id)
     if decision is None:
         return (f"error: the user did not approve {what} within "
@@ -661,7 +664,8 @@ async def _run_shell(args: dict, ctx: ToolContext) -> str:
     if not command:
         return "error: command is required"
     if ctx.require_shell_approval or has_read_untrusted_content(ctx):
-        refusal = await wait_for_approval(ctx, "run_shell", command, "this command", cwd)
+        unsandboxed = await asyncio.to_thread(host_sandbox.working_sandbox_program) is None
+        refusal = await wait_for_approval(ctx, "run_shell", command, "this command", cwd, unsandboxed=unsandboxed)
         if refusal:
             return refusal
     return await shell_tool.run_shell(command, cwd, ctx.host_limits)

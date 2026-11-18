@@ -29,9 +29,12 @@
   file, so a refused path never shows up in a diff.
 - The C and C++ code check could be made to read any file the server can read (`#/**/include`,
   `/**/#include`, a form feed or vertical tab around `#include`) and gcc's error text quoted it.
-  C and C++ are now only compiled inside bubblewrap with no network, a private /tmp and the data,
-  app and home folders hidden, and only the snippet's own messages are shown; without bubblewrap
-  they are not compiled at all. Every checker runs with a scrubbed environment.
+  C and C++ are now only compiled inside bubblewrap with no network, a private /tmp and only the
+  system program folders (`/usr`, `/bin`, `/lib*`, `/etc/alternatives`) and the snippet in view, so
+  no other file on the server can be included; only the snippet's own messages are shown, and
+  without bubblewrap they are not compiled at all. The include filter reads string, character and
+  raw string literals the way the compiler does and refuses a comment right after `#`. Every
+  checker runs with a scrubbed environment.
 - Mail no longer blocks the server. Every IMAP and SMTP call from the email pages, the email
   tool and the email rules runs off the event loop with a 20 second timeout on the connection and
   every command, so a mail server that never answers (or starfire's own port given as one) cannot
@@ -110,12 +113,15 @@
   core files, 32 processes inside bubblewrap) and inside bubblewrap with no network when it can
   start; without `prlimit` every check is skipped. Parsers (Python, JSON, YAML, TOML, XML) run in a
   child process with no fork. The server reads at most 64 KB of a checker's output, gcc and clang
-  stop after 20 errors, one account runs one check at a time, and the C include filter now also
-  sees includes after a form feed, a vertical tab or a bare carriage return and removes comments
-  with a plain scan, so a hostile snippet cannot stall the server.
+  stop after 20 errors, one account runs one check at a time and at most 20 seconds of checks a
+  minute, and the C include filter now also sees includes after a form feed, a vertical tab or a
+  bare carriage return and removes comments with a plain scan, so a hostile snippet cannot stall
+  the server.
 - Mail calls run on four threads of their own, each cut off after 60 seconds; an account may run
-  two at once and make `MAIL_REQUESTS_PER_MINUTE` (60) mail requests a minute. A mail server may
-  send at most 32 MB per request, and a message over 25 MB is fetched only up to 25 MB.
+  two at once and make `MAIL_REQUESTS_PER_MINUTE` (60) mail requests a minute. An IMAP server may
+  send at most 32 MB per request, each line counted with 256 bytes more for what it costs to keep,
+  and a message over 25 MB is fetched only up to 25 MB. An SMTP reply may be at most 64 KB, each of
+  its lines at most 2 KB, so an endless multi-line reply is stopped at once.
 - github_cli refuses flags that can print the token and the commands that run programs or change
   the sign-in, and asks first for everything but plain reads, also after untrusted content.
 - Arty Auto reads only the first and last 4,000 characters of a message to pick a role, with
@@ -125,20 +131,28 @@
 - Approval cards show the action, recipient and mailbox of the call in their heading and keep the
   call text in its own scroll area, so the recipient and the run button are on screen together.
   Wide and blank-looking spaces are shown as `\u` escapes on the card.
+- When bubblewrap is missing or cannot start, the run_shell approval card says the command runs
+  without a sandbox, and a failed start is tried again after five minutes instead of being kept
+  until the server restarts.
 - Finished background replies are kept within 64 MB in total, and the reply of an account that is
   disabled or removed stops at its next chunk without being saved. A branch, a clone or an import
   of a chat that read untrusted content keeps that mark, and so does a chat whose turn carried a
   file.
 
 ### Added
+- **Settings > Arty memory** for admins: list and search what Arty remembers, edit a fact in place, remove a
+  fact or a whole name after a confirm, and add a fact. starfire relays each change to Arty's memory API with its
+  own Arty connection (`GET /api/arty-memory`, `POST /api/arty-memory/add`, `/edit`, `/delete`) and shows Arty's
+  own error when it refuses. Ordinary accounts get a 403 and no tab.
 - **Arty Auto** in the model picker, the default for new accounts: the server picks the vision model
   for pictures and video, the code model for code, the agent for reminders, phone, home and web
   tasks or anything addressed to Arty, and the chat model otherwise, from fixed rules with no
   extra model call. Admins set each role under Settings → Connections; Auto keeps to each
   account's allowed models. Each reply names the model Auto picked (`qwen3:14b · Arty Auto: code`).
   Arty Auto is the first entry of the model picker, followed by one flat list of every model the
-  account may use, each listed once (a model also offered through another server, such as
-  `arty/<name>` on Arty's, is shown as the direct one) and no headings; a small **Arty Auto** / **Choose a
+  account may use (a model Arty's server offers again, such as `arty/<name>`, is shown once as the
+  direct one; the same name on two other servers is listed for each, marked `server N`) and no
+  headings; a small **Arty Auto** / **Choose a
   model** switch at the top shows how the chat's model is picked. Presets are no longer listed in
   the picker (apply them from Workspace → Models). Chats store Arty Auto as `auto`.
 - Each chat keeps its model (or Auto) on the server and the picker shows it after a refresh, in

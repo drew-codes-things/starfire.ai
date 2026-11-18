@@ -6,7 +6,8 @@ function modelOptionMeta(m) {
   if (isAutoModel(m)) return AUTO_MODEL_HINT;
   const provider = window.providerLabel ? window.providerLabel(m.provider) : m.provider;
   const size = m.size ? (m.size / 1073741824).toFixed(1) + ' GB · ' : '';
-  return size + provider;
+  const server = m.server_note ? ' · ' + m.server_note : '';
+  return size + provider + server;
 }
 
 function selectModel(endpointId, modelId) {

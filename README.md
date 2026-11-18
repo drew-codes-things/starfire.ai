@@ -36,7 +36,8 @@ Built on FastAPI with encrypted key storage, as a local chat app for you and the
   under it, and without it every code check is reported as skipped
 - [bubblewrap](https://github.com/containers/bubblewrap) (`bwrap`, optional): C and C++ are only
   checked inside it, and run_shell runs in it when it is installed and can start (without it, or
-  where it cannot start, run_shell runs unsandboxed and logs that)
+  where it cannot start, run_shell runs unsandboxed, logs that and says so on its approval card; a
+  failed start is tried again after five minutes)
 
 ## Setup
 
@@ -198,9 +199,16 @@ How to link them:
   Arty is doing, answer its permission questions with **Allow** or **Deny**, send a message, or **Stop** the current
   turn. starfire uses its own Arty connection for this, so the browser never holds Arty's key. For a phone with its
   own device key, switch on **Arty CLI** for it on the **Arty devices** page.
+- **Editing Arty's memory**: **Settings > Arty memory** (admins only) lists what Arty remembers, by name with its
+  kind and facts, with a search over all three. A fact can be edited in place or removed (after a confirm), a name
+  can be removed with all its facts, and a new fact can be added under a new or existing name. starfire passes each
+  change to Arty's `GET /v1/memory` and `POST /v1/memory/add`, `/edit` and `/delete` with its own Arty connection
+  and shows Arty's answer as it comes (a fact already saved, a name that isn't there, text that is too long, the
+  memory store being down). Every chat reads the same memory, so the next chat anywhere sees the change. Other
+  accounts get a 403 from `/api/arty-memory` and no tab.
 
 Arty works without the other two. Arty CLI needs Arty. starfire.ai works with other models on its own, but its
-**Arty devices** and **Arty CLI** pages need Arty.
+**Arty devices**, **Arty CLI** and **Arty memory** pages need Arty.
 
 ## Adding a hosted provider
 
@@ -287,10 +295,10 @@ tokens (colours, radii, spacing, shadows) in `static/style.css`, with a dark and
 
 **Arty Auto** (Auto for short) is what a new account starts with. In the model picker it is the
 first entry, above one flat list of every model the account may use, with no headings. A model
-listed both by its own server and again through another server (for example `arty/<name>` on
-Arty's server next to `<name>` on the engine) is shown once, as the direct one; the same name on
-two servers is shown once too, preferring the one that is not Arty's (any server that lists an
-`OWN_TOOLS_MODELS` match). Picking a model there sets the chat to that model; picking Arty Auto
+that Arty's server (any server that lists an `OWN_TOOLS_MODELS` match) offers again, as
+`arty/<name>` or `<name>`, next to `<name>` on another server is shown once, as the direct one.
+The same name on two other servers is listed for each of them, marked `server 1`, `server 2` and
+so on in the order the servers answered, so the account can choose where its text goes. Picking a model there sets the chat to that model; picking Arty Auto
 (or **Arty Auto** at the top of the picker) goes back. For every
 message the server picks a model from simple fixed rules, without asking another model first:
 
@@ -340,8 +348,12 @@ Every checker runs in its own process under `prlimit`: 512 MB of memory (1 GB fo
 CPU, files up to 8 MB, no core files, and inside bubblewrap at most 32 processes and no network.
 A check is stopped after 20 s. The server reads at most 64 KB of a checker's output, and the C
 compilers stop after 20 errors. C and C++ only compile code whose `#include` lines name system
-headers such as `<stdio.h>`. Two checks run at once on the whole server and one per account; a
-check beyond that is reported as busy.
+headers such as `<stdio.h>` (comments and string literals are read the way the compiler reads
+them, and a comment right after `#` is refused), and the compiler's sandbox holds only the system
+program folders (`/usr`, `/bin`, `/lib*`, `/etc/alternatives`), a private `/tmp` and the snippet,
+so an include that gets past the filter finds no other file. Two checks run at once on the whole
+server and one per account, and one account may use 20 seconds of checking in a minute, so two
+accounts cannot keep the checker busy for everyone else; a check beyond that is reported as busy.
 
 Your own messages have **edit**, **copy** and **delete**. Editing your
 message or regenerating branches the conversation - rather than mutating history in place,
@@ -595,9 +607,11 @@ That's the deliberate tradeoff for not needing a database or a background sync s
 Mail runs on its own four threads. Each mail call has 60 seconds in total, connection and every
 reply included, and is cut off after that. An account may have two mail calls running at once and
 make `MAIL_REQUESTS_PER_MINUTE` (60) mail requests a minute, admins included; past either it gets
-a 429 with `Retry-After`. A mail server may send at most 32 MB for one request; a message larger
-than 25 MB is read up to 25 MB and says so at its end. Ordinary accounts can only use mail
-servers on public addresses.
+a 429 with `Retry-After`. Over IMAP a mail server may send at most 32 MB for one request, every
+line counted with 256 bytes more for what it costs to keep, so a flood of short lines is stopped
+before it fills memory; a message larger than 25 MB is read up to 25 MB and says so at its end.
+Over SMTP one reply may be at most 64 KB and each of its lines at most 2 KB. Ordinary accounts can
+only use mail servers on public addresses.
 
 ## Compare
 

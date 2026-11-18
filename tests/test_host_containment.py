@@ -173,3 +173,24 @@ def test_github_cli_gets_only_its_own_token_from_the_environment(tmp_path, secre
     monkeypatch.setenv("PATH", f"{fake_gh.parent}:{os.environ['PATH']}")
     result = asyncio.run(github_tool.run_gh(["auth", "status"]))
     assert "GH_TOKEN=gh-placeholder-token" in result and FAKE_SECRET not in result
+
+
+def test_a_failed_sandbox_probe_is_tried_again_after_a_while(tmp_path, monkeypatch):
+    program = tmp_path / "bwrap"
+    program.write_text("#!/bin/sh\nexit 1\n")
+    program.chmod(0o755)
+    monkeypatch.setattr(host_sandbox, "SANDBOX_RETRY_SECONDS", 3600, raising=False)
+    assert host_sandbox.sandbox_starts(str(program)) is False
+    program.write_text("#!/bin/sh\nexit 0\n")
+    assert host_sandbox.sandbox_starts(str(program)) is False
+    monkeypatch.setattr(host_sandbox, "SANDBOX_RETRY_SECONDS", 0, raising=False)
+    assert host_sandbox.sandbox_starts(str(program)) is True
+
+
+def test_a_working_sandbox_is_probed_once(tmp_path):
+    program = tmp_path / "bwrap"
+    count = tmp_path / "count"
+    program.write_text(f"#!/bin/sh\necho x >> {count}\nexit 0\n")
+    program.chmod(0o755)
+    assert all(host_sandbox.sandbox_starts(str(program)) for _ in range(3))
+    assert count.read_text().count("x") == 1
