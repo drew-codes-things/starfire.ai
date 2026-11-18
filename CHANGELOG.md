@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Security
+- starfire Desktop's link to Arty Desktop: pairing no longer sends the 6 digit code; both apps prove they know it with
+  SPAKE2 and work out the token themselves, so something else listening on Arty Desktop's port gets neither the code nor
+  a token. Before every call that carries the token, Arty Desktop must answer a fresh challenge keyed by the pairing, or
+  nothing is sent and the light says Arty Desktop did not prove itself (the pairing is kept until you Unpair). Only the
+  settings page can use the link, Try it needs a click there, the general step channel is gone, links blocked in the
+  starfire window open in the browser only from the main frame after a click, the starfire origin gets the microphone
+  but not the camera, a quick-ask question is cleaned and capped in the main process, and an app page must be a file URL
+  with no host. look_at_screen now gets only the named app's window when Arty Desktop can find it.
 - Shell and edit approval are stored per account on the server and start on for every account.
   A chat request can only ask for more approval, never less, so a direct POST to
   `/api/chat_stream` with `require_shell_approval: false` still gets an approval card. Only an
