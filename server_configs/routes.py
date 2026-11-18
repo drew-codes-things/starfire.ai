@@ -1592,10 +1592,10 @@ async def chat_stream_endpoint(body: ChatBody):
     generator = _track_usage(generator, endpoint.provider, model, input_text)
     if pick:
         generator = _with_first_events([{"model_choice": pick.event()}], generator)
+    owner = user_data.current_user_id.get()
     if not body.session_id:
-        return _event_stream(generator)
+        return _event_stream(_while_the_account_is_open(generator, owner))
     try:
-        owner = user_data.current_user_id.get()
         run = reply_runs.start(owner, body.session_id, body.reply_index, _while_the_account_is_open(generator, owner),
                                _save_finished_reply(model))
     except TooManyReplies as error:
