@@ -595,9 +595,11 @@ That's the deliberate tradeoff for not needing a database or a background sync s
 Mail runs on its own four threads. Each mail call has 60 seconds in total, connection and every
 reply included, and is cut off after that. An account may have two mail calls running at once and
 make `MAIL_REQUESTS_PER_MINUTE` (60) mail requests a minute, admins included; past either it gets
-a 429 with `Retry-After`. A mail server may send at most 32 MB for one request; a message larger
-than 25 MB is read up to 25 MB and says so at its end. Ordinary accounts can only use mail
-servers on public addresses.
+a 429 with `Retry-After`. Over IMAP a mail server may send at most 32 MB for one request, every
+line counted with 256 bytes more for what it costs to keep, so a flood of short lines is stopped
+before it fills memory; a message larger than 25 MB is read up to 25 MB and says so at its end.
+Over SMTP one reply may be at most 64 KB and each of its lines at most 2 KB. Ordinary accounts can
+only use mail servers on public addresses.
 
 ## Compare
 

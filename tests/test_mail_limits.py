@@ -6,6 +6,7 @@ import importlib
 import ipaddress
 import os
 import re
+import smtplib
 import socket
 import ssl
 import sys
@@ -373,3 +374,137 @@ def test_the_manage_email_tool_counts_toward_the_mail_requests_a_minute(tmp_path
     answers = [asyncio.run(builtin_tools.call_builtin_tool("manage_email", asked, ctx)) for _ in range(4)]
     assert answers[:3] == ["[]"] * 3
     assert "3 mail requests a minute" in answers[3], answers[3]
+
+
+SMTP_FLOOD_BYTES = 8 * MEBIBYTE
+SMTP_FLOOD_LINE = b"250-" + b"e" * 96 + b"\r\n"
+SMTP_PEAK_LIMIT_BYTES = 2 * MEBIBYTE
+SMTP_LONG_LINE = b"250-" + b"l" * 5000 + b"\r\n"
+
+
+class FloodingSmtpServer:
+    def __init__(self, flood_greeting: bool, flood: bytes):
+        self.server = socket.create_server(("127.0.0.1", 0))
+        self.port = self.server.getsockname()[1]
+        self.greeting = flood.replace(b"250-", b"220-") + b"220 ready\r\n" if flood_greeting else b"220 ready\r\n"
+        self.ehlo_reply = flood + b"250 SIZE 1000\r\n"
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    def _serve(self):
+        self.server.settimeout(10)
+        try:
+            conn, _ = self.server.accept()
+            with conn:
+                self._converse(conn)
+        except OSError:
+            return
+
+    def _converse(self, conn):
+        conn.sendall(self.greeting)
+        lines = conn.makefile("rb")
+        while line := lines.readline():
+            if line.upper().startswith((b"EHLO", b"HELO")):
+                conn.sendall(self.ehlo_reply)
+            elif line.upper().startswith(b"QUIT"):
+                conn.sendall(b"221 bye\r\n")
+                return
+            else:
+                conn.sendall(b"502 no\r\n")
+
+    def close(self):
+        self.server.close()
+
+
+@pytest.fixture
+def flooding_smtp():
+    servers = []
+
+    def start(flood: bytes, flood_greeting: bool = False):
+        servers.append(FloodingSmtpServer(flood_greeting, flood))
+        return servers[-1]
+
+    yield start
+    for server in servers:
+        server.close()
+
+
+def send_with_peak(server) -> tuple[BaseException | None, int, float]:
+    started = time.monotonic()
+    tracemalloc.start()
+    try:
+        email_client.send_message(local_account(server.port), "pw", "a@b.example", "s", "b", allow_private_hosts=True)
+        outcome = None
+    except Exception as error:
+        outcome = error
+    finally:
+        peak = tracemalloc.get_traced_memory()[1]
+        tracemalloc.stop()
+    return outcome, peak, time.monotonic() - started
+
+
+def flood_of(line: bytes, total_bytes: int) -> bytes:
+    return line * (total_bytes // len(line))
+
+
+@pytest.mark.parametrize("flood_greeting", [False, True], ids=["ehlo", "greeting"])
+def test_an_smtp_server_that_floods_a_multi_line_reply_is_stopped_at_the_reply_limit(flooding_smtp, flood_greeting):
+    server = flooding_smtp(flood_of(SMTP_FLOOD_LINE, SMTP_FLOOD_BYTES), flood_greeting=flood_greeting)
+    outcome, peak, seconds = send_with_peak(server)
+    assert "more than" in str(outcome), (outcome, peak)
+    assert isinstance(outcome, email_client.SmtpReplyTooLarge), outcome
+    assert email_client.describe_failure(outcome, show_details=False) == str(outcome)
+    assert peak < SMTP_PEAK_LIMIT_BYTES, peak
+    assert seconds < 5
+
+
+def test_an_smtp_reply_line_over_the_line_limit_is_refused(flooding_smtp):
+    server = flooding_smtp(SMTP_LONG_LINE)
+    outcome, _, _ = send_with_peak(server)
+    assert "line" in str(outcome), outcome
+    assert isinstance(outcome, email_client.SmtpReplyTooLarge), outcome
+
+
+def test_an_ordinary_multi_line_ehlo_reply_still_works(flooding_smtp):
+    server = flooding_smtp(b"250-mail.example.test\r\n250-PIPELINING\r\n250-8BITMIME\r\n")
+    outcome, _, _ = send_with_peak(server)
+    assert isinstance(outcome, smtplib.SMTPNotSupportedError), outcome
+
+
+UNTAGGED_FLOOD_LINES = 400_000
+UNTAGGED_PEAK_LIMIT_BYTES = 32 * MEBIBYTE
+LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+
+def response_type_named(number: int) -> bytes:
+    name = ""
+    for _ in range(6):
+        number, letter = divmod(number, len(LETTERS))
+        name += LETTERS[letter]
+    return name.encode()
+
+
+UNTAGGED_FLOOD = b"".join(b"* " + response_type_named(number) + b"\r\n" for number in range(UNTAGGED_FLOOD_LINES))
+
+
+class UntaggedFloodImapServer(LocalImapServer):
+    def _untagged(self, command: bytes):
+        if command.startswith(b"LOGIN"):
+            return [UNTAGGED_FLOOD]
+        return super()._untagged(command)
+
+
+def test_short_untagged_lines_of_different_types_are_charged_for_what_they_keep_in_memory(tmp_path, monkeypatch):
+    server_context, client_context = local_tls_contexts(tmp_path)
+    monkeypatch.setattr(email_client.ssl, "create_default_context", lambda *args, **kwargs: client_context)
+    server = UntaggedFloodImapServer(server_context, 1000, honours_partial_fetch=True)
+    tracemalloc.start()
+    try:
+        outcome = email_client.list_folders(local_account(server.port), "pw", allow_private_hosts=True)
+    except imaplib.IMAP4.error as error:
+        outcome = error
+    finally:
+        peak = tracemalloc.get_traced_memory()[1]
+        tracemalloc.stop()
+        server.close()
+    assert isinstance(outcome, imaplib.IMAP4.error) and "more than" in str(outcome), (outcome, peak)
+    assert peak < UNTAGGED_PEAK_LIMIT_BYTES, peak

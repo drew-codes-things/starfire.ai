@@ -34,6 +34,9 @@ MAIL_TIMEOUT_SECONDS = 20
 MEBIBYTE = 1024 * 1024
 MAX_MESSAGE_BYTES = 25 * MEBIBYTE
 MAX_BYTES_PER_MAIL_CONNECTION = 32 * MEBIBYTE
+MEMORY_COST_PER_RESPONSE_LINE = 256
+MAX_SMTP_REPLY_BYTES = 64 * 1024
+MAX_SMTP_REPLY_LINE_BYTES = 2048
 MESSAGE_CUT_NOTE = f"\n\n(the rest of this message is over {MAX_MESSAGE_BYTES // MEBIBYTE} MB and was not fetched)"
 SIZE_IN_FETCH = re.compile(rb"RFC822\.SIZE (\d+)")
 MAIL_DEADLINE_SECONDS = 60
@@ -50,6 +53,10 @@ class MailDeadlinePassed(TimeoutError):
 
 
 class MailTooLarge(imaplib.IMAP4.error):
+    pass
+
+
+class SmtpReplyTooLarge(RuntimeError):
     pass
 
 
@@ -158,7 +165,7 @@ class PinnedIMAP4SSL(imaplib.IMAP4_SSL):
         if self.stopped_for_size or size > self.bytes_left:
             self.stopped_for_size = True
             raise MailTooLarge(f"the mail server sent more than {MAX_BYTES_PER_MAIL_CONNECTION // MEBIBYTE} MB "
-                               "for one mail request, so it was stopped")
+                               "for one mail request (each line counted with what it costs to keep), so it was stopped")
         self.bytes_left -= size
 
     def read(self, size):
@@ -167,14 +174,38 @@ class PinnedIMAP4SSL(imaplib.IMAP4_SSL):
 
     def readline(self):
         line = super().readline()
-        self._spend(len(line))
+        self._spend(len(line) + MEMORY_COST_PER_RESPONSE_LINE)
         return line
 
     def logout(self):
         if not self.stopped_for_size:
             return super().logout()
+        self.untagged_responses.clear()
         self.shutdown()
         return "BYE", [b"stopped after the mail server sent too much"]
+
+
+class BoundedSmtpReplyFile:
+    def __init__(self, file):
+        self.file = file
+        self.bytes_left = MAX_SMTP_REPLY_BYTES
+
+    def start_reply(self) -> None:
+        self.bytes_left = MAX_SMTP_REPLY_BYTES
+
+    def readline(self, limit: int = -1) -> bytes:
+        line = self.file.readline(MAX_SMTP_REPLY_LINE_BYTES + 1)
+        if len(line) > MAX_SMTP_REPLY_LINE_BYTES:
+            raise SmtpReplyTooLarge(f"the mail server sent a reply line over {MAX_SMTP_REPLY_LINE_BYTES} bytes, "
+                                    "so it was stopped")
+        self.bytes_left -= len(line)
+        if self.bytes_left < 0:
+            raise SmtpReplyTooLarge(f"the mail server sent more than {MAX_SMTP_REPLY_BYTES // 1024} KB "
+                                    "in one reply, so it was stopped")
+        return line
+
+    def close(self) -> None:
+        self.file.close()
 
 
 class _PinnedSmtpSocket:
@@ -184,6 +215,17 @@ class _PinnedSmtpSocket:
 
     def _connect_pinned(self, port, timeout) -> socket.socket:
         return _watched(socket.create_connection((self.pinned_address, port), timeout, self.source_address))
+
+    def getreply(self):
+        if self.file is None and self.sock is not None:
+            self.file = BoundedSmtpReplyFile(self.sock.makefile("rb"))
+        if isinstance(self.file, BoundedSmtpReplyFile):
+            self.file.start_reply()
+        try:
+            return super().getreply()
+        except SmtpReplyTooLarge:
+            self.close()
+            raise
 
 
 class PinnedSMTP(_PinnedSmtpSocket, smtplib.SMTP):

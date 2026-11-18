@@ -114,8 +114,10 @@
   sees includes after a form feed, a vertical tab or a bare carriage return and removes comments
   with a plain scan, so a hostile snippet cannot stall the server.
 - Mail calls run on four threads of their own, each cut off after 60 seconds; an account may run
-  two at once and make `MAIL_REQUESTS_PER_MINUTE` (60) mail requests a minute. A mail server may
-  send at most 32 MB per request, and a message over 25 MB is fetched only up to 25 MB.
+  two at once and make `MAIL_REQUESTS_PER_MINUTE` (60) mail requests a minute. An IMAP server may
+  send at most 32 MB per request, each line counted with 256 bytes more for what it costs to keep,
+  and a message over 25 MB is fetched only up to 25 MB. An SMTP reply may be at most 64 KB, each of
+  its lines at most 2 KB, so an endless multi-line reply is stopped at once.
 - github_cli refuses flags that can print the token and the commands that run programs or change
   the sign-in, and asks first for everything but plain reads, also after untrusted content.
 - Arty Auto reads only the first and last 4,000 characters of a message to pick a role, with
