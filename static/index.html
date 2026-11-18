@@ -289,6 +289,7 @@
           <button class="settings-tab admin-only" type="button" data-tab="hardware">Hardware</button>
           <button class="settings-tab admin-only" type="button" data-tab="data">Data</button>
           <button class="settings-tab admin-only" type="button" data-tab="accounts">Accounts</button>
+          <button class="settings-tab admin-only" type="button" data-tab="artymemory">Arty memory</button>
         </nav>
         <div class="settings-panels">
 
@@ -659,6 +660,31 @@
                 <button type="button" class="btn ghost" data-category="task">Task</button>
               </div>
               <ul class="endpoint-list" id="memoryList"></ul>
+            </div>
+          </div>
+
+          <div class="settings-panel admin-only" data-panel="artymemory" hidden>
+            <div class="settings-card">
+              <h3>Add to Arty's memory</h3>
+              <div class="settings-row">
+                <input id="artyMemoryEntity" type="text" maxlength="60" aria-label="Who or what the fact is about" placeholder="Who or what it's about" autocomplete="off" spellcheck="false" />
+                <input id="artyMemoryType" type="text" maxlength="40" aria-label="Kind, such as person or topic (optional)" placeholder="Kind (optional)" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="settings-row">
+                <input id="artyMemoryFact" type="text" maxlength="300" aria-label="The fact to remember" placeholder="The fact to remember" autocomplete="off" />
+                <button type="button" class="btn send" id="addArtyMemoryBtn">Add</button>
+              </div>
+              <p class="settings-hint" id="artyMemoryAddResult" role="status"></p>
+              <p class="settings-hint">Arty reads this memory in every chat, in its apps, here and in ArtyCode, so a change shows up in the next chat anywhere.</p>
+            </div>
+            <div class="settings-card">
+              <h3>What Arty remembers</h3>
+              <div class="settings-row">
+                <input id="artyMemorySearch" type="search" aria-label="Search Arty's memory" placeholder="Search names, kinds and facts" autocomplete="off" spellcheck="false" />
+                <button type="button" class="btn ghost" id="refreshArtyMemoryBtn">Reload</button>
+              </div>
+              <p class="settings-hint" id="artyMemoryStatus" role="status"></p>
+              <ul class="endpoint-list" id="artyMemoryList"></ul>
             </div>
           </div>
 
@@ -1176,6 +1202,7 @@
   <script src="helperTasks.js"></script>
   <script src="settings.js"></script>
   <script src="settingsMemoryTasks.js"></script>
+  <script src="settingsArtyMemory.js"></script>
   <script src="settingsEmail.js"></script>
   <script src="settingsNotes.js"></script>
   <script src="settingsSystem.js"></script>

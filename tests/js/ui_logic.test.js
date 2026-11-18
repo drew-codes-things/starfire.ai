@@ -536,3 +536,24 @@ test('a shell approval card warns when the command would run without a sandbox',
   const [card] = logic.pendingApprovalCards([{ id: 'p1', command: 'ls', unsandboxed: true }], []);
   assert.equal(card.data.unsandboxed, true);
 });
+
+const ARTY_MEMORY = [
+  { name: 'Rowan', type: 'person', facts: ['Lives in Bath', 'Likes tea'] },
+  { name: 'Garden', type: 'topic', facts: ['Has a pond', 'Rowan planted the roses'] },
+  { name: 7, type: 'topic', facts: ['dropped'] },
+];
+
+test('the Arty memory list is searched by name, type or fact and keeps the matching facts', () => {
+  assert.deepEqual(logic.artyMemoryRows(ARTY_MEMORY, ''), [
+    { name: 'Rowan', type: 'person', facts: ['Lives in Bath', 'Likes tea'] },
+    { name: 'Garden', type: 'topic', facts: ['Has a pond', 'Rowan planted the roses'] },
+  ]);
+  assert.deepEqual(logic.artyMemoryRows(ARTY_MEMORY, '  ROWAN '), [
+    { name: 'Rowan', type: 'person', facts: ['Lives in Bath', 'Likes tea'] },
+    { name: 'Garden', type: 'topic', facts: ['Rowan planted the roses'] },
+  ]);
+  assert.deepEqual(logic.artyMemoryRows(ARTY_MEMORY, 'person').map(row => row.name), ['Rowan']);
+  assert.deepEqual(logic.artyMemoryRows(ARTY_MEMORY, 'nothing like this'), []);
+  assert.deepEqual(logic.artyMemoryRows(null, ''), []);
+  assert.deepEqual(logic.artyMemoryRows([{ name: 'Odd', facts: [3, 'kept'] }], ''), [{ name: 'Odd', type: '', facts: ['kept'] }]);
+});

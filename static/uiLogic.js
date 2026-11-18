@@ -451,6 +451,20 @@ function modelMenuEntries(listed, query) {
   return [...autoShown, ...distinctModels(listed).filter(m => modelMatchesSearch(m, search))];
 }
 
+function artyMemoryRows(entities, query) {
+  const search = String(query || '').trim().toLowerCase();
+  const rows = [];
+  for (const entity of Array.isArray(entities) ? entities : []) {
+    if (!entity || typeof entity.name !== 'string') continue;
+    const type = typeof entity.type === 'string' ? entity.type : '';
+    const facts = Array.isArray(entity.facts) ? entity.facts.filter(fact => typeof fact === 'string') : [];
+    const entityMatches = !search || entity.name.toLowerCase().includes(search) || type.toLowerCase().includes(search);
+    const shownFacts = entityMatches ? facts : facts.filter(fact => fact.toLowerCase().includes(search));
+    if (entityMatches || shownFacts.length) rows.push({ name: entity.name, type, facts: shownFacts });
+  }
+  return rows;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     isLocalMediaUrl, isCodeLanguageClass, toolOutcome, toolOutcomeLine,
@@ -468,5 +482,6 @@ if (typeof module !== 'undefined' && module.exports) {
     AUTO_MODEL_ID, AUTO_MODEL_NAME, AUTO_MODEL_HINT, AUTO_CHOICE, isAutoChoice, modelChoiceToShow, autoPickLabel, replyModelLabel,
     autoModelEntry, PICKER_MODE_AUTO, PICKER_MODE_CHOSEN, pickerMode, distinctModels, modelMenuEntries,
     BACKEND_RUNS_ON_ITS_OWN, NO_LOCAL_OLLAMA, FOUND_NOT_ADDED, backendStatusPlan, scanEndpointBody, scanSummary, addedLocalMessage,
+    artyMemoryRows,
   };
 }

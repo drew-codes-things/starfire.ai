@@ -199,9 +199,16 @@ How to link them:
   Arty is doing, answer its permission questions with **Allow** or **Deny**, send a message, or **Stop** the current
   turn. starfire uses its own Arty connection for this, so the browser never holds Arty's key. For a phone with its
   own device key, switch on **Arty CLI** for it on the **Arty devices** page.
+- **Editing Arty's memory**: **Settings > Arty memory** (admins only) lists what Arty remembers, by name with its
+  kind and facts, with a search over all three. A fact can be edited in place or removed (after a confirm), a name
+  can be removed with all its facts, and a new fact can be added under a new or existing name. starfire passes each
+  change to Arty's `GET /v1/memory` and `POST /v1/memory/add`, `/edit` and `/delete` with its own Arty connection
+  and shows Arty's answer as it comes (a fact already saved, a name that isn't there, text that is too long, the
+  memory store being down). Every chat reads the same memory, so the next chat anywhere sees the change. Other
+  accounts get a 403 from `/api/arty-memory` and no tab.
 
 Arty works without the other two. Arty CLI needs Arty. starfire.ai works with other models on its own, but its
-**Arty devices** and **Arty CLI** pages need Arty.
+**Arty devices**, **Arty CLI** and **Arty memory** pages need Arty.
 
 ## Adding a hosted provider
 

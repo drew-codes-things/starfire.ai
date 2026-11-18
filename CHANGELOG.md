@@ -140,6 +140,10 @@
   file.
 
 ### Added
+- **Settings > Arty memory** for admins: list and search what Arty remembers, edit a fact in place, remove a
+  fact or a whole name after a confirm, and add a fact. starfire relays each change to Arty's memory API with its
+  own Arty connection (`GET /api/arty-memory`, `POST /api/arty-memory/add`, `/edit`, `/delete`) and shows Arty's
+  own error when it refuses. Ordinary accounts get a 403 and no tab.
 - **Arty Auto** in the model picker, the default for new accounts: the server picks the vision model
   for pictures and video, the code model for code, the agent for reminders, phone, home and web
   tasks or anything addressed to Arty, and the chat model otherwise, from fixed rules with no

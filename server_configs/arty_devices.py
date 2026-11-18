@@ -72,10 +72,10 @@ def brain_key() -> str:
     return api_keys.load()[endpoints.find_by_url(brain_address()).id]
 
 
-def require_admin(request: Request) -> None:
+def require_admin(request: Request, action: str = "manage Arty's devices") -> None:
     user = getattr(request.state, "user", None)
     if user is None or user.role != "admin":
-        raise HTTPException(403, "only an admin can manage Arty's devices")
+        raise HTTPException(403, f"only an admin can {action}")
 
 
 def brain_message(response: httpx.Response) -> str:
