@@ -148,6 +148,10 @@
   when a reply finishes while the window is hidden. The window runs sandboxed with context isolation, navigation and new
   windows limited to your starfire's origin (other links open in the system browser), and its own pages carry a strict CSP.
   It has its own red logo so it is not mixed up with Arty Desktop. Unit tests run in CI (`node --test desktop/tests/*.test.js`).
+- **starfire Desktop: link to Arty Desktop.** A switch in Settings with a light (Off, Not paired, Arty Desktop is not
+  running, Connected). It pairs once with a 6 digit code Arty Desktop shows (single use, two minutes), talks to
+  `127.0.0.1` only, keeps the token in its private config file and can ask Arty Desktop's computer control to take a
+  step; Arty Desktop still puts every step to you as its Allow / Not now card. Needs Arty Desktop 1.5.5 or newer.
 - **Settings > Arty memory** for admins: list and search what Arty remembers, edit a fact in place, remove a
   fact or a whole name after a confirm, and add a fact. starfire relays each change to Arty's memory API with its
   own Arty connection (`GET /api/arty-memory`, `POST /api/arty-memory/add`, `/edit`, `/delete`) and shows Arty's

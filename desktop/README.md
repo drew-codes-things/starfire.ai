@@ -36,6 +36,14 @@ so a new starfire release shows up in the app without updating it.
   notification says so. Click it to open the window. Off in Settings if you prefer.
 - **Start with the PC** - off by default. On Linux it writes `~/.config/autostart/starfire-desktop.desktop`; on Windows it
   uses the login item. It starts hidden in the tray.
+- **Link to Arty Desktop** - a switch in Settings with a light that says Off, Not paired, Arty Desktop is not running or
+  Connected. Switched on, you pair once: Arty Desktop's tray menu has **Link starfire...**, which shows a 6 digit code (one
+  use, two minutes); type it into Settings. After that starfire Desktop can ask Arty Desktop's computer control to take a
+  step (Settings has a **Try it** button that asks for the list of open windows). Arty Desktop puts every step to you as
+  its normal Allow / Not now card, so starfire never gets round it, and a step is refused while the switch is off or
+  Arty's HANDS is off. Everything goes to `127.0.0.1` only (the port is Arty Desktop's 8765, `artyPort` in the config
+  file for a different one); the token is kept in `~/.config/starfire/config.json` (mode 600) and never reaches the
+  app's pages. Unpair in Settings forgets it on both sides.
 - **Its own icon** - starfire's red logo on a red tile, so it never gets mixed up with Arty Desktop in the taskbar.
 
 ### Wayland
@@ -59,6 +67,9 @@ running app to show the quick-ask window. `STARFIRE_WAYLAND=1` starts the app as
   answers calls that come from those pages.
 - The address must be **https**. `http` is accepted only for `localhost` and local network addresses (192.168.x.x, 10.x.x.x,
   172.16-31.x.x, link-local, `.local`), and only with the tick box on the address screen.
+- The Arty Desktop link talks to `127.0.0.1` over plain http from the app's main process only (the pages cannot reach it),
+  sends no Origin header, follows no redirects and caps what it reads. The pairing code is single use and short lived on
+  Arty Desktop's side, and the stored token is a random value Arty Desktop keeps only as a hash.
 - Only the starfire origin is given microphone, notification, clipboard-write and full-screen permission.
 - Certificate errors are never overridden.
 - The quick-ask text is passed to the page as data, not built into script text.
@@ -118,7 +129,6 @@ was hidden.
 ## Next steps
 
 - Windows installer, built and tried in a Windows VM.
-- A link to Arty Desktop on the same PC (local, paired once with a code) so starfire Desktop can use its computer control.
 - Chats kept in step live between starfire Desktop, the website and ArtyCode.
 - Carry the quick-ask question through a sign-in when the window shows the login page.
 

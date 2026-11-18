@@ -1,5 +1,5 @@
 const { normalizeAddress, checkStarfire } = require('./address');
-const { applySettingsPatch, saveSettings } = require('./settings');
+const { applySettingsPatch, saveSettings, withArtyToken } = require('./settings');
 const { registerQuickAsk } = require('./shortcut');
 
 function refuse(error) {
@@ -73,6 +73,20 @@ function createSettingsController({ file, initial, globalShortcut, onQuickAsk, s
     return { ok: true, settings: get() };
   }
 
+  function setArtyToken(token) {
+    const result = withArtyToken(current, token);
+    if (!result.ok) return result;
+    try {
+      saveSettings(file, result.settings);
+    } catch (error) {
+      return refuse(`Could not save the settings: ${error.message}`);
+    }
+    const previous = current;
+    current = result.settings;
+    onChange(get(), previous);
+    return { ok: true };
+  }
+
   async function connect({ address, allowInsecure }) {
     const insecure = allowInsecure === true;
     const normalized = normalizeAddress(address, { allowInsecure: insecure });
@@ -84,7 +98,7 @@ function createSettingsController({ file, initial, globalShortcut, onQuickAsk, s
     return { ok: true, origin: normalized.origin, version: health.version };
   }
 
-  return { get, start, update, connect, shortcutProblem: () => shortcutProblem };
+  return { get, start, update, connect, setArtyToken, shortcutProblem: () => shortcutProblem };
 }
 
 module.exports = { createSettingsController };
