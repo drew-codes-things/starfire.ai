@@ -424,23 +424,25 @@ function nameAfterServerPrefix(id) {
   return cut > 0 ? id.slice(cut + 1) : '';
 }
 
-function sameModelName(model, listed) {
-  const inner = nameAfterServerPrefix(model.id);
-  const reachedDirectly = !!inner && listed.some(other => other.id === inner && other.endpoint_id !== model.endpoint_id);
-  return reachedDirectly ? inner : model.id;
+function isArtyRouteToADirectModel(model, listed, servedByArty) {
+  if (!servedByArty.has(model.endpoint_id)) return false;
+  const names = [model.id, nameAfterServerPrefix(model.id)].filter(Boolean);
+  return listed.some(other => !servedByArty.has(other.endpoint_id) && names.includes(other.id));
+}
+
+function serverNumbers(listed) {
+  const numbers = new Map();
+  for (const m of listed) if (!numbers.has(m.endpoint_id)) numbers.set(m.endpoint_id, numbers.size + 1);
+  return numbers;
 }
 
 function distinctModels(listed) {
   const servedByArty = artyServers(listed);
-  const routeRank = m => (sameModelName(m, listed) !== m.id ? 2 : servedByArty.has(m.endpoint_id) ? 1 : 0);
-  const keptByName = new Map();
-  for (const m of listed) {
-    const name = sameModelName(m, listed);
-    const held = keptByName.get(name);
-    if (!held || routeRank(m) < routeRank(held)) keptByName.set(name, m);
-  }
-  const kept = new Set(keptByName.values());
-  return listed.filter(m => kept.has(m));
+  const kept = listed.filter(m => !isArtyRouteToADirectModel(m, listed, servedByArty));
+  const numbers = serverNumbers(listed);
+  const serversPerName = new Map();
+  for (const m of kept) serversPerName.set(m.id, (serversPerName.get(m.id) || 0) + 1);
+  return kept.map(m => (serversPerName.get(m.id) > 1 ? { ...m, server_note: `server ${numbers.get(m.endpoint_id)}` } : m));
 }
 
 function modelMenuEntries(listed, query) {

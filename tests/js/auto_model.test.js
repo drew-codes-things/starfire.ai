@@ -80,14 +80,31 @@ test('a model reached directly and again through Arty is listed once, as the dir
   ]);
 });
 
-test('the same name on two servers is listed once, preferring the server that is not Arty', () => {
+test('a model Arty also offers is listed once as the direct one, and the same name on two other servers is listed twice and told apart', () => {
   const twice = [
     { id: 'Arty', endpoint_id: 'e2', own_tools: true },
     { id: 'general:14b', endpoint_id: 'e2', own_tools: false },
     { id: 'general:14b', endpoint_id: 'e1', own_tools: false },
     { id: 'general:14b', endpoint_id: 'e3', own_tools: false },
   ];
-  assert.deepEqual(logic.distinctModels(twice).map(m => [m.endpoint_id, m.id]), [['e2', 'Arty'], ['e1', 'general:14b']]);
+  assert.deepEqual(logic.distinctModels(twice).map(m => [m.endpoint_id, m.id, m.server_note]), [
+    ['e2', 'Arty', undefined], ['e1', 'general:14b', 'server 2'], ['e3', 'general:14b', 'server 3'],
+  ]);
+});
+
+test('a cloud server listed first does not hide the same name on the local engine', () => {
+  const cloudFirst = [
+    { id: 'general:14b', endpoint_id: 'cloud', own_tools: false },
+    { id: 'evil/general:14b', endpoint_id: 'cloud', own_tools: false },
+    { id: 'general:14b', endpoint_id: 'engine', own_tools: false },
+  ];
+  const entries = logic.modelMenuEntries(cloudFirst, '');
+  assert.deepEqual(entries.map(m => [m.endpoint_id, m.id]), [
+    ['auto', 'auto'], ['cloud', 'general:14b'], ['cloud', 'evil/general:14b'], ['engine', 'general:14b'],
+  ]);
+  const notes = entries.filter(m => m.id === 'general:14b').map(m => m.server_note);
+  assert.deepEqual(notes, ['server 1', 'server 2']);
+  assert.equal(entries.find(m => m.id === 'evil/general:14b').server_note, undefined);
 });
 
 test('different models are never merged: namespaced names on one server, and routes with no direct model', () => {
@@ -96,7 +113,7 @@ test('different models are never merged: namespaced names on one server, and rou
     { id: 'maker/general:14b', endpoint_id: 'e1' },
     { id: 'other/maker/general:14b', endpoint_id: 'e2' },
   ];
-  assert.deepEqual(ids(logic.distinctModels(engine)), ['general:14b', 'maker/general:14b']);
+  assert.deepEqual(ids(logic.distinctModels(engine)), ['general:14b', 'maker/general:14b', 'other/maker/general:14b']);
   const onlyThroughArty = [{ id: 'Arty', endpoint_id: 'e2', own_tools: true }, { id: 'arty/general:14b', endpoint_id: 'e2', own_tools: true }];
   assert.deepEqual(ids(logic.modelMenuEntries(onlyThroughArty, '')), ['auto', 'Arty', 'arty/general:14b']);
 });

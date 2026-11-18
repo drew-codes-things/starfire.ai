@@ -145,8 +145,9 @@
   extra model call. Admins set each role under Settings → Connections; Auto keeps to each
   account's allowed models. Each reply names the model Auto picked (`qwen3:14b · Arty Auto: code`).
   Arty Auto is the first entry of the model picker, followed by one flat list of every model the
-  account may use, each listed once (a model also offered through another server, such as
-  `arty/<name>` on Arty's, is shown as the direct one) and no headings; a small **Arty Auto** / **Choose a
+  account may use (a model Arty's server offers again, such as `arty/<name>`, is shown once as the
+  direct one; the same name on two other servers is listed for each, marked `server N`) and no
+  headings; a small **Arty Auto** / **Choose a
   model** switch at the top shows how the chat's model is picked. Presets are no longer listed in
   the picker (apply them from Workspace → Models). Chats store Arty Auto as `auto`.
 - Each chat keeps its model (or Auto) on the server and the picker shows it after a refresh, in

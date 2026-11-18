@@ -288,10 +288,10 @@ tokens (colours, radii, spacing, shadows) in `static/style.css`, with a dark and
 
 **Arty Auto** (Auto for short) is what a new account starts with. In the model picker it is the
 first entry, above one flat list of every model the account may use, with no headings. A model
-listed both by its own server and again through another server (for example `arty/<name>` on
-Arty's server next to `<name>` on the engine) is shown once, as the direct one; the same name on
-two servers is shown once too, preferring the one that is not Arty's (any server that lists an
-`OWN_TOOLS_MODELS` match). Picking a model there sets the chat to that model; picking Arty Auto
+that Arty's server (any server that lists an `OWN_TOOLS_MODELS` match) offers again, as
+`arty/<name>` or `<name>`, next to `<name>` on another server is shown once, as the direct one.
+The same name on two other servers is listed for each of them, marked `server 1`, `server 2` and
+so on in the order the servers answered, so the account can choose where its text goes. Picking a model there sets the chat to that model; picking Arty Auto
 (or **Arty Auto** at the top of the picker) goes back. For every
 message the server picks a model from simple fixed rules, without asking another model first:
 
