@@ -250,6 +250,10 @@
   WCAG AA contrast for every text colour on every surface in both themes.
 
 ### Changed
+- The README is now a short front page (what starfire is, the two ways to use it, quick start, releases), and the
+  reference sections moved to `docs/` with a page each. The screenshot is `docs/screenshot.png`. The run_shell and
+  automation texts now describe the bubblewrap sandbox and the approval rules instead of "no sandbox" and "commands
+  run straight away".
 - ArtyEngine-aware model server detection: startup auto-detection tries ArtyEngine's port 11438
   before Ollama's 11434 and prefers it when both answer, **scan network** probes 11438 too, and
   endpoints, the scan result and Settings → Hardware name the backend that answered (ArtyEngine

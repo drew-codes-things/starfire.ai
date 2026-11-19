@@ -2,46 +2,46 @@
 
 # starfire.ai
 
-**A terminal-themed local AI chat interface - runs local models through Ollama and optionally talks to hosted providers, with tool-calling, memory, documents, notes, automations, and email built in.**
+**A terminal-themed local AI chat interface. It runs local models through Ollama, optionally talks to hosted providers, and has tool-calling, memory, documents, notes, automations and email built in.**
 
 [![Python](https://img.shields.io/badge/python-3.12+-blue?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/fastapi-web-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Ollama](https://img.shields.io/badge/ollama-local%20models-000000?style=flat-square)](https://ollama.com/)
-[![Version](https://img.shields.io/badge/version-1.1.0-lightgrey?style=flat-square)](CHANGELOG.md)
+[![Server](https://img.shields.io/badge/server-1.1.0-lightgrey?style=flat-square)](CHANGELOG.md)
+[![Desktop](https://img.shields.io/badge/desktop-1.0.0-lightgrey?style=flat-square)](https://github.com/drew-codes-things/starfire.ai/releases/tag/desktop-v1.0.0)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square)](LICENSE)
 
 </div>
 
-![starfire.ai showing a chat with a highlighted code block and a table](screenshot.png)
+## What it is
 
----
+starfire runs local models through [Ollama](https://ollama.com) (auto-detected on startup, and started
+automatically if it is installed but not running, or add one manually) and optionally talks to hosted providers
+(OpenAI, Anthropic, or any OpenAI-compatible API such as Groq, OpenRouter, LM Studio, llama.cpp or vLLM) with API
+keys you add in Settings. Nothing is sent anywhere unless you add a hosted provider yourself.
 
-## Overview
+It is built on FastAPI with encrypted key storage, as a local chat app for you and the people you add.
 
-A terminal-themed AI chat interface. Runs local models through [Ollama](https://ollama.com)
-(auto-detected on startup - and started automatically if it's installed but not already
-running - or add one manually) and optionally talks to hosted providers
-(OpenAI, Anthropic, or any OpenAI-compatible API - Groq, OpenRouter, LM Studio, llama.cpp,
-vLLM, ...) via API keys you add in Settings. Nothing is sent anywhere unless you add a
-hosted provider yourself.
+## Two ways to use it
 
-Built on FastAPI with encrypted key storage, as a local chat app for you and the people you add.
+| | What it is | Get it |
+|---|---|---|
+| **Web app** | The starfire server. You run it once (on a home server, a PC or in Docker) and use it from any browser. | [Quick start](#quick-start) below, or the [install guide](docs/install.md) |
+| **Desktop app** | starfire Desktop: your starfire in its own window, with a tray icon, a quick-ask shortcut (Ctrl+Shift+Space by default), notifications and the link to Arty Desktop. It connects to a starfire server you already run. | [Downloads](https://github.com/drew-codes-things/starfire.ai/releases/tag/desktop-v1.0.0) for Debian (`.deb` or AppImage) and Windows, then [Set up starfire Desktop](desktop/README.md#set-up-starfire-desktop) |
 
-## Requirements
+The desktop app does not replace the server: start with the web app, then add the desktop app on any computer that should
+have starfire in a window of its own. It asks for your starfire's address on first run and stays signed in. It is a small Electron shell in [`desktop/`](desktop/README.md), separate from the
+server, and it only ever opens the address you give it.
 
-- Python 3.12+
-- [Ollama](https://ollama.com/download), installed and running, for local models (optional
-  if you only plan to use hosted providers)
-- `prlimit` (util-linux, installed on most Linux systems) for code checks: every checker runs
-  under it, and without it every code check is reported as skipped
-- [bubblewrap](https://github.com/containers/bubblewrap) (`bwrap`, optional): C and C++ are only
-  checked inside it, and run_shell runs in it when it is installed and can start (without it, or
-  where it cannot start, run_shell runs unsandboxed, logs that and says so on its approval card; a
-  failed start is tried again after five minutes)
+![starfire.ai showing a chat with a highlighted code block and a table](docs/screenshot.png)
 
-## Setup
+## Quick start
+
+You need Python 3.12+ and, for local models, [Ollama](https://ollama.com/download) (optional if you only use hosted
+providers). The [install guide](docs/install.md) lists the optional extras.
 
 ```bash
+git clone https://github.com/drew-codes-things/starfire.ai.git
 cd starfire.ai
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
@@ -49,822 +49,49 @@ cp .env.example .env
 python server.py
 ```
 
-Then open [http://localhost:8080](http://localhost:8080).
+Then open [http://localhost:8080](http://localhost:8080). It listens on `127.0.0.1` only by default.
 
-It listens on `127.0.0.1` only by default.
-
-### Logging in
-
-The first time you open starfire it shows a setup page: enter the one-time setup code, then
-choose your name, email and a password (at least 10 characters). While no account exists,
-starfire prints the code in its log when it starts, in a line like
-`no account yet: open /setup.html and enter the setup code ...` (the terminal for
-`python server.py`, `docker compose logs` for Docker, `journalctl -u <service>` for a service).
-Only someone who can read that log can make the admin account, so a stranger who reaches a fresh
-copy first cannot. The code is random, lives in memory only (a restart makes a new one, and it
-is gone once the account exists), and 5 wrong codes from one address lock that address out of
-setup for 15 minutes. That makes the admin account, and the setup page closes
-for good (a `data/.setup-done` marker keeps it closed: if `data/users.json` ever goes missing,
-starfire answers 503 until it is restored, instead of offering setup to whoever comes first).
-Until then, every other page and API call is locked, so set it up straight away
-on a new install. After that, every page and API call needs a login (kept for 30 days in an
-HttpOnly cookie; 5 wrong passwords lock that email from that address for 15 minutes, and
-20 wrong passwords for one email within an hour, from anywhere, lock it for an hour except
-from an address that has signed in to it before or a browser already signed in to it). The
-login and setup pages can load only the stylesheet, the logo and the fonts without a login.
-A login only works on the host name it was made on, so a cookie handed to another site behind
-the same proxy cannot open this one.
-Change your password under **Settings → Account**; that logs out every other browser. Forgot
-it? Reset it from the terminal on the machine starfire runs on (this also logs out every
-browser that was signed in):
-
-```bash
-python reset_password.py you@example.com
-```
-
-To copy logins from Open WebUI instead (same email and password - only the bcrypt hash is
-copied):
-
-```bash
-python import_openwebui_users.py /path/to/open-webui/data/webui.db
-```
-
-Accounts are kept in
-`data/users.json`. The cookie is `Secure`, so serve it over HTTPS (or `localhost`), or set
-`COOKIE_SECURE=false` for plain HTTP on a trusted network. The shell tool runs as whichever
-system user starfire runs as, so give it an unprivileged one.
-
-### Accounts
-
-The first account is the admin. Under **Settings → Accounts** an admin adds more people (name,
-email, a starting password they can change later, and a role), resets a password, disables or
-re-enables an account, and deletes one along with everything it owns.
-
-Each account has its own chats, folders, memory, knowledge documents, notes and templates,
-automations, email accounts and rules, prompts, presets, usage figures, attachments and
-generated files, stored under `data/users/<id>/`. What's shared is the house's infrastructure:
-model connections and their API keys, MCP servers, local image and audio setup, hardware and
-backup. Only admins can change those; everyone can use them. Non-admins don't see the
-Connections, Audio & Images, Hardware, Data and Accounts tabs, and the tools menu hides the
-MCP server management for them.
-
-Upgrading from a single-user install: on the first start your existing data moves into the
-first admin's folder automatically. The Open WebUI import script now takes `--user EMAIL`
-(default: the first admin).
-
-If Ollama (port 11434) or ArtyEngine (port 11438) is already running on this machine the first
-time starfire starts, it's detected and added as an endpoint, so it appears in the model list
-with no setup; when both answer, ArtyEngine is used. Port 11438 only counts as ArtyEngine when
-the server there names itself as ArtyEngine (port 11434 has no such check: anything that
-answers Ollama's API there on the first start is taken for Ollama). A server only counts as
-speaking Ollama's API when its `/api/tags` answers with a model list; a server that answers 200 on
-every path is not taken for Ollama. Detection runs only while no Ollama-API server is set up at
-all: none added with **add ollama** or **scan network** (on this machine or another) and no Ollama
-server on another machine added with an API key (Ollama Cloud does not count, as it is not a server
-of your own, and an Ollama on this machine added with a key does not stop detection: at each start
-it is filed as Ollama in place when its server answers Ollama's API, whatever its port and however
-the address names this machine, so it is used and no second endpoint is added for it, unless
-another server on this machine is already the chosen one or `OLLAMA_BASE_URL` names another server;
-then it is left as it is). Detection
-never adds a second endpoint for a server already stored under another name for this machine
-(`localhost` or `127.0.0.1`, with or without `/api`). Once one is, starfire keeps using it and never adds or switches to
-another server by itself (Settings → Hardware shows one it finds but has not added as "found, not
-added"). Memory and document embeddings and model pulls go to `OLLAMA_BASE_URL` or else to the
-first endpoint on this machine filed as Ollama in **Settings → Connections** (one added with
-**add ollama** or **scan network**, detected at start, or added with a key and filed as Ollama as
-above; its server root, even when it was stored
-with an `/api` or `/v1` path), never to whatever happens to answer on a port.
-When the only model server set up is on another machine and `OLLAMA_BASE_URL` is not set,
-embeddings stay off and search uses keywords; set `OLLAMA_BASE_URL` to that server to turn them
-on. A server on this machine without the Ollama API, found by **scan network** or typed into
-**add ollama**, is stored as OpenAI-compatible at its `/v1` address when its `/v1/models` lists
-models: it is used for chat, not for embeddings or pulls. **add ollama** refuses a server whose
-`/api/tags` gives no model list and that is not stored that way. It asks `/api/tags` under the
-address as typed (after taking off a `/v1` or `/api` ending, so an Ollama behind a proxy path such
-as `https://box.example/ollama` or `https://box.example/ollama/v1` is asked at `/ollama/api/tags`;
-an address ending in `/api` gets that far on this machine; elsewhere only when `/api` is the
-whole path and the address is on port 11434 or is the `OLLAMA_BASE_URL` address (host and port),
-because otherwise the first check asks `<address>/v1/models`), with the same 5 s limit and the
-same API key as its first check, reuses the first answer when that check already asked
-`/api/tags`, and says whether the server did not answer in time, refused the key, answered with an
-error or answered without a model list. At each start a stored server on
-this machine is filed by the API it speaks: as OpenAI-compatible only when its Ollama API answers
-"not found" or answers without a model list and its `/v1/models` lists models, and back as Ollama
-once its Ollama API lists models again, unless another server on this machine is the chosen one
-by then; a server that is down or answers with an error keeps its
-kind. Each endpoint remembers what it was added as: one added at its `/v1` address as anything
-other than Ollama (by the scan, the key form, or **add ollama** finding no Ollama API) is never
-filed as Ollama, even when it starts listing Ollama models, so it never becomes the embeddings
-server, while one added with **add ollama** as Ollama is filed back as Ollama whatever its address.
-An endpoint stored before this was remembered counts as added as the kind it had then. The scan names every server it could not add and why. Clicking **start
-Ollama** on Settings → Hardware adds the Ollama it started when no model server on this machine
-is set up yet. It only starts Ollama when Ollama's own port here is the server starfire would use:
-when `OLLAMA_BASE_URL` or the stored server points somewhere else and does not answer, it says so
-instead of starting an Ollama starfire would not use. To add a server later, open
-**Settings → Connections** and either click **add ollama** (fills in the default endpoint, then
-Test/Add) or **scan network** to probe common local model-server ports (11438, 11434, 1234 and
-8080).
-
-Any server that speaks Ollama's API can stand in for Ollama. Arty runs on
-[ArtyEngine](https://github.com/drew-codes-things/ArtyEngine), its own Ollama-compatible server
-built on llama.cpp, and starfire talks to it the same way. starfire tells the two apart from
-what the server reports (ArtyEngine's `Server` header, or its "Arty engine is running"
-greeting when a proxy drops that header), names the one it found in the endpoint label and on
-**Settings → Hardware**, and treats anything else that answers Ollama's API as Ollama. The name
-is only a label, not a proof of identity: any local program can send the same header. An
-auto-detected endpoint is renamed on startup when the server behind its address now reports the
-other name; an endpoint you named yourself keeps your name. On
-another machine, set `OLLAMA_BASE_URL` in `.env` to its address and reach it through a reverse
-proxy as ArtyEngine's README describes, since it listens on loopback by default. The **Start
-Ollama** button only appears when an Ollama binary is installed here; with ArtyEngine or a
-remote server, the Hardware tab says the backend runs on its own. ArtyEngine is a separate
-project under its own licence, PolyForm Strict 1.0.0, not starfire's Apache 2.0.
-
-## Arty, Arty CLI and starfire.ai
-
-These three projects are made to work together, and each one links to the other two.
-
-| Project | What it is | What it does for the other two |
-|---|---|---|
-| [Arty](https://github.com/drew-codes-things/Arty) | The assistant: the brain and its API, tools, memory and voice, plus the desktop, Android, iPhone and Quest apps | Answers for both. Arty CLI and starfire.ai send their chats to Arty's API and use its models and tools. Arty's approve page sends a browser that has no Arty key to starfire.ai |
-| [Arty CLI](https://github.com/drew-codes-things/ArtyCode) (ArtyCode) | Arty in your terminal: a coding agent that reads, edits and runs code in a project, asking first | Talks only to Arty. Logs in with an Arty API key, or by approving the computer in the browser. With `/remote` it shares a session through Arty, so starfire.ai and the Arty phone apps can follow and steer it |
-| [starfire.ai](https://github.com/drew-codes-things/starfire.ai) | A web chat dashboard for local and hosted models | Lets you chat with Arty in the browser. Its admin-only **Arty devices** page approves a computer that is logging in (Arty CLI's browser login), lists and turns off approved devices, chooses which devices may control Arty CLI, and makes a new key with a QR code for a phone. Its admin-only **Arty CLI** page follows and steers shared Arty CLI sessions |
-
-How to link them:
-
-- **Arty to starfire.ai**: set `BRAIN_STARFIRE_URL` in the brain's `brain.env` to starfire's address, so the approve
-  page can send people there.
-- **starfire.ai to Arty**: add Arty under **Settings > Connections** with its address and API key, and set
-  `ARTY_BASE_URL` in starfire's `.env` to exactly the same address (the **Arty devices** page needs it).
-  `ARTY_PHONE_URL`, `ARTY_ACCESS_CLIENT_ID` and `ARTY_ACCESS_CLIENT_SECRET` are optional, for phone setup codes that
-  work away from home.
-- **Arty CLI to Arty**: set `ARTY_URL` (home network) or `ARTY_REMOTE_URL` (from anywhere, with
-  `ARTY_ACCESS_CLIENT_ID` and `ARTY_ACCESS_CLIENT_SECRET` if Cloudflare Access guards it), then run `arty login`.
-
-- **Controlling Arty CLI from elsewhere**: run `/remote` (or start with `arty --remote`) on the computer, then open
-  **Arty CLI** in starfire's sidebar (admins only). It lists the computers sharing a session; open one to read what
-  Arty is doing, answer its permission questions with **Allow** or **Deny**, send a message, or **Stop** the current
-  turn. starfire uses its own Arty connection for this, so the browser never holds Arty's key. For a phone with its
-  own device key, switch on **Arty CLI** for it on the **Arty devices** page.
-- **Editing Arty's memory**: **Settings > Arty memory** (admins only) lists what Arty remembers, by name with its
-  kind and facts, with a search over all three. A fact can be edited in place or removed (after a confirm), a name
-  can be removed with all its facts, and a new fact can be added under a new or existing name. starfire passes each
-  change to Arty's `GET /v1/memory` and `POST /v1/memory/add`, `/edit` and `/delete` with its own Arty connection
-  and shows Arty's answer as it comes (a fact already saved, a name that isn't there, text that is too long, the
-  memory store being down). Every chat reads the same memory, so the next chat anywhere sees the change. Other
-  accounts get a 403 from `/api/arty-memory` and no tab.
-
-Arty works without the other two. Arty CLI needs Arty. starfire.ai works with other models on its own, but its
-**Arty devices**, **Arty CLI** and **Arty memory** pages need Arty.
-
-## Adding a hosted provider
-
-Settings → Connections → "Add API provider": pick OpenAI, Anthropic, or "Other
-(OpenAI-compatible)", paste an API key, Test, then Add. The key is encrypted at rest - see
-below.
-
-## Interface
-
-The layout is the familiar chat-app one: a collapsible sidebar of chats on the left, a compact
-model picker in the header, a centred conversation and a rounded message box. A new chat opens
-on a centred greeting with the message box in the middle and four suggestion chips under it;
-after the first message the box sits at the bottom. Everything is drawn from one set of design
-tokens (colours, radii, spacing, shadows) in `static/style.css`, with a dark and a light set.
-
-- **Sidebar**: new chat, Workspace and Notes shortcuts, search (`tag:name` searches by tag),
-  pinned chats, folders (drag a chat onto one; "New chat here" from a folder's menu), and chats
-  grouped Today, Yesterday, Previous 7 days, Previous 30 days and then by month. Each chat's
-  `···` menu has pin, rename, clone, tags, move to folder, download (.json/.md), archive and
-  delete (with a confirmation). On phones the sidebar is a slide-over drawer with a scrim.
-- **Account menu** (bottom of the sidebar): Settings, Archived chats, Keyboard shortcuts and
-  Log out, under your name and email.
-- **Model picker**: searchable; **Arty Auto** first, then every model you may use, each listed
-  once. The **Arty Auto** / **Choose a model** switch at the top shows which way the chat's model
-  is picked. The star sets the default model. Presets are applied from Workspace → Models. A chat
-  reopens on the model it was last used with.
-- **Message box**: grows with its text up to a cap. `/` inserts a saved prompt, `#` attaches a
-  Knowledge document, `@` sends the next message to a different model. **+** uploads files
-  (text files are attached inline; PDFs are added to Knowledge and attached) and toggles tools
-  - web search, deep research, image generation and the rest - with the active ones shown as
-  chips. Files can also be dropped or pasted in. The microphone dictates; the waveform button
-  is a hands-free voice conversation (browser speech recognition and speech synthesis). The
-  send button turns into a stop button while a reply streams. If a message fails to send, its
-  text is put back in the box.
-- **Messages**: yours sit in a soft bubble on the right; replies are plain full-width text
-  under the starfire mark and the model name, with a typing indicator until the first words
-  arrive. Actions (copy, edit, read aloud, info, rate, continue, delete) appear on hover and
-  are always visible on touch screens; regenerate, with its model chooser, is on the newest
-  reply only. Deleting a message asks first.
-- **Side chats**: type `/side` or `/btw` (with or without a question) to ask something on the
-  side. The side chat sees the chat so far, nothing in it is saved, and the main chat is left
-  as it was; "Back to chat" (or "Toggle side chat" in the command palette) returns to it.
-- **Header buttons**: temporary chat (never saved to history), compare models, download the
-  current chat as .json (re-importable), .md or .txt, and chat controls (system prompt plus
-  temperature, top p, top k, max tokens, context length, repeat penalty and seed; Ollama takes
-  all of them, OpenAI-compatible APIs and Anthropic take the ones they support). Controls are
-  kept per chat: what you set on a new chat is your default, each saved chat keeps its own
-  copy, and "Use my defaults" and "Save as my defaults" move settings between the two. Chats
-  saved before this existed use your defaults.
-- **Settings**: a tabbed dialog. General (chat behaviour, shortcuts, version), Appearance
-  (System, Light or Dark theme; chat bubbles; wide chat), Account (who you are, change
-  password), Chats and Usage; then Workspace (Models, Knowledge, Prompts, Tools), Personal
-  (Memory, Notes, Automations, Email) and, for admins, Admin (Connections, Audio & Images,
-  Hardware, Data, Accounts). Each tab loads its data when you open it.
-- **Themes**: the stored theme is applied before the page paints, so there is no flash; System
-  follows the operating system and switches live. The login and setup pages use the same theme.
-- **Feedback**: copy, save and error messages show as short toasts. Confirmations use
-  starfire's own dialog, and everything that removes something asks first. An offline banner
-  appears when the server cannot be reached.
-- **Approvals**: a shell command or file edit that is waiting for your answer is drawn again
-  when the page loads, so a reload or a second device does not lose it.
-- **Phones and tablets**: safe-area insets are respected, inputs are 16px so iOS does not zoom,
-  menus open as bottom sheets, and every control is at least 44px tall.
-
-### Keyboard shortcuts
-
-`Ctrl+/` (or `Cmd+/`) shows this list in the app; it is also under the account menu.
-
-| Shortcut | Action |
-|---|---|
-| `Ctrl+Shift+O` | New chat |
-| `Shift+Esc` | Focus the message box |
-| `Esc` | Close the top dialog or menu, or stop the reply that is streaming |
-| `Enter` / `Shift+Enter` | Send / new line (swapped to `Ctrl+Enter` / `Enter` in Settings → General) |
-| `Ctrl+K` | Command palette |
-| `Ctrl+Shift+S` | Toggle the sidebar |
-| `Ctrl+Shift+C` | Copy the last reply |
-| `Ctrl+Shift+;` | Copy the last code block |
-| `Ctrl+/` | Show the shortcuts |
-
-## Chat
-
-### Arty Auto
-
-**Arty Auto** (Auto for short) is what a new account starts with. In the model picker it is the
-first entry, above one flat list of every model the account may use, with no headings. A model
-that Arty's server (any server that lists an `OWN_TOOLS_MODELS` match) offers again, as
-`arty/<name>` or `<name>`, next to `<name>` on another server is shown once, as the direct one.
-The same name on two other servers is listed for each of them, marked `server 1`, `server 2` and
-so on in the order the servers answered, so the account can choose where its text goes. Picking a model there sets the chat to that model; picking Arty Auto
-(or **Arty Auto** at the top of the picker) goes back. For every
-message the server picks a model from simple fixed rules, without asking another model first:
-
-| The message | Goes to |
-|---|---|
-| has a picture or a video attached | the vision model (names with `vl`, `vision` or `llava`) |
-| has audio attached, or starts with "Arty" / "hey Arty" | the agent (the first `OWN_TOOLS_MODELS` match) |
-| has a code block, a stack trace or error name, a source file name, or asks about code | the code model (names with `code`) |
-| asks for a reminder, timer, the phone, calendar, inbox, lights, music, the web, weather or news | the agent |
-| anything else | the chat model (`TASK_MODEL` when it is listed, otherwise the first ordinary model) |
-
-An admin can name the model for each role under **Settings → Connections → Arty Auto**. A role
-with no model falls back to the chat model. Auto only ever picks from the models the account may
-use, so an ordinary account is never sent to a model matched by `RESTRICTED_MODELS` or left out
-of its own list, even when an admin named that model for a role; the one exception is a
-restricted model an admin put by its full name into that account's own list. A pattern such as
-`*` or `own/*`, or a name without its tag, never opens a restricted model. A guess never lands on a
-restricted model for anyone. Each reply names the model Auto picked and why
-(`qwen3:14b · Arty Auto: code`) in its header, in the status line and under **info**.
-
-Every chat keeps its own model (or Auto) on the server, so a refresh, another tab or another
-device opens it with the same choice. A new chat starts with the model you picked last (the star
-marks it), or Auto.
-
-A reply in a saved chat is written on the server: refreshing or closing the page while it streams
-does not stop it. Open the chat again and the page picks the reply up where it is (or shows it
-finished), and the server saves it into the chat when it ends. The stop button stops it on the
-server too. Temporary and side chats still stop when the page goes away.
-
-Every reply has a toolbar: **edit** (in place), **copy**, **listen**, **info** (model, time,
-estimated size), **+1 / -1** rating, **continue** (extends the reply), **regenerate** (with any
-model) and **delete**.
-
-Code in a reply lands in its own box with the language, a **copy** button and a check result.
-When a reply finishes, every fenced code block whose language starfire knows is parsed or
-compiled on the server - Python (`compile`), JavaScript and TypeScript (`node --check`),
-shell (`bash -n`), JSON, YAML, TOML and XML (parsers), Go (`gofmt -e`), C and C++
-(`cc -fsyntax-only`), Ruby (`ruby -c`) and PHP (`php -l`) - and never executed. A block that
-passes shows **✓ syntax ok**; a block that fails is sent back to the same model with the error,
-up to twice, and the corrected version replaces it in the reply (**✓ fixed · syntax ok**, with
-the original error in the tooltip). If it still fails, the original stays with **✗ syntax
-error** and the line number, so you know before you paste. The copy button is disabled while a
-block is being checked. Languages whose checker isn't installed on this machine are left
-unmarked. Switch the whole thing off under **Settings → General**.
-
-Every checker runs in its own process under `prlimit`: 512 MB of memory (1 GB for node), 10 s of
-CPU, files up to 8 MB, no core files, and inside bubblewrap at most 32 processes and no network.
-A check is stopped after 20 s. The server reads at most 64 KB of a checker's output, and the C
-compilers stop after 20 errors. C and C++ only compile code whose `#include` lines name system
-headers such as `<stdio.h>` (comments and string literals are read the way the compiler reads
-them, and a comment right after `#` is refused), and the compiler's sandbox holds only the system
-program folders (`/usr`, `/bin`, `/lib*`, `/etc/alternatives`), a private `/tmp` and the snippet,
-so an include that gets past the filter finds no other file. Two checks run at once on the whole
-server and one per account, and one account may use 20 seconds of checking in a minute, so two
-accounts cannot keep the checker busy for everyone else; a check beyond that is reported as busy.
-
-Your own messages have **edit**, **copy** and **delete**. Editing your
-message or regenerating branches the conversation - rather than mutating history in place,
-they create a new chat pointing back at the original up to that point (marked `↪` in the
-sidebar). The send button becomes a stop button while a reply is streaming (`Esc` stops it too). Every conversation autosaves
-as you go, and the history sent to the model is trimmed to the context length (8192 tokens
-unless set in controls).
-
-A status line under the message box shows the open chat at a glance and updates while a reply
-streams, for example `3 turns 10 steps · 27 tok/s | 108K tok · Cache hit 99% | ◔ 10%`:
-
-- **turns**: your messages in this chat.
-- **steps**: tool calls starfire ran for replies in this chat (counted from this version on; hidden
-  for models that run their own tools, such as Arty, because starfire cannot see those).
-- **tok/s**: speed of the latest reply. It is the model server's own timing when it reports one
-  (Ollama and ArtyEngine `eval_duration`, llama.cpp `timings`); otherwise it is measured from the
-  stream, leaving out time spent running tools. A `~` marks a figure estimated from characters
-  (about four per token) while the reply is still arriving.
-- **tok**: prompt plus reply tokens of the latest model call, as the server reported them.
-- **Cache hit**: the share of that prompt the server took from its prompt cache. Shown only when
-  the server reports cached prompt tokens (ArtyEngine `prompt_eval_cached_count`, OpenAI-style
-  `usage.prompt_tokens_details.cached_tokens`, llama.cpp `timings.cache_n`, Anthropic
-  `cache_read_input_tokens`); stock Ollama and Arty's brain do not, so it stays hidden there.
-- **ring**: how much of the context window those tokens fill. Shown only when the window is known,
-  which today means requests starfire sends straight to Ollama or ArtyEngine (`TASK_NUM_CTX` or the
-  chat's own context length).
-
-Anything the server did not report is left out rather than guessed. On a narrow screen the
-items drop off in this order: cache, steps, turns, speed, tokens; the ring stays. The figures are
-kept with each reply, so an old chat shows them again when opened. To get usage from
-OpenAI-style servers starfire asks for it (`stream_options.include_usage`); a server that
-refuses that option is asked again without it.
-
-If a model likely doesn't support tool-calling (or is small enough - under ~3B parameters -
-to be unreliable about *when* to use a tool rather than just answering directly), a banner
-warns you before you enable tools for it, and the backend withholds the tools list from that
-model's requests either way.
-
-New chats get a title and up to three tags, and each reply can be followed by three suggested
-follow-up questions you can click to send (all three can be switched off in Settings → General).
-These small jobs go to the chat's own model unless `TASK_MODEL` is set, in which case they go
-straight to that Ollama model instead. That keeps them out of an assistant's history and tool
-loop (Arty's brain, for example): point it at the model the assistant already has loaded, with
-`TASK_NUM_CTX` matching its context size, so Ollama doesn't load a second copy. Qwen3 models
-are asked not to think for these (Ollama's `think: false`). Every request starfire sends
-straight to Ollama (chats, these small jobs and the model warm-up) asks for `TASK_NUM_CTX` as
-its context size, unless the chat sets its own context length, and turns context shift off
-(`shift: false`), as Arty's brain does, so Ollama keeps the model it already has loaded.
-
-## Chats
-
-Chats are saved automatically after each exchange. Settings → Chats exports every chat as
-JSON, imports a starfire export or an Open WebUI chat export, archives all chats, lists tags,
-and has a delete-all (you type "delete all" to confirm). A conversation you haven't sent a
-message in yet is also kept as a local draft (browser `localStorage`) so a crash or an
-offline moment before the first backend save doesn't lose it.
-
-## Prompts
-
-Workspace → Prompts stores reusable prompts under a `/command`. Typing `/command` in the chat
-box inserts it, filling in `{{CURRENT_DATE}}`, `{{CURRENT_TIME}}`, `{{CURRENT_WEEKDAY}}` and
-`{{CLIPBOARD}}`.
-
-## Tools (MCP servers)
-
-Settings → Tools lets the model call external tools via the
-[Model Context Protocol](https://modelcontextprotocol.io). **Fetch** and **Memory** (two of the
-three official reference servers) are installed and connected automatically on first run - just
-enable their checkbox to use them in a chat. **Filesystem** (read/write within a directory you
-choose) stays a manual "Quick add" since it needs that directory choice first.
-
-### Signing in to online services
-
-**Sign in to an online service** at the top of the Tools tab lists hosted MCP servers that let
-starfire sign in through the browser, with nothing to paste: Notion, Linear, Atlassian, Sentry,
-Cloudflare, Stripe, PayPal, Canva and Webflow. Click one and starfire sends you to that
-service's own sign-in page; approve there and you come back to starfire with the server
-connected and its tools listed. The URL box under the list does the same for any other MCP
-server address that supports browser sign-in.
-
-How it works (the [MCP authorization spec](https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization)):
-starfire asks the server, reads its protected resource metadata and its sign-in server's
-metadata, registers itself as an app there (dynamic client registration), and sends you to the
-authorization page with PKCE (S256) and a one-time `state` tied to your starfire session. The
-sign-in must come back to the same session within 10 minutes and can be used once. The access
-and refresh tokens are encrypted like the other MCP secrets, never logged, and left out of
-backups. starfire renews the access token shortly before it runs out and again whenever the
-server answers 401; when the service refuses a renewal, the server shows **Needs sign-in
-again** with a button that runs the sign-in once more. Only admins can sign in to services,
-the same rule as adding any MCP server.
-
-A sign-in address the server names (its metadata, registration and token addresses) must be a
-public https address, checked again after its name is looked up; addresses on this computer or
-a private network are only used when the MCP server itself is on this computer. When the
-server signs in through a different site than its own address, starfire names that site and
-asks before sending you there. If the service is briefly unreachable when a token needs
-renewing, that one tool call fails and the next one tries again.
-
-The address the service sends you back to is
-`<the address you opened starfire at>/api/mcp/servers/sign-in/callback`, taken from your
-browser's own origin (it must match the host the request came to). If everyone opens starfire
-at one public address, set `PUBLIC_BASE_URL` to it and that address is used instead.
-
-Not in the list, with the reason found when they were checked on 13 Nov 2026: GitHub's hosted
-server and Asana's v2 server need an OAuth app registered by hand (no dynamic registration, so
-GitHub keeps the token form in the repository list); Asana's older server and Vercel only
-register apps whose return address is on the same computer (`localhost`), which a starfire
-on another machine is not; Hugging Face's server answers without a sign-in, so add it as a
-plain URL.
-
-An MCP server that is already running at a URL - the newer **streamable HTTP** transport or
-the older **SSE** one - is added from the same **Custom MCP server** form: pick the transport,
-paste the URL (for example `http://localhost:3001/mcp`) and, if the server wants one, an
-`Authorization` header value. Local servers stay stdio: a command plus arguments.
-
-Filesystem and MCP Memory need [Node.js](https://nodejs.org) (`npx`) installed locally; Fetch
-needs [uv](https://docs.astral.sh/uv/) (`uvx`). Beyond those three, a **server repository**
-dropdown lists other common MCP servers (Git, GitHub, GitLab, SQLite, Brave Search, Slack,
-Puppeteer) with a per-server configure form for whatever it needs (an API key/token, a local
-path, etc.) - or add any other stdio MCP server yourself by command + args. Enable a server's
-checkbox to include its tools in the next chat message - supported for Ollama (models with
-tool-calling support), OpenAI, and Anthropic.
-
-MCP servers run on the server with the settings and tokens the admin gave them, so only admin
-accounts can use them, the same rule as the shell, file edit and GitHub tools. Other accounts'
-chats run without them.
-
-The same Tools tab also has several built-in (non-MCP) tools - see Memory, Documents, Notes,
-Automations, and Email below for most of them, plus:
-
-- **Search the web** - a single no-API-key backend (DuckDuckGo's HTML results page); see
-  `server_configs/web_search.py`. Swapping in a proper provider later is a one-function change.
-- **Find images on the web** - DuckDuckGo image search (no API key). The model asks for a
-  picture of something, the top usable result is downloaded on the server (images only, 15 MB
-  cap, no private addresses) and stored with the other generated files, then shown in the chat
-  with a link to the page it came from. Nothing is hot-linked from the model's own guesses.
-- **⚠️ Run shell commands** - off by default. One general-purpose shell tool the model can call
-  directly, the same way coding agents use one shell tool rather than a curated command
-  set. **There is no sandbox under it** - it runs as your own user on your own machine, with
-  only a timeout (120s) and an output-size cap as guardrails. By default every command the
-  model proposes **waits in the chat for you to press "run it" or "reject"** (five minutes,
-  then it is dropped); the model only sees the output once you approve. You can switch that
-  off under the shell toggle if you really want it unattended. Only enable this in a chat (or
-  an automation, see below) that won't also be reading untrusted content (a webpage, an email)
-  in the same conversation - a tool the agent can call is reachable by prompt injection, and
-  this one has no floor under it if that happens. `ssh host 'command'` through this same tool
-  covers SSH; there's no separate SSH-specific tool.
-
-### Tool levels for local models
-
-Not every model can juggle fifteen tool schemas. starfire picks a level from the Ollama model's
-parameter count (the `7b`, `14b` in its name) and tells you in a banner above the chat:
-
-| Level | Models | What the model is given |
-|---|---|---|
-| none | under 3B, or known non-tool models | no tools at all, whatever you ticked |
-| basic | 3B up to 12B | web search, knowledge, memory, notes, find/generate images, scheduled tasks, plus MCP servers, capped at 8 tools in total |
-| full | 12B and up, and every hosted provider | everything you enabled |
-
-The thresholds are two constants at the top of `server_configs/model_capabilities.py`.
-
-## Memory
-
-Settings → Memory is a persistent fact store - "user prefers dark mode", "user's dog is named
-Rex" - that survives across chats. Add facts manually there, or just type `remember: ...` in
-the chat (handled instantly, without calling the model at all; the colon is required, and
-temporary and side chats send it to the model like any other message). Enable "Remember & recall
-facts" in Settings → Tools to let the model itself list, add, edit, delete, or search your
-memory during a conversation. Search is keyword/token overlap by default - fast,
-dependency-free, no setup - **optionally blended with semantic similarity** when a local Ollama
-with an embedding model (`nomic-embed-text` by default) is reachable, so a paraphrase with no
-shared words can still surface. No Ollama/embedding model pulled → falls back to exactly the
-old keyword-only behavior, automatically, with no configuration needed either way.
-
-## Knowledge (documents)
-
-Settings → Knowledge lets you upload `.txt`, `.md`, or `.pdf` files, which are chunked and
-indexed for the model to search. Enable "Search my documents" in Settings → Tools so the model
-can pull in relevant passages while answering. Same keyword-search-by-default,
-semantic-when-available behavior as Memory above.
-
-## Notes
-
-Settings → Notes is a to-do list / notes app - plain notes or checklists, with due dates,
-repeat (daily/weekly/monthly/yearly), pinning, labels, and color. Due dates accept natural
-language - "tomorrow", "next friday", "in 3 days", each optionally with "at 9am" / "at 14:30" -
-as well as a plain `YYYY-MM-DD` or full ISO datetime; anything not recognized as one of those
-phrases is assumed to already be an ISO date and passed through unchanged. Enable "Manage notes
-& to-dos" in Settings → Tools to let the model add/update/delete/toggle items itself (using the
-same natural-language dates).
-
-**Templates** - save a note/checklist's shape (title, content or checklist items, type, label,
-color, repeat) and instantiate it with one click instead of rebuilding a recurring structure by
-hand. Five starter templates (Meeting notes, Daily to-do, Weekly review, Shopping list, Project
-brainstorm) are seeded on first run.
-
-Two things worth knowing:
-- **Recurring due dates only advance while the Notes tab is open** - a lightweight timer
-  checks for overdue repeating notes and pushes their due date forward one period at a time.
-  The server never rewrites a due date on its own; only a browser tab open on the Notes page does.
-- **No reminder popups, emails, or push notifications** - a proper reminder system is a large
-  subsystem of its own (delivery channels, SSRF-guarded webhooks, a background poller, a dedup
-  cache). starfire shows overdue/due-today notes with a highlighted badge in the list
-  instead. If you want to be notified outside the app, that's not built.
-
-## Audio & Images (local generation)
-
-Settings → Audio & Images configures fully local image, audio, and video generation - no API key,
-no hosted service, no content moderation layer other than whatever model you load:
-
-- **Image** - via [ComfyUI](https://github.com/comfyanonymous/ComfyUI), a plain local server
-  (same trust model as Ollama). Point starfire at your ComfyUI base URL and checkpoints
-  directory; a generic URL-based downloader can pull any checkpoint file you give it a link to
-  - starfire doesn't curate or recommend which ones. Low/medium/high quality presets trade off
-  steps and resolution.
-- **Audio** - via [Piper](https://github.com/rhasspy/piper), a one-shot local CLI (not a
-  server) with low/medium/high quality voice variants you download per-voice.
-- **Video** - no fixed built-in workflow (the ecosystem is too fragmented for one); export a
-  working ComfyUI workflow graph as JSON, tell starfire which node/input holds the prompt text,
-  and save it under a name. The `generate_video` tool then queues it by name.
-
-Enable the corresponding tool (Generate image / Generate audio / Generate document) in Settings
-→ Tools. If local generation isn't configured, image/audio generation fall back to OpenAI's API
-(DALL-E/TTS) when a hosted OpenAI endpoint is configured - otherwise they're unavailable.
-
-## Automations
-
-Settings → Automations schedules a prompt to be sent to a model on a repeating basis (once,
-daily, weekly, or a cron expression) and records what came back. Pick which tools that run may
-use from the same list as chat (memory, documents, tasks, email, notes, web search, and - if you
-choose to enable it - shell). There's no separate "run a shell command" task type;
-a task is "send a prompt, with these tools available" and reuses the model's
-normal tool-calling for that, one mechanism rather than two. The same warning as the chat
-toggle applies: only give an automation the shell tool if it isn't also going to encounter
-untrusted content - an automation runs unattended, so there is nobody to approve its commands
-and they run straight away. The tool levels above apply to automations too.
-
-## Email
-
-Settings → Email connects a mailbox via IMAP/SMTP with an **app password** (Gmail, Outlook,
-iCloud, Fastmail, or any provider that issues one - no OAuth, no Google Cloud project setup).
-Once connected you get a simple inbox: browse folders, read, reply, send, mark read, archive,
-delete, plus three on-demand AI actions per message - Summarize, Check Urgency, and AI Draft
-Reply. Enable "Read & send email" in Settings → Tools to let the model do the same during a
-conversation.
-
-Every action opens a live IMAP/SMTP connection - there's no background inbox sync or caching,
-so listing a folder takes a moment each time rather than being instant from a local cache.
-That's the deliberate tradeoff for not needing a database or a background sync service.
-
-Mail runs on its own four threads. Each mail call has 60 seconds in total, connection and every
-reply included, and is cut off after that. An account may have two mail calls running at once and
-make `MAIL_REQUESTS_PER_MINUTE` (60) mail requests a minute, admins included; past either it gets
-a 429 with `Retry-After`. Over IMAP a mail server may send at most 32 MB for one request, every
-line counted with 256 bytes more for what it costs to keep, so a flood of short lines is stopped
-before it fills memory; a message larger than 25 MB is read up to 25 MB and says so at its end.
-Over SMTP one reply may be at most 64 KB and each of its lines at most 2 KB. Ordinary accounts can
-only use mail servers on public addresses.
-
-## Compare
-
-The **compare** button (header) opens a side-by-side view: one prompt, sent to as many
-model/endpoint columns as you add, streamed in parallel. Useful for actually seeing how two
-models answer the same thing rather than guessing.
-
-## Deep Research & GitHub
-
-Two more builtin tools in Settings → Tools:
-
-- **Deep research** - searches the web, reads the top results, and returns a synthesized,
-  cited report in one tool call. Slower and more thorough than the plain "Search the web" tool;
-  use it for open-ended questions, not quick lookups.
-- **GitHub (gh CLI)** - runs the `gh` binary only (not arbitrary shell), so the model can list
-  issues, open PRs, check CI, etc. Needs `gh` installed and already authenticated
-  (`gh auth login`) - this tool doesn't manage credentials itself. It only runs issue, pr, repo,
-  release, run, workflow, label, gist, search, status, api, org, project, ruleset, cache, browse and
-  `auth status`; reads with known flags run straight away, everything else waits for an approval
-  card. Flags that can print the token (`--show-token`, `--jq`, `-q`, `--template`, `-t`) are
-  always refused, and `alias`, `extension`, `config`, `secret`, `codespace` and `auth token` never
-  run.
-
-## Presets
-
-Workspace → Models (presets) saves the current (model + system prompt + enabled tools) as a named preset
-you can reapply with one click, instead of reconfiguring the header and toggles every time.
-
-## Usage
-
-Settings → Usage shows estimated token counts and cost, today and all-time, broken down by
-model. Token counts are estimated (~4 chars/token) and cost is looked up from a small static
-price table for known hosted models - not a substitute for your provider's own billing page,
-but enough to see where usage is trending. Ollama/local models always show $0.
-
-## Hardware
-
-Settings → Hardware detects this machine's RAM/VRAM (capacity - does a model fit?) and
-CPU/GPU/RAM identity and speed (roughly, will it run well?), then suggests which common
-Ollama-pullable models should actually work - instead of guessing and hitting an
-out-of-memory error or a model that swaps to disk and crawls. Detection works on Linux, macOS,
-and Windows; GPU VRAM/name needs `nvidia-smi` (NVIDIA only), and RAM speed/type needs
-`dmidecode` **and root** on Linux specifically (macOS/Windows can read it as a normal user).
-
-**Model server status** is also shown here, naming the backend that answered (Ollama or
-ArtyEngine). If Ollama is installed but nothing is running, a **Start Ollama**
-button launches it (no elevated privileges needed - same as running `ollama serve` yourself);
-starfire also tries this automatically on its own startup. If Ollama isn't installed at all,
-the tab shows the right install step for your OS (the official installer command on Linux,
-a download link for macOS/Windows) - starfire won't run that installer for you, since Ollama's
-own Linux installer needs `sudo`.
-
-### Pulling models
-
-Click **pull** next to any suggested model in the Hardware tab (or in Settings → Connections) to
-download it through Ollama with a progress bar, same UX as Ollama's own CLI. To pull a model
-manually instead - useful for scripting, a headless box, or a model not in the suggested
-list - use Ollama's CLI directly:
-
-```bash
-ollama pull llama3.1:8b        # any model from https://ollama.com/library
-ollama pull qwen2.5-coder:7b
-```
-
-A model pulled this way shows up in starfire's model list immediately; no restart needed.
-`ollama list` shows what's already pulled, and `ollama rm <model>` removes one.
-
-## Backup & restore
-
-Settings → Data can download a zip of the whole `data/` directory, or restore one - the same
-thing the manual "copy the data folder" step below does, through the UI. Restoring **overwrites
-your current data** and can't be undone; back up first if you're not sure.
-
-The zip carries no credentials: it leaves out `.key`, `api_keys.json`, `sessions.json`, any
-`.env` and any temp or backup copy of these files or of `mcp_servers.json` (such as
-`.sessions.json.*.tmp` or `mcp_servers.json.bak`), and blanks MCP server tokens and header values. Credentials inside MCP server arguments
-and URLs are replaced with `__secret_removed__`: a password in a URL, a query value whose name
-looks like a key, token, secret, password or auth, the value after a flag such as `--api-key`,
-`--token` or `--password`, and `NAME=value` or `Name: value` arguments with such names. A secret
-passed as a bare argument with none of these markers can't be told apart from a file name, so
-give tokens to MCP servers as env values. After restoring on a new install, enter
-provider API keys, email passwords and MCP tokens again (the settings page marks email accounts
-and MCP servers that need it; remove and add them again). Restoring on the same install keeps
-the MCP tokens, arguments and URLs of servers that still exist there. Account records keep their bcrypt
-password hashes, so everyone can still log in. Restoring an older zip that still holds `.key` or
-`api_keys.json` restores everything else and keeps this install's own keys.
-
-## Command palette
-
-`Ctrl+K` / `Cmd+K` opens a fuzzy-filterable list of actions - new chat, export, open any
-settings tab, compare models, toggle theme, keyboard shortcuts. Arrow keys to navigate, Enter
-to run, Escape to close.
-
-## Docker
-
-The easiest way to run it in Docker is via the included compose file:
+Or with Docker:
 
 ```bash
 cp .env.example .env
 docker compose up -d --build
 ```
 
-A host-run Ollama is reachable from inside the container via `host.docker.internal`.
-Data persists in `./data` on the host (mounted as a volume), so it survives container
-rebuilds and restarts.
+The first time you open starfire it shows a setup page. Enter the one-time setup code from starfire's log, then choose
+your name, email and a password (at least 10 characters). Until the admin account exists, every other page and API
+call is locked, so set it up straight away. More in [Logging in and accounts](docs/accounts.md).
 
-### Building the image manually
+## Documentation
 
-If you don't want compose, build and run the image directly:
+| Page | What is in it |
+|---|---|
+| [Install](docs/install.md) | Requirements, running from source, Docker |
+| [Logging in and accounts](docs/accounts.md) | First-run setup code, passwords, the admin and other accounts |
+| [Model servers and providers](docs/model-servers.md) | How Ollama and ArtyEngine are found, hosted providers, hardware and pulling models |
+| [Interface](docs/interface.md) | Sidebar, model picker, message box, settings, keyboard shortcuts, command palette |
+| [Chat](docs/chat.md) | Arty Auto, replies, code checks, status line, saved chats, prompts, compare, presets, usage |
+| [Tools](docs/tools.md) | MCP servers, signing in to online services, built-in tools, tool levels |
+| [Memory, knowledge and notes](docs/memory-knowledge-notes.md) | Facts, documents and notes, for you and for the model |
+| [Audio and images](docs/media-generation.md) | Local image, audio and video generation |
+| [Automations](docs/automations.md) | Scheduled prompts |
+| [Email](docs/email.md) | IMAP and SMTP mail |
+| [Arty, Arty CLI and starfire.ai](docs/arty.md) | How the three projects link together |
+| [Backup and restore](docs/backup.md) | Downloading and restoring the data folder |
+| [Configuration](docs/configuration.md) | Every environment variable |
+| [Data and security](docs/data-and-security.md) | What is stored where and how |
+| [Features](docs/features.md) | The full feature list |
+| [Development](docs/development.md) | Tests and the build |
+| [starfire Desktop](desktop/README.md) | Install, set up, link with Arty Desktop, build |
+| [Changelog](CHANGELOG.md) | What changed in each release |
 
-```bash
-docker build -t starfire.ai .
-docker run -d -p 127.0.0.1:8080:8080 -v $(pwd)/data:/app/data --add-host host.docker.internal:host-gateway starfire.ai
-```
+## Releases
 
-To push the built image to a registry instead of just running it locally:
-
-```bash
-docker tag starfire.ai ghcr.io/<your-username>/starfire.ai:latest
-docker push ghcr.io/<your-username>/starfire.ai:latest
-```
-
-(swap `ghcr.io/<your-username>` for Docker Hub's `<your-username>/starfire.ai` if you'd
-rather use that instead)
-
-## Configuration
-
-| Variable | Default | Notes |
-|---|---|---|
-| `PORT` | `8080` | Port the server listens on |
-| `BIND_HOST` | `127.0.0.1` | Address to listen on; keep it on loopback unless an account exists, since the shell tool can run commands |
-| `COOKIE_SECURE` | `true` | Set to `false` to allow the login cookie over plain HTTP on a trusted network |
-| `OLLAMA_BASE_URL` | _(auto-detect)_ | Override auto-detection with a specific Ollama URL (or an Ollama-compatible server such as ArtyEngine) |
-| `DATA_DIR` | `./data` | Where endpoint config and encrypted API keys are stored |
-| `TASK_MODEL` | _(chat's model)_ | Ollama model for titles, tags and follow-up suggestions |
-| `TASK_NUM_CTX` | `24576` | Context size for every request sent straight to Ollama (chats, `TASK_MODEL` jobs, warm-up); match the loaded model's to avoid a reload, `0` leaves it to Ollama |
-| `ARTY_BASE_URL` | _(unset)_ | Arty's API address (for example `http://<arty-host>:8081/v1`). Must match an Arty connection under Settings > Connections that has Arty's API key; turns on the Arty devices page |
-| `ARTY_PHONE_URL` | _(Arty's address)_ | The address a phone should use in the setup QR code made on the Arty devices page (for example Arty's public address) |
-| `ARTY_ACCESS_CLIENT_ID` / `ARTY_ACCESS_CLIENT_SECRET` | _(unset)_ | Cloudflare Access service token put in the phone setup QR code, only when both are set |
-| `OWN_TOOLS_MODELS` | `Arty,assistant-core,arty/*` | Comma-separated model ids (with `*` wildcards) that bring their own tools: the tools menu hides for them and starfire sends them none (`assistant-core` is Arty's old name, kept for saved chats). Add the pattern of any other brain model that runs with Arty's tools |
-| `INLINE_MEDIA_PREFIXES` | `/arty-files/` | Comma-separated path prefixes whose image and video links render inline in replies; links to another host with one of these paths load through this server instead |
-| `MODEL_VOICES` | (empty) | Comma-separated `pattern=voice.onnx@speed` rules giving models a server voice (Piper, `*` wildcards, speed 0.5 to 2, default 1). With read-aloud or a voice call on, a matching model's reply is spoken sentence by sentence while it streams, instead of by the browser at the end |
-| `MODEL_VOICES_DIR` | `<DATA_DIR>/voices` | Folder holding the `.onnx` voices (and their `.onnx.json`) named in `MODEL_VOICES` |
-| `TRUSTED_PROXIES` | `127.0.0.1,::1` | Comma-separated addresses or networks of proxies in front of starfire. The login lockout follows `X-Forwarded-For` back through these hops to the visitor; when every hop is trusted (a Cloudflare tunnel's `cloudflared` included), the visitor's address is read from `CLIENT_IP_HEADER`. List only machines that set those headers themselves |
-| `CLIENT_IP_HEADER` | `CF-Connecting-IP` | Header holding the visitor's address, read only when the request came through trusted proxies alone |
-| `MAX_DOCUMENT_MB` | `20` | Largest knowledge document one upload may be |
-| `MAX_ATTACHMENTS_MB` | `1024` | Total size of one account's chat attachments (each kept 30 days) |
-| `MAX_DOCUMENTS_MB` | `512` | Total size of one account's knowledge documents once their text is stored |
-| `MAX_RESTORE_MB` | `1024` | Largest backup zip Settings → Data will restore |
-| `MIN_FREE_DISK_MB` | `512` | Uploads, restores and backups are refused when they would leave less free disk than this next to `DATA_DIR` |
-| `PUBLIC_BASE_URL` | _(unset)_ | The one address everyone opens starfire at (for example `https://starfire.example.com`). When set, MCP browser sign-ins return there; when unset they return to the address the browser used. Leave it unset if people use more than one address, since a sign-in must finish on the host it started on |
-| `EDIT_ALLOWED_ROOTS` | _(none)_ | Comma-separated folders an admin's `edit_file` may write besides the account's own workspace (`<DATA_DIR>/users/<id>/workspace`). The data and app folders are never editable |
-| `RESTRICTED_MODELS` | `*-abl,*-abl-*,*abliterated*,*uncensored*` | Comma-separated model ids (`*` wildcards, any case) that ordinary accounts can neither see nor use. A model matches when its name does with or without its `:tag` or `@digest` and with any leading `namespace/` parts removed. Admins use every model; under Settings > Accounts > models an admin can instead give an account its own list. In that list, patterns and names without a tag still leave out every restricted model; only a restricted model's full name (with or without `:latest`) lets that account use it |
-| `GENERATIONS_PER_MINUTE` | `20` | Model replies an ordinary account may ask for in a minute (chats, helper calls, email AI actions); `0` turns the limit off. Admins are not limited |
-| `MAIL_REQUESTS_PER_MINUTE` | `60` | Mail requests (email pages and the email tool) one account may make in a minute, admins included; `0` turns the limit off. Two mail calls per account run at once, each cut off after 60 seconds |
-| `GENERATIONS_PER_DAY` | `400` | Model replies an ordinary account may use in a UTC day, scheduled automations and email rules included; `0` turns the limit off |
-| `SESSION_CHECK_HOSTS` | _(none)_ | Extra `host:port` names, comma-separated, on which `GET /api/auth/me` answers for a session made on any host. `127.0.0.1:<PORT>`, `localhost:<PORT>` and `[::1]:<PORT>` are always included, so a service on the same machine can ask who a browser's cookie belongs to. Every other request only accepts a session on the host it was signed in on |
-
-Hosted-provider API keys are **not** set via environment variables - add them through the
-Settings UI so they're encrypted at rest rather than sitting in plaintext in `.env`.
-
-## Data & security
-
-- `data/endpoints.json` - configured model endpoints (base URLs, non-secret).
-- `data/api_keys.json` - API keys, encrypted with [Fernet](https://cryptography.io/en/latest/fernet/),
-  `chmod 600` (owner-only).
-- `data/.key` - the per-install encryption key, `chmod 600` (owner-only).
-- `data/mcp_servers.json` - configured MCP servers; env and header values (tokens), arguments,
-  URLs and browser sign-in tokens are encrypted with the same key as `api_keys.json`.
-- `data/users.json` / `data/sessions.json` - accounts (bcrypt hashes) and login sessions.
-- `data/users/<id>/` - one folder per account holding that person's `memory.json`,
-  `documents.json`, `tasks.json` / `task_runs.json`, `email_accounts.json` / `email_rules.json`
-  (host/port/username, match/action config - all non-secret; the app password itself is
-  encrypted in `data/api_keys.json` alongside provider API keys), `notes.json` /
-  `note_templates.json`, `chat_sessions.json`, `chat_folders.json`, `presets.json`,
-  `prompts.json`, `usage.json`, `generated_files.json` + `generated/`, and `attachments/`.
-- `data/comfyui_config.json` / `data/piper_config.json` / `data/custom_workflows.json` - local
-  image/audio/video generation config (see Local generation above); non-secret, no API keys
-  involved.
-
-Back up or delete the whole `data/` directory to reset the app (or use Settings → Data's
-one-click backup/restore, which leaves keys and passwords out); deleting `data/.key` makes any
-stored keys unrecoverable.
-
-## Features
-
-- Multi-provider chat: Ollama (local or Ollama Cloud), OpenAI, Anthropic, and any
-  OpenAI-compatible server, over one unified streaming UI
-- Ollama auto-detected and auto-started on startup; one-click install guidance, manual add,
-  or network-scan for anything else
-- Light, dark and system themes from one token set, with no flash on load; toasts; a
-  keyboard shortcuts sheet; an account menu; phone layout with a drawer and bottom sheets
-- Chat-app layout: chat sidebar with folders, pins, tags, archive and date groups;
-  searchable model picker with a default model; `/` prompts, `#` knowledge, `@` model
-  mentions; file attachments; chat controls (system prompt + sampling params); temporary
-  chats; `/side` and `/btw` side chats; hands-free voice call; reply rating, info, continue
-  and in-place edit
-- Conversation branching (edit/regenerate fork into a new session rather than overwriting
-  history), autosaved chats with search, JSON export/import (including Open WebUI exports)
-- Encrypted local API-key storage, no plaintext secrets on disk
-- Tool-calling via MCP servers (filesystem, fetch, memory, a repository of common servers with
-  per-server configure forms, or any custom stdio server), with a warning - and server-side
-  enforcement - when the selected model likely can't use tools reliably
-- Persistent memory (keyword-searchable facts) and document RAG (upload & search .txt/.md/.pdf),
-  both usable by the model as tools or managed directly in Settings
-- Scheduled task automation (once/daily/weekly/cron prompts, run history) and email
-  (IMAP/SMTP with an app password: browse/read/send/reply/archive, rules that act on new mail
-  automatically, plus on-demand AI summarize/urgency-check/draft-reply), both usable by the
-  model as tools too
-- Notes and checklists with due dates, repeat, pinning, labels, and reusable templates -
-  usable by the model as a tool too
-- Fully local image/audio/video generation (ComfyUI/Piper, no API key, no hosted moderation)
-  with a hosted-API fallback when configured
-- Hardware detection (RAM/VRAM capacity, CPU/GPU/RAM identity and speed, cross-platform) with
-  model-fit suggestions and one-click pulls with progress bars
-- Incremental markdown rendering while responses stream; markdown, sanitiser, syntax
-  highlighting and the IBM Plex fonts are bundled in `static/vendor/`, so the UI makes no
-  request to any CDN or font service and works offline
-- Shell commands wait for your approval in the chat; find real images on the web; connect MCP
-  servers over streamable HTTP or SSE as well as stdio; tool levels sized to the local model
-- Code blocks are syntax-checked server-side when a reply finishes, with an automatic fix
-  round-trip to the model and a copy button on every block
-- Light/dark theme toggle
-- Optional system prompt (saved in browser), export chat as JSON, markdown or text
-- Multiple accounts, each with its own chats, memory, knowledge, notes, automations and email,
-  managed by the admin from Settings → Accounts
-- Runs 100% locally unless you opt in to a hosted provider - no telemetry, no cloud accounts
-
-## Desktop app
-
-[starfire Desktop](desktop/README.md) puts your starfire in its own window on Debian (AppImage) and Windows (installer):
-it asks for your starfire's address on first run, stays signed in, lives in the tray, opens a quick-ask window from a
-global shortcut (Ctrl+Shift+Space by default) and shows a notification when a reply finishes while the window is hidden.
-It is a small Electron shell in `desktop/`, separate from the server, and it only ever opens the address you give it.
-To install it, point it at your server, sign in and link it with Arty Desktop, follow
-[Set up starfire Desktop](desktop/README.md#set-up-starfire-desktop).
-With the Arty Desktop link on, an admin can ask the chat to "look at my discord": Arty asks you to Allow a screenshot and the model sees it.
-
-## Development
-
-`pip install -r requirements.txt pytest pyflakes`, then `python -m pytest -q` for the server
-and the static-file checks, and `node --test tests/js/` for the browser logic in
-`static/uiLogic.js` and the inline theme script (Node 20 or newer, no packages to install); the desktop
-app has its own tests (`cd desktop && npm test`).
-The pages and scripts are served as written, with no build step; the server sends static
-files gzip-compressed to browsers that accept it and leaves API replies and streams alone.
+The [releases page](https://github.com/drew-codes-things/starfire.ai/releases) holds two kinds of release. Server
+releases are tagged `v1.x` (the current one is [v1.1.0](https://github.com/drew-codes-things/starfire.ai/releases/tag/v1.1.0))
+and are the starfire server. Desktop releases are tagged `desktop-v1.x` (the current one is
+[desktop-v1.0.0](https://github.com/drew-codes-things/starfire.ai/releases/tag/desktop-v1.0.0)) and carry the
+starfire Desktop installers. They have separate version numbers.
 
 ## License
 
