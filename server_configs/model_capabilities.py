@@ -14,7 +14,7 @@ TOOL_TIERS = ("none", "basic", "full")
 
 BASIC_TIER_TOOLS = [
     "search_web", "search_documents", "manage_memory", "manage_notes",
-    "find_image", "generate_image", "manage_tasks", "look_at_screen",
+    "find_image", "generate_image", "manage_tasks", "look_at_screen", "open_in_browser",
 ]
 BASIC_TIER_MAX_TOOLS = 8
 

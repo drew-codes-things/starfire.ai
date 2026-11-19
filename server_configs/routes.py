@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 import auth
 import auth_routes
 import auto_model
+import browser_open
 import builtin_tools
 import code_check
 import model_access
@@ -878,7 +879,7 @@ def _task_chat_fn(endpoint_id, model, prompt, enabled_mcp_servers, enabled_built
     return run_chat_collected(
         endpoint.base_url, api_key, model, [{"role": "user", "content": prompt}],
         enabled_server_ids=set(enabled_mcp_servers),
-        enabled_builtin_tools=model_capabilities.tools_for_tier(tier, set(enabled_builtin_tools) - {builtin_tools.SCREEN_TOOL}),
+        enabled_builtin_tools=model_capabilities.tools_for_tier(tier, set(enabled_builtin_tools) - builtin_tools.DESKTOP_TOOLS),
         ctx=ctx, max_tools=model_capabilities.tool_cap_for_tier(tier),
     )
 
@@ -1381,6 +1382,7 @@ class ChatBody(BaseModel):
     require_shell_approval: bool | None = None
     earlier_untrusted_content: bool = False
     desktop_screen: bool = False
+    desktop_browser: bool = False
     memory_commands: bool = False
     session_id: str = ""
     reply_index: int = -1
@@ -1564,8 +1566,10 @@ async def chat_stream_endpoint(body: ChatBody):
         _remember_untrusted_content(user_data.current_user_id.get(), body.session_id)
     auto_chose_own_tools = bool(pick) and _brings_own_tools(model)
     screen_offered = body.desktop_screen and _current_user_is_active_admin()
-    requested_builtin_tools = (set(body.enabled_builtin_tools) - {builtin_tools.SCREEN_TOOL}) | (
-        {builtin_tools.SCREEN_TOOL} if screen_offered else set())
+    browser_offered = body.desktop_browser and _current_user_is_active_admin()
+    requested_builtin_tools = (set(body.enabled_builtin_tools) - builtin_tools.DESKTOP_TOOLS) | (
+        {builtin_tools.SCREEN_TOOL} if screen_offered else set()) | (
+        {builtin_tools.BROWSER_TOOL} if browser_offered else set())
     tools_requested = bool(body.enabled_mcp_servers or requested_builtin_tools) and not auto_chose_own_tools
     tools_usable = tools_requested and model_capabilities.supports_tools(endpoint.provider, model)
     if tools_usable:
@@ -1585,6 +1589,7 @@ async def chat_stream_endpoint(body: ChatBody):
                             interactive=True)
         ctx.untrusted_read = _turn_starts_with_untrusted_content(body)
         ctx.desktop_screen = screen_offered
+        ctx.desktop_browser = browser_offered
         tier = model_capabilities.tool_tier(endpoint.provider, model)
         generator = run_chat_with_tools(endpoint.base_url, api_key, model, messages,
                                           system, options, set(body.enabled_mcp_servers),
@@ -2126,6 +2131,35 @@ async def answer_screen_look(request_id: str, body: ScreenLookResultBody):
         raise HTTPException(400, str(error))
     if not answered:
         raise HTTPException(404, "no look is waiting with that id")
+    return {"ok": True}
+
+class BrowserOpenResultBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    ok: bool
+    browser: str = Field("", max_length=browser_open.MAX_BROWSER_CHARS)
+    tab: int | None = Field(None, ge=0, le=browser_open.MAX_TAB)
+    reason: str = Field("", max_length=40)
+    detail: str = Field("", max_length=browser_open.MAX_DETAIL_CHARS)
+
+@router.post("/browser-opens/{request_id}/claim")
+async def claim_browser_open(request_id: str):
+    _require_host_tool_access("open pages in a browser")
+    try:
+        return browser_open.claim(request_id, user_data.current_user_id.get())
+    except browser_open.NotWaiting:
+        raise HTTPException(404, "no open is waiting with that id (already answered, timed out, or the server restarted)")
+    except browser_open.AlreadyClaimed:
+        raise HTTPException(409, "that open was already taken up")
+
+@router.post("/browser-opens/{request_id}/result")
+async def answer_browser_open(request_id: str, body: BrowserOpenResultBody):
+    _require_host_tool_access("open pages in a browser")
+    try:
+        answered = browser_open.resolve(request_id, user_data.current_user_id.get(), body.model_dump())
+    except browser_open.BadAnswer as error:
+        raise HTTPException(400, str(error))
+    if not answered:
+        raise HTTPException(404, "no open is waiting with that id")
     return {"ok": True}
 
 @router.get("/pending-edits")

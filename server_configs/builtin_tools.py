@@ -6,7 +6,9 @@ import re
 import shlex
 import unicodedata
 from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 
+import browser_open
 import comfyui_client
 import date_parsing
 import deep_research
@@ -329,6 +331,28 @@ TOOL_SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "open_in_browser",
+            "description": "Open a web page in one of the user's own browsers on their PC, through starfire Desktop "
+                            "and Arty Desktop. The user is asked to allow it first and sees the exact address and "
+                            "browser. Nothing from the page comes back: you do not see what it shows. Use it when "
+                            "they ask you to open a page or link for them. If it fails, say plainly that you could "
+                            "not open it; never guess why or what the page shows.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "the full http:// or https:// address to open, "
+                                                              "with no spaces"},
+                    "browser": {"type": "string", "description": "the browser to use, such as Firefox or Chrome. "
+                                                                  "Leave empty to let Arty Desktop pick the only "
+                                                                  "connected one."},
+                },
+                "required": ["url"],
+            },
+        },
+    },
 ]
 
 _TOOL_NAMES = {t["function"]["name"] for t in TOOL_SCHEMAS}
@@ -337,6 +361,8 @@ NO_ONE_TO_ASK = ("error: this needs the user's approval, and nobody is there to 
 HOST_TOOLS = frozenset({"run_shell", "edit_file", "github_cli"})
 MCP_TOOL_PREFIX = "mcp__"
 SCREEN_TOOL = "look_at_screen"
+BROWSER_TOOL = "open_in_browser"
+DESKTOP_TOOLS = frozenset({SCREEN_TOOL, BROWSER_TOOL})
 UNTRUSTED_SOURCE_TOOLS = frozenset({"search_web", "deep_research", "find_image", "search_documents", "github_cli", SCREEN_TOOL})
 EMAIL_ACTIONS_THAT_READ_MAIL = frozenset({"list_messages", "search", "read_message", "summarize", "draft_reply",
                                           "check_urgency"})
@@ -346,7 +372,7 @@ STATE_CHANGING_ACTIONS = {
     "manage_memory": frozenset({"add", "edit", "delete"}),
     "manage_notes": frozenset({"add", "update", "delete", "toggle_item"}),
 }
-TOOLS_THAT_ASK_FOR_THEMSELVES = frozenset({"run_shell", "edit_file", "github_cli", SCREEN_TOOL})
+TOOLS_THAT_ASK_FOR_THEMSELVES = frozenset({"run_shell", "edit_file", "github_cli", SCREEN_TOOL, BROWSER_TOOL})
 MAX_APPROVAL_SUMMARY_CHARS = 20_000
 CARD_FIELDS_FIRST = ("action", "to", "account_id", "uid", "folder", "subject", "schedule", "scheduled_time",
                      "cron_expression", "task_id", "note_id", "memory_id", "id", "endpoint_id", "model")
@@ -378,6 +404,7 @@ class ToolContext:
     may_use_host_tools: bool = False
     untrusted_read: bool = False
     desktop_screen: bool = False
+    desktop_browser: bool = False
     host_limits: HostLimits = HostLimits()
     events: "asyncio.Queue | None" = None
     screen_images: list = field(default_factory=list)
@@ -517,6 +544,8 @@ async def call_builtin_tool(name: str, arguments: dict, ctx: ToolContext) -> str
         return await _run_shell(arguments, ctx)
     if name == SCREEN_TOOL:
         return await _look_at_screen(arguments, ctx)
+    if name == BROWSER_TOOL:
+        return await _open_in_browser(arguments, ctx)
     raise ValueError(f"unknown builtin tool: {name}")
 
 def _find_openai_endpoint(ctx: ToolContext) -> tuple[str, str] | None:
@@ -749,6 +778,54 @@ async def _look_at_screen(arguments: dict, ctx: ToolContext) -> str:
     result = _screen_success(outcome)
     ctx.screen_images.append({"mime": outcome["mime"], "image": outcome["image"], "caption": result})
     return result
+
+def _refused_web_address(url) -> str | None:
+    if not isinstance(url, str) or not url:
+        return "error: url is required and must be text"
+    if len(url) > browser_open.MAX_URL_CHARS:
+        return f"error: url is longer than {browser_open.MAX_URL_CHARS} characters"
+    if any(character == " " or _is_unshowable_character(character) for character in url):
+        return "error: url must not contain spaces, line breaks or hidden characters"
+    if not url.startswith(browser_open.WEB_SCHEMES) or not urlsplit(url).hostname:
+        return "error: url must be a full http:// or https:// web address"
+    return None
+
+def _refused_browser_name(browser) -> str | None:
+    if browser == "" or browser_open.is_browser_name(browser):
+        return None
+    return "error: browser must be empty or one of " + ", ".join(browser_open.BROWSER_NAMES)
+
+def _browser_open_failure(url: str, outcome: dict) -> str:
+    reason = browser_open.REASON_TEXTS.get(outcome.get("reason"), browser_open.DEFAULT_REASON_TEXT)
+    detail = _clean_detail(outcome.get("detail"))
+    said = f' It said: "{detail}".' if detail else ""
+    return (f"error: could not open {url}: {reason}.{said} Nothing was opened. "
+            "Tell the user plainly that you could not open it. Do not guess why or what the page shows.")
+
+def _browser_open_success(url: str, requested: str, outcome: dict) -> str:
+    browser = outcome.get("browser") or requested or "their browser"
+    tab = outcome.get("tab")
+    where = f"{browser}, tab {tab}" if isinstance(tab, int) else browser
+    return (f"Opened {url} in {where}. Nothing from the page was read: you have not seen what it shows, "
+            "so do not describe its content.")
+
+async def _open_in_browser(arguments: dict, ctx: ToolContext) -> str:
+    if not ctx.may_use_host_tools:
+        return f"error: only an admin account can use {BROWSER_TOOL}, because it acts on their computer"
+    if not ctx.desktop_browser:
+        return f"error: {BROWSER_TOOL} is only available in starfire Desktop with the link to Arty Desktop connected"
+    if not can_ask_the_user(ctx):
+        return NO_ONE_TO_ASK
+    url, browser = arguments.get("url"), arguments.get("browser", "")
+    refusal = _refused_web_address(url) or _refused_browser_name(browser)
+    if refusal:
+        return refusal
+    request_id = browser_open.stage(url, browser, user_data.current_user_id.get())
+    await ctx.emit({"browser_request": {"request_id": request_id, "url": url, "browser": browser}})
+    outcome = await browser_open.wait_for_open(request_id)
+    if outcome.get("ok") is not True:
+        return _browser_open_failure(url, outcome)
+    return _browser_open_success(url, browser, outcome)
 
 def take_screen_images(ctx: ToolContext) -> list[dict]:
     images = list(getattr(ctx, "screen_images", []) or [])
