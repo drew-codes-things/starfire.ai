@@ -2,6 +2,7 @@ import ipaddress
 import os
 import stat
 import sys
+import threading
 
 import bcrypt
 import pytest
@@ -260,6 +261,44 @@ def test_wrong_setup_codes_lock_out_the_address(setup_client, users):
     locked = setup_client.post("/api/auth/setup", json=setup_body())
     assert locked.status_code == 429
     assert not users.has_users()
+
+
+def test_wrong_setup_codes_sent_at_once_cannot_pass_the_limit(setup_client, monkeypatch):
+    import auth_routes
+    from fastapi import HTTPException
+    burst = 2 * auth.MAX_FAILED_LOGINS
+    monkeypatch.setattr(auth_routes, "address_attempts", LoginLimiter(max_failures=burst + 1))
+    entered = threading.Semaphore(0)
+    release = threading.Event()
+    real_matches = auth_routes.setup_code.matches
+
+    def held_matches(code):
+        entered.release()
+        release.wait(timeout=10)
+        return real_matches(code)
+
+    monkeypatch.setattr(auth_routes.setup_code, "matches", held_matches)
+    statuses = []
+    request = Request({"type": "http", "method": "POST", "path": "/api/auth/setup", "headers": [],
+                       "client": ("203.0.113.7", 40000)})
+
+    def guess():
+        try:
+            auth_routes._check_setup_code("guess", request)
+        except HTTPException as refused:
+            statuses.append(refused.status_code)
+
+    threads = [threading.Thread(target=guess) for _ in range(burst)]
+    for thread in threads:
+        thread.start()
+    compared = 0
+    while compared + statuses.count(429) < burst and entered.acquire(timeout=2):
+        compared += 1
+    release.set()
+    for thread in threads:
+        thread.join(timeout=10)
+    assert compared == auth.MAX_FAILED_LOGINS
+    assert sorted(statuses) == [401] * auth.MAX_FAILED_LOGINS + [429] * (burst - auth.MAX_FAILED_LOGINS)
 
 
 def test_bad_details_keep_the_setup_code_and_success_spends_it(setup_client, users, caplog):
