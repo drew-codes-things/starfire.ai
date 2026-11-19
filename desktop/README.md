@@ -5,7 +5,7 @@
 **starfire.ai in its own window on your Linux or Windows PC, with a tray icon, a quick-ask shortcut and desktop notifications.**
 
 [![Electron](https://img.shields.io/badge/electron-44-47848F?style=flat-square&logo=electron&logoColor=white)](https://www.electronjs.org/)
-[![Linux](https://img.shields.io/badge/linux-AppImage-FCC624?style=flat-square&logo=linux&logoColor=black)](https://appimage.org/)
+[![Linux](https://img.shields.io/badge/linux-.deb%20%7C%20AppImage-FCC624?style=flat-square&logo=linux&logoColor=black)](https://github.com/drew-codes-things/starfire.ai/releases/tag/desktop-v1.0.0)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square)](../LICENSE)
 
 </div>
@@ -23,7 +23,7 @@ so a new starfire release shows up in the app without updating it.
 
 ## Set up starfire Desktop
 
-You need a starfire server that is already running somewhere you can reach (see the main [README](../README.md#setup)),
+You need a starfire server that is already running somewhere you can reach (see the main [README](../README.md#quick-start)),
 and its address, for example `https://starfire.example.com`. The app is only a window onto that server: it does not
 contain one.
 
