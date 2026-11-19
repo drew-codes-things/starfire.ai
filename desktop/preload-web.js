@@ -6,5 +6,6 @@ if (isOffered) {
   contextBridge.exposeInMainWorld('starfireDesktopLink', {
     linkStatus: () => ipcRenderer.invoke('starfire-web:status'),
     lookAtScreen: (app) => ipcRenderer.invoke('starfire-web:look', { app: typeof app === 'string' ? app : '' }),
+    openInBrowser: (url, browser) => ipcRenderer.invoke('starfire-web:open', { url: typeof url === 'string' ? url : '', browser: typeof browser === 'string' ? browser : '' }),
   });
 }

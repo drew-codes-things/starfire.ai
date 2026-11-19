@@ -1,6 +1,6 @@
 {
   "name": "starfire-desktop",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "productName": "starfire",
   "description": "starfire.ai in its own window: your starfire, a tray icon, a quick-ask shortcut and notifications",
   "main": "main.js",

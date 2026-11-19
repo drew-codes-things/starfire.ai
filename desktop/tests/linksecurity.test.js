@@ -148,7 +148,7 @@ test('pairing with the real kind of Arty proves both sides and saves a token tha
     assert.doesNotMatch(record.body, /482913|482 913/);
     assert.ok(!record.body.includes(settings().artyToken));
   }
-  assert.deepEqual(await link.status(), { state: 'connected', paired: true, computer: true });
+  assert.deepEqual(await link.status(), { state: 'connected', paired: true, computer: true, capabilities: [], artyDesktop: '' });
   const statusCalls = arty.seen.slice(-2);
   assert.match(statusCalls[0].url, /^\/link\/proof\?nonce=[0-9a-f]{32}$/);
   assert.equal(statusCalls[0].token, null);
@@ -193,7 +193,7 @@ test('the reviewer\'s fake listener gets no code and no token, and the light nev
 test('a 403 from whatever answers does not forget the pairing', async () => {
   const forbidding = await listen((request, response) => send(response, 403, { error: 'no' }));
   const { link, settings } = linkFor(forbidding.port, { artyToken: SAVED_TOKEN });
-  assert.deepEqual(await link.status(), { state: 'unproven', paired: true });
+  assert.deepEqual(await link.status(), { state: 'unproven', paired: true, capabilities: [], artyDesktop: '' });
   assert.equal(settings().artyToken, SAVED_TOKEN);
   forbidding.server.close();
 });
@@ -402,7 +402,7 @@ test('a proof that is not 64 lowercase hex is unproven, never a crash or Node\'s
   for (const proof of ODD_PROOFS) {
     await withListener(answeringProofWith(proof), async (odd) => {
       const { link } = linkFor(odd.port, { artyToken: SAVED_TOKEN });
-      assert.deepEqual(await link.status(), { state: 'unproven', paired: true }, String(proof));
+      assert.deepEqual(await link.status(), { state: 'unproven', paired: true, capabilities: [], artyDesktop: '' }, String(proof));
       const tried = await link.tryLink();
       assert.match(tried.error, /did not prove/);
       const looked = await link.lookAtScreen('Discord');

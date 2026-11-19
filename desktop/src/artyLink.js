@@ -17,6 +17,18 @@ const PICTURE_SIGNATURES = { 'image/jpeg': [0xff, 0xd8, 0xff], 'image/png': [0x8
 const BASE64_FORMAT = /^[A-Za-z0-9+/]+={0,2}$/;
 const HIDDEN_CHARACTER = /[\p{C}\p{Z}]/u;
 const LOOK_REASONS = new Set(['declined', 'timed_out', 'not_found', 'cannot_see', 'off_limits', 'unavailable', 'busy', 'bad_request', 'ambiguous', 'changed', 'failed']);
+const OPEN_REASONS = new Set(['declined', 'timed_out', 'abandoned', 'busy', 'bad_request', 'no_browser', 'which_browser', 'not_connected', 'unavailable', 'failed']);
+const CAPABILITY_IDS = new Set(['screen.look', 'browser.open', 'browser.own', 'screen.control', 'quiz']);
+const BROWSER_CAPABILITY = 'browser.open';
+const MAX_CAPABILITIES = 10;
+const MAX_BROWSERS = 10;
+const BROWSER_NAME_FORMAT = /^(Chrome|Edge|Brave|Opera|Vivaldi|Chromium|Firefox)( [2-9])?$/;
+const BROWSER_STATES = new Set(['connected']);
+const MAX_BROWSER_CHARS = 40;
+const MAX_URL_CHARS = 2000;
+const WEB_ADDRESS_START = /^https?:\/\//;
+const ARTY_VERSION_FORMAT = /^\d+\.\d+\.\d+$/;
+const MAX_ARTY_VERSION_CHARS = 20;
 const PAIRING_CODE_FORMAT = /^[0-9]{6}$/;
 const SESSION_FORMAT = /^[0-9a-f]{32}$/;
 const PROOF_FORMAT = /^[0-9a-f]{64}$/;
@@ -116,6 +128,70 @@ function isPairingAnswer(body) {
   return SESSION_FORMAT.test(String(body.session)) && typeof body.share === 'string' && typeof body.proof === 'string';
 }
 
+function isPlainObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isBrowserName(name) {
+  return typeof name === 'string' && name.length <= MAX_BROWSER_CHARS && BROWSER_NAME_FORMAT.test(name);
+}
+
+function isWebAddress(url) {
+  if (typeof url !== 'string' || url.length > MAX_URL_CHARS || HIDDEN_CHARACTER.test(url)) return false;
+  if (!WEB_ADDRESS_START.test(url)) return false;
+  try {
+    return new URL(url).hostname !== '';
+  } catch (error) {
+    return false;
+  }
+}
+
+function connectedBrowsers(browsers) {
+  return browsers
+    .filter((browser) => isPlainObject(browser) && isBrowserName(browser.name) && BROWSER_STATES.has(browser.state))
+    .map((browser) => ({ name: browser.name, state: browser.state }));
+}
+
+function hasValidBrowsers(entry) {
+  if (!('browsers' in entry)) return true;
+  return entry.id === BROWSER_CAPABILITY && Array.isArray(entry.browsers) && entry.browsers.length <= MAX_BROWSERS;
+}
+
+function isCapability(entry) {
+  return isPlainObject(entry) && CAPABILITY_IDS.has(entry.id) && Number.isSafeInteger(entry.version) && entry.version > 0
+    && typeof entry.available === 'boolean' && hasValidBrowsers(entry);
+}
+
+function cleanCapability(entry) {
+  const capability = { id: entry.id, version: entry.version, available: entry.available };
+  if (entry.id === BROWSER_CAPABILITY) capability.browsers = connectedBrowsers(entry.browsers || []);
+  return capability;
+}
+
+function validCapabilities(raw) {
+  if (!Array.isArray(raw) || raw.length > MAX_CAPABILITIES) return [];
+  const seen = new Set();
+  const kept = [];
+  for (const entry of raw.filter(isCapability)) {
+    if (seen.has(entry.id)) continue;
+    seen.add(entry.id);
+    kept.push(cleanCapability(entry));
+  }
+  return kept;
+}
+
+function validArtyVersion(raw) {
+  return typeof raw === 'string' && raw.length <= MAX_ARTY_VERSION_CHARS && ARTY_VERSION_FORMAT.test(raw) ? raw : '';
+}
+
+function linkState(state, paired) {
+  return { state, paired, capabilities: [], artyDesktop: '' };
+}
+
+function connectedState(body) {
+  return { state: 'connected', paired: true, computer: body.computer === true, capabilities: validCapabilities(body.capabilities), artyDesktop: validArtyVersion(body.arty_desktop) };
+}
+
 function lookFailure(reason, error) {
   return { ok: false, reason, error };
 }
@@ -124,6 +200,16 @@ function describeLookRefusal(answer) {
   const body = bodyOf(answer);
   const reason = LOOK_REASONS.has(body.reason) ? body.reason : 'failed';
   return lookFailure(reason, typeof body.error === 'string' ? shownText(body.error) : `Arty Desktop answered ${answer.status}.`);
+}
+
+function describeOpenRefusal(answer) {
+  const body = bodyOf(answer);
+  const reason = OPEN_REASONS.has(body.reason) ? body.reason : 'failed';
+  return lookFailure(reason, typeof body.error === 'string' ? shownText(body.error) : `Arty Desktop answered ${answer.status}.`);
+}
+
+function openedTab(tab) {
+  return Number.isSafeInteger(tab) && tab >= 0 ? tab : null;
 }
 
 function createArtyLink({ getSettings, setToken, request = requestArty }) {
@@ -136,18 +222,18 @@ function createArtyLink({ getSettings, setToken, request = requestArty }) {
   async function status() {
     const settings = getSettings();
     const paired = settings.artyToken !== '';
-    if (!settings.artyLink) return { state: 'off', paired };
-    if (!paired) return { state: 'unpaired', paired: false };
+    if (!settings.artyLink) return linkState('off', paired);
+    if (!paired) return linkState('unpaired', false);
     let answer;
     try {
-      if (!(await isProvenArty(settings))) return { state: 'unproven', paired: true };
+      if (!(await isProvenArty(settings))) return linkState('unproven', true);
       answer = await request({ method: 'GET', path: '/link/status', token: settings.artyToken, port: settings.artyPort, timeoutMs: STATUS_TIMEOUT_MS });
     } catch (error) {
-      return { state: 'unreachable', paired: true };
+      return linkState('unreachable', true);
     }
-    if (answer.status === 403) return { state: 'unproven', paired: true };
-    if (answer.status !== 200 || bodyOf(answer).ok !== true) return { state: 'unreachable', paired: true };
-    return { state: 'connected', paired: true, computer: bodyOf(answer).computer === true };
+    if (answer.status === 403) return linkState('unproven', true);
+    if (answer.status !== 200 || bodyOf(answer).ok !== true) return linkState('unreachable', true);
+    return connectedState(bodyOf(answer));
   }
 
   async function finishPairing(settings, code, secret, share, started) {
@@ -231,7 +317,25 @@ function createArtyLink({ getSettings, setToken, request = requestArty }) {
     return { ok: true, image: body.image, mime: body.mime, target: shownText(body.target), window: shownText(body.window), note: shownText(body.note) };
   }
 
-  return { status, pair, unpair, tryLink, lookAtScreen };
+  async function openInBrowser(url, browser) {
+    const settings = getSettings();
+    if (!settings.artyLink) return lookFailure('not_linked', 'The link to Arty Desktop is off.');
+    if (settings.artyToken === '') return lookFailure('not_linked', 'Pair with Arty Desktop first.');
+    if (!isWebAddress(url)) return lookFailure('bad_request', 'That is not a web address that can be shown plainly on the Allow card.');
+    if (browser !== '' && !isBrowserName(browser)) return lookFailure('bad_request', 'That is not the name of a browser Arty Desktop knows.');
+    let answer;
+    try {
+      if (!(await isProvenArty(settings))) return lookFailure('not_linked', NOT_PROVEN);
+      answer = await request({ method: 'POST', path: '/link/browser', token: settings.artyToken, body: { action: 'open', url, browser }, port: settings.artyPort, timeoutMs: STEP_TIMEOUT_MS });
+    } catch (error) {
+      return lookFailure(NETWORK_FAILURES.includes(error.code) ? 'not_running' : 'failed', describeFailure(error));
+    }
+    const body = bodyOf(answer);
+    if (answer.status !== 200 || body.ok !== true) return describeOpenRefusal(answer);
+    return { ok: true, browser: isBrowserName(body.browser) ? body.browser : '', tab: openedTab(body.tab) };
+  }
+
+  return { status, pair, unpair, tryLink, lookAtScreen, openInBrowser };
 }
 
 module.exports = { createArtyLink, requestArty, LOOPBACK_HOST };

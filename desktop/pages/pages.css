@@ -138,3 +138,7 @@ body.quick { display: block; padding: 0; background: var(--bg); border: 1px soli
 .quick-body textarea { height: 70px; resize: none; font-size: 1rem; }
 .quick-hint { display: flex; justify-content: space-between; gap: 12px; margin-top: 8px; font-size: 0.8rem; color: var(--muted); }
 .quick-hint .status { margin: 0; min-height: 0; font-size: 0.8rem; }
+.capabilities { list-style: none; margin: 8px 0 0; padding: 0; }
+.capabilities li { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; font-size: 0.9rem; }
+.capability-on { color: var(--ok); }
+.capability-off { color: var(--muted); }

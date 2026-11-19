@@ -13,6 +13,9 @@
   const linkDetail = document.getElementById('link-detail');
   const linkCode = document.getElementById('link-code');
   const linkPairButton = document.getElementById('link-pair');
+  const capabilityPanel = document.getElementById('link-capabilities');
+  const capabilityList = document.getElementById('capability-list');
+  const CAPABILITY_LABELS = { 'screen.look': 'Look at your screen', 'browser.open': 'Open pages in your browsers', 'browser.own': "Arty's own browser", 'screen.control': 'Use your mouse and keyboard', quiz: 'Quiz helper' };
   const LINK_LABELS = { off: 'Off', unpaired: 'Not paired', unreachable: 'Arty Desktop is not running', unproven: 'Arty Desktop did not prove itself', connected: 'Connected' };
   const LINK_POLL_MS = 3000;
   const STEP_PREVIEW_CHARS = 300;
@@ -37,12 +40,36 @@
     return state.computer ? 'Arty Desktop computer control is on.' : 'Computer control is off in Arty Desktop, so it will refuse steps.';
   }
 
+  function capabilityLabel(capability) {
+    const label = CAPABILITY_LABELS[capability.id];
+    const browsers = Array.isArray(capability.browsers) ? capability.browsers.map((browser) => browser.name) : [];
+    return browsers.length > 0 ? `${label} (${browsers.join(', ')})` : label;
+  }
+
+  function capabilityItem(capability) {
+    const item = document.createElement('li');
+    const name = document.createElement('span');
+    name.textContent = capabilityLabel(capability);
+    const availability = document.createElement('span');
+    availability.className = capability.available ? 'capability-on' : 'capability-off';
+    availability.textContent = capability.available ? 'available' : 'not available';
+    item.append(name, availability);
+    return item;
+  }
+
+  function renderCapabilities(state) {
+    const known = state.state === 'connected' && Array.isArray(state.capabilities) ? state.capabilities.filter((capability) => Object.hasOwn(CAPABILITY_LABELS, capability.id)) : [];
+    capabilityList.replaceChildren(...known.map(capabilityItem));
+    capabilityPanel.hidden = known.length === 0;
+  }
+
   function renderLink(state) {
     linkLight.dataset.state = state.state;
     linkLabel.textContent = LINK_LABELS[state.state];
     linkPairing.hidden = state.state !== 'unpaired';
     linkPaired.hidden = !(state.paired && state.state !== 'off');
     linkDetail.textContent = linkPaired.hidden ? '' : linkDetailFor(state);
+    renderCapabilities(state);
   }
 
   async function refreshLink() {

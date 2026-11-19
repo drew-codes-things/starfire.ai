@@ -14,7 +14,7 @@ function frame(url, parent = null) {
   return { url, parent };
 }
 
-function setup({ settings = LINKED, linkStatus = { state: 'connected', paired: true, computer: true }, look = { ok: true, image: 'x' }, onMainPage = true } = {}) {
+function setup({ settings = LINKED, linkStatus = { state: 'connected', paired: true, computer: true, capabilities: [] }, look = { ok: true, image: 'x' }, opened = { ok: true, browser: 'Firefox', tab: 3 }, onMainPage = true } = {}) {
   const handlers = new Map();
   const listeners = new Map();
   const ipcMain = { handle: (channel, handler) => handlers.set(channel, handler), on: (channel, handler) => listeners.set(channel, handler) };
@@ -22,6 +22,7 @@ function setup({ settings = LINKED, linkStatus = { state: 'connected', paired: t
   const artyLink = {
     status: async () => { calls.push(['status']); return linkStatus; },
     lookAtScreen: async (app) => { calls.push(['look', app]); return look; },
+    openInBrowser: async (url, browser) => { calls.push(['open', url, browser]); return opened; },
     runComputer: async () => { throw new Error('the web bridge must never run a computer step'); },
     pair: async () => { throw new Error('the web bridge must never pair'); },
     unpair: async () => { throw new Error('the web bridge must never unpair'); },
@@ -71,10 +72,10 @@ test('the preload is told yes only for the starfire page in the main window with
   assert.equal(asksAllowed(setup({ settings: { ...LINKED, artyToken: '' } }).listeners, frame(`${ADDRESS}/`)), false);
 });
 
-test('the bridge has exactly three channels and the link channels of the app\'s own pages are not among them', () => {
+test('the bridge has exactly four channels and the link channels of the app\'s own pages are not among them', () => {
   const { handlers, listeners } = setup();
   assert.deepEqual([...handlers.keys(), ...listeners.keys()].sort(), Object.values(WEB_CHANNELS).sort());
-  assert.equal(Object.values(WEB_CHANNELS).length, 3);
+  assert.equal(Object.values(WEB_CHANNELS).length, 4);
   assert.ok(Object.values(WEB_CHANNELS).every((channel) => channel.startsWith('starfire-web:')));
 });
 
@@ -82,29 +83,38 @@ test('every call from anywhere but the starfire page is refused and does nothing
   const { handlers, calls } = setup();
   const strangers = [frame('https://example.org/'), frame(`${ADDRESS}/`, frame(`${ADDRESS}/`)), frame('file:///tmp/pages/settings.html'), null];
   for (const senderFrame of strangers) {
-    for (const channel of [WEB_CHANNELS.status, WEB_CHANNELS.look]) {
+    for (const channel of [WEB_CHANNELS.status, WEB_CHANNELS.look, WEB_CHANNELS.open]) {
       await assert.rejects(() => handlers.get(channel)({ senderFrame }, { app: 'Discord' }), /Refused/);
     }
+    await assert.rejects(() => handlers.get(WEB_CHANNELS.open)({ senderFrame }, { url: 'https://example.org/', browser: '' }), /Refused/);
   }
+  assert.equal(calls.length, 0);
+});
+
+test('an open from the starfire page in another window is refused and does nothing', async () => {
+  const { handlers, calls } = setup({ onMainPage: false });
+  await assert.rejects(() => handlers.get(WEB_CHANNELS.open)({ senderFrame: frame(`${ADDRESS}/`) }, { url: 'https://example.org/', browser: '' }), /Refused/);
   assert.equal(calls.length, 0);
 });
 
 test('calls are refused while the link is off or unpaired, even from the starfire page', async () => {
   for (const settings of [{ ...LINKED, artyLink: false }, { ...LINKED, artyToken: '' }]) {
     const { handlers, calls } = setup({ settings });
-    for (const channel of [WEB_CHANNELS.status, WEB_CHANNELS.look]) {
+    for (const channel of [WEB_CHANNELS.status, WEB_CHANNELS.look, WEB_CHANNELS.open]) {
       await assert.rejects(() => handlers.get(channel)({ senderFrame: frame(`${ADDRESS}/`) }, { app: 'Discord' }), /Refused/);
     }
     assert.equal(calls.length, 0);
   }
 });
 
-test('the page learns only whether the link is connected, nothing about Arty or the token', async () => {
+test('the page learns only whether the link is connected and what it can do, nothing about Arty or the token', async () => {
+  const capabilities = [{ id: 'browser.open', version: 1, available: true, browsers: [{ name: 'Firefox', state: 'connected' }] }];
   for (const [linkStatus, expected] of [
-    [{ state: 'connected', paired: true, computer: false }, { connected: true }],
-    [{ state: 'unreachable', paired: true }, { connected: false }],
-    [{ state: 'unpaired', paired: false }, { connected: false }],
-    [{ state: 'off', paired: true }, { connected: false }],
+    [{ state: 'connected', paired: true, computer: false, artyDesktop: '1.6.0', capabilities }, { connected: true, capabilities }],
+    [{ state: 'connected', paired: true, computer: false }, { connected: true, capabilities: [] }],
+    [{ state: 'unreachable', paired: true, capabilities }, { connected: false, capabilities: [] }],
+    [{ state: 'unpaired', paired: false, capabilities: [] }, { connected: false, capabilities: [] }],
+    [{ state: 'off', paired: true, capabilities: [] }, { connected: false, capabilities: [] }],
   ]) {
     const { handlers } = setup({ linkStatus });
     assert.deepEqual(await handlers.get(WEB_CHANNELS.status)({ senderFrame: frame(`${ADDRESS}/`) }), expected);
@@ -122,6 +132,25 @@ test('a look passes only the app name on, and nothing else can be sent', async (
     assert.equal(result.reason, 'bad_request');
   }
   assert.equal(calls.length, 1);
+});
+
+test('an open passes only the address and the browser on, and nothing else can be sent', async () => {
+  const { handlers, calls } = setup();
+  const event = { senderFrame: frame(`${ADDRESS}/`) };
+  assert.deepEqual(await handlers.get(WEB_CHANNELS.open)(event, { url: 'https://example.org/', browser: 'Firefox' }), { ok: true, browser: 'Firefox', tab: 3 });
+  assert.deepEqual(await handlers.get(WEB_CHANNELS.open)(event, { browser: '', url: 'https://example.org/a' }), { ok: true, browser: 'Firefox', tab: 3 });
+  assert.deepEqual(calls, [['open', 'https://example.org/', 'Firefox'], ['open', 'https://example.org/a', '']]);
+  const wrong = [
+    { url: 'https://example.org/' }, { browser: 'Firefox' }, { url: 'https://example.org/', browser: 'Firefox', action: 'close' },
+    { url: 'https://example.org/', browser: 5 }, { url: ['https://example.org/'], browser: '' }, { url: null, browser: '' },
+    { app: 'Discord' }, {}, null, 'https://example.org/', ['https://example.org/', ''], undefined,
+  ];
+  for (const request of wrong) {
+    const result = await handlers.get(WEB_CHANNELS.open)(event, request);
+    assert.equal(result.ok, false, JSON.stringify(request));
+    assert.equal(result.reason, 'bad_request');
+  }
+  assert.equal(calls.length, 2);
 });
 
 test('the web path can only look: it never reaches a computer step, pairing or unpairing', async () => {
@@ -161,18 +190,29 @@ test('the preload exposes nothing unless the main process says yes', () => {
   }
 });
 
-test('the preload exposes only a status check and a look, each through its own channel', async () => {
+test('the preload exposes only a status check, a look and an open, each through its own channel', async () => {
   const { exposed, invoked } = loadPreload(true);
   assert.deepEqual([...Object.keys(exposed)], ['starfireDesktopLink']);
-  assert.deepEqual([...Object.keys(exposed.starfireDesktopLink)].sort(), ['linkStatus', 'lookAtScreen']);
+  assert.deepEqual([...Object.keys(exposed.starfireDesktopLink)].sort(), ['linkStatus', 'lookAtScreen', 'openInBrowser']);
   await exposed.starfireDesktopLink.linkStatus();
   await exposed.starfireDesktopLink.lookAtScreen('Discord');
   await exposed.starfireDesktopLink.lookAtScreen();
+  await exposed.starfireDesktopLink.openInBrowser('https://example.org/', 'Firefox');
+  await exposed.starfireDesktopLink.openInBrowser('https://example.org/');
   assert.deepEqual(invoked, [
     [WEB_CHANNELS.status],
     [WEB_CHANNELS.look, { app: 'Discord' }],
     [WEB_CHANNELS.look, { app: '' }],
+    [WEB_CHANNELS.open, { url: 'https://example.org/', browser: 'Firefox' }],
+    [WEB_CHANNELS.open, { url: 'https://example.org/', browser: '' }],
   ]);
+});
+
+test('the preload sends only text as the address and browser, whatever the page hands it', async () => {
+  const { exposed, invoked } = loadPreload(true);
+  await exposed.starfireDesktopLink.openInBrowser({ toString: () => 'https://example.org/' }, ['Firefox']);
+  await exposed.starfireDesktopLink.openInBrowser(5, { name: 'Firefox' });
+  assert.deepEqual(invoked.map((call) => call[1]), [{ url: '', browser: '' }, { url: '', browser: '' }]);
 });
 
 test('the preload sends only text as the app, whatever the page hands it', async () => {

@@ -35,7 +35,7 @@ function refused() {
 
 test('off means no conversation with Arty at all', async () => {
   const { link, calls } = build({ settings: { artyLink: false, artyToken: TOKEN } });
-  assert.deepEqual(await link.status(), { state: 'off', paired: true });
+  assert.deepEqual(await link.status(), { state: 'off', paired: true, capabilities: [], artyDesktop: '' });
   assert.equal((await link.pair('123456')).ok, false);
   assert.equal((await link.tryLink()).ok, false);
   assert.equal(calls.length, 0);
@@ -43,26 +43,26 @@ test('off means no conversation with Arty at all', async () => {
 
 test('on but never paired is not connected and asks for nothing', async () => {
   const { link, calls } = build({ settings: { artyLink: true } });
-  assert.deepEqual(await link.status(), { state: 'unpaired', paired: false });
+  assert.deepEqual(await link.status(), { state: 'unpaired', paired: false, capabilities: [], artyDesktop: '' });
   assert.equal((await link.tryLink()).ok, false);
   assert.equal(calls.length, 0);
 });
 
 test('paired and answering is Connected, and says whether computer control is on', async () => {
   const { link, calls } = build({ settings: { artyLink: true, artyToken: TOKEN }, replies: [{ status: 200, body: { ok: true, computer: true } }, { status: 200, body: { ok: true, computer: false } }] });
-  assert.deepEqual(await link.status(), { state: 'connected', paired: true, computer: true });
+  assert.deepEqual(await link.status(), { state: 'connected', paired: true, computer: true, capabilities: [], artyDesktop: '' });
   assert.equal((await link.status()).computer, false);
   assert.deepEqual(calls[0], { method: 'GET', path: '/link/status', token: TOKEN, port: 8765, timeoutMs: 3000 });
 });
 
 test('Arty Desktop not running is shown as unreachable, not as an error', async () => {
   const { link } = build({ settings: { artyLink: true, artyToken: TOKEN }, replies: [refused()] });
-  assert.deepEqual(await link.status(), { state: 'unreachable', paired: true });
+  assert.deepEqual(await link.status(), { state: 'unreachable', paired: true, capabilities: [], artyDesktop: '' });
 });
 
 test('a refused token after a good proof is shown, and the pairing is kept for the user to decide', async () => {
   const { link, settings } = build({ settings: { artyLink: true, artyToken: TOKEN }, replies: [{ status: 403, body: { error: 'x' } }] });
-  assert.deepEqual(await link.status(), { state: 'unproven', paired: true });
+  assert.deepEqual(await link.status(), { state: 'unproven', paired: true, capabilities: [], artyDesktop: '' });
   assert.equal(settings().artyToken, TOKEN);
 });
 
