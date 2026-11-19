@@ -16,6 +16,18 @@
 
 ---
 
+## Two ways to use it
+
+| | What it is | Get it |
+|---|---|---|
+| **Web app** | The starfire server. You run it once (on a home server, a PC or in Docker) and use it from any browser. | [Setup](#setup) or [Docker](#docker) |
+| **Desktop app** | starfire Desktop: your starfire in its own window, with a tray icon, a quick-ask shortcut, notifications and the link to Arty Desktop. It connects to a starfire server you already run. | [Downloads](https://github.com/drew-codes-things/starfire.ai/releases/tag/desktop-v1.0.0) for Debian (`.deb` or AppImage) and Windows, then [Set up starfire Desktop](desktop/README.md#set-up-starfire-desktop) |
+
+The desktop app does not replace the server: start with the web app, then add the desktop app on any computer that should
+have starfire in a window of its own.
+
+---
+
 ## Overview
 
 A terminal-themed AI chat interface. Runs local models through [Ollama](https://ollama.com)
@@ -849,7 +861,7 @@ stored keys unrecoverable.
 
 ## Desktop app
 
-[starfire Desktop](desktop/README.md) puts your starfire in its own window on Debian (AppImage) and Windows (installer):
+[starfire Desktop](desktop/README.md) puts your starfire in its own window on Debian (`.deb` or AppImage) and Windows (installer):
 it asks for your starfire's address on first run, stays signed in, lives in the tray, opens a quick-ask window from a
 global shortcut (Ctrl+Shift+Space by default) and shows a notification when a reply finishes while the window is hidden.
 It is a small Electron shell in `desktop/`, separate from the server, and it only ever opens the address you give it.
