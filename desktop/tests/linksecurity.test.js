@@ -4,6 +4,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const { EventEmitter } = require('node:events');
 const spake2 = require('../src/spake2');
 const { createArtyLink, LOOPBACK_HOST } = require('../src/artyLink');
@@ -318,11 +319,12 @@ test('the starfire origin gets the microphone but never the camera', () => {
 });
 
 test('an app page only counts when the file URL has no host (localhost is the same as none in a file URL)', () => {
-  const pages = '/opt/app/resources/app.asar/pages';
-  assert.equal(isLocalPageUrl(`file://${pages}/settings.html`, pages), true);
-  assert.equal(isLocalPageUrl(`file://evilhost${pages}/settings.html`, pages), false);
-  assert.equal(isLocalPageUrl(`file://localhost${pages}/settings.html`, pages), true);
-  assert.equal(isLocalPageUrl(`file://127.0.0.1${pages}/settings.html`, pages), false);
+  const pages = path.join(ROOT, 'pages');
+  const pagePath = `${pathToFileURL(pages).pathname}/settings.html`;
+  assert.equal(isLocalPageUrl(`file://${pagePath}`, pages), true);
+  assert.equal(isLocalPageUrl(`file://evilhost${pagePath}`, pages), false);
+  assert.equal(isLocalPageUrl(`file://localhost${pagePath}`, pages), true);
+  assert.equal(isLocalPageUrl(`file://127.0.0.1${pagePath}`, pages), false);
 });
 
 function windowsWithFakes() {
