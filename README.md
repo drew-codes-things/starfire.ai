@@ -853,6 +853,8 @@ stored keys unrecoverable.
 it asks for your starfire's address on first run, stays signed in, lives in the tray, opens a quick-ask window from a
 global shortcut (Ctrl+Shift+Space by default) and shows a notification when a reply finishes while the window is hidden.
 It is a small Electron shell in `desktop/`, separate from the server, and it only ever opens the address you give it.
+To install it, point it at your server, sign in and link it with Arty Desktop, follow
+[Set up starfire Desktop](desktop/README.md#set-up-starfire-desktop).
 With the Arty Desktop link on, an admin can ask the chat to "look at my discord": Arty asks you to Allow a screenshot and the model sees it.
 
 ## Development

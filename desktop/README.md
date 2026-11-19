@@ -21,6 +21,173 @@ so a new starfire release shows up in the app without updating it.
 
 ---
 
+## Set up starfire Desktop
+
+You need a starfire server that is already running somewhere you can reach (see the main [README](../README.md#setup)),
+and its address, for example `https://starfire.example.com`. The app is only a window onto that server: it does not
+contain one.
+
+### 1. Install
+
+**Debian, Ubuntu and relatives (.deb, recommended on Linux)**
+
+```bash
+sudo apt install ./starfire_1.0.0_amd64.deb
+```
+
+Run it from the folder that holds the file. This installs starfire under `/opt/starfire`, a `starfire` command, a menu
+entry (Network) and the icon. Start it from the menu or with `starfire`.
+
+**Any Linux (AppImage)**
+
+```bash
+sudo apt install libfuse2t64     # only needed once, on Debian 13 and recent Ubuntu; older releases call it libfuse2
+chmod +x starfire-1.0.0-x86_64.AppImage
+./starfire-1.0.0-x86_64.AppImage
+```
+
+To get a menu entry, copy the file to `~/Applications/starfire.AppImage` and add
+`~/.local/share/applications/starfire.desktop` with `Exec` set to that path, `Icon=starfire` and
+`StartupWMClass=starfire`.
+
+**Windows**
+
+Run `starfire-Setup-1.0.0.exe`. It installs for your user only (no administrator rights), lets you pick the folder and
+starts starfire when it finishes. The installer is not signed, so Windows SmartScreen warns first: choose **More info**,
+then **Run anyway**.
+
+The `.deb`, the AppImage and the installer are attached to the desktop release on the
+[starfire.ai releases page](https://github.com/drew-codes-things/starfire.ai/releases), or you can build them yourself
+(see [Build](#build)).
+
+### 2. First start: tell it where your starfire is
+
+The first time the app runs it shows **Welcome to starfire** and asks for **Your starfire address**.
+
+1. Type the address of your server. Leaving out `https://` is fine, the app adds it. Include a port if your server uses
+   one, for example `https://starfire.example.com:8443`.
+2. Press **Connect**. The app asks the server for `/api/health` and only saves an address that answers like starfire.
+   On success it says `Connected to starfire <version>` and opens the main window.
+3. If the server is on your own computer or home network and has no https, for example `http://10.0.0.5:8080`, tick
+   **This runs on my own computer or home network without https** first. The tick box is accepted only for `localhost`,
+   `.local` names and private addresses (192.168.x.x, 10.x.x.x, 172.16-31.x.x, link-local). Any address on the public
+   internet must be https.
+
+The address is saved in the app's config file, so this question is asked once. Change it later in **Settings**, under
+**Address**.
+
+### 3. Sign in
+
+The main window now shows your server's own sign-in page. Sign in with your starfire email and password. The window has
+its own session, so it stays signed in across restarts until your server's session lifetime ends (30 days by default for
+a starfire server).
+
+**A brand-new server** has no accounts yet, so the first page is the setup page instead. The setup code on it is not
+something the app can tell you: starfire prints a one-time code in its own log when it starts with no account, in a line
+like `no account yet: open /setup.html and enter the setup code ...`. Read it where the server runs (the terminal for
+`python server.py`, `docker compose logs` for Docker, `journalctl -u <service>` for a service), type it into the setup
+page, then choose your name, email and a password of at least 10 characters. That first account is the admin. The code
+changes every time the server restarts and stops existing once the account is made. Five wrong codes from one address lock
+that address out of setup for 15 minutes.
+
+### 4. Settings worth knowing
+
+Open Settings from the tray icon menu or the **starfire** menu (press Alt if the menu bar is hidden). Everything is saved the moment you change it.
+
+| Setting | What it does |
+|---|---|
+| Quick ask shortcut | Default **Ctrl+Shift+Space**. Opens a small always-on-top window; type a question and press Enter and a new chat is started in the main window. Press **Change**, then the new keys; Esc cancels. A shortcut another program already holds is refused and the old one keeps working. |
+| Start with the PC | Off by default. Starts starfire hidden in the tray when you log in. |
+| Notify when a reply finishes | On by default. Only fires when the starfire window is hidden, minimised or in the background. Click the notification to open the window. |
+| Closing the window keeps starfire in the tray | On by default, so closing the window does not quit the app. Turn it off to quit when the window closes (do this on a desktop with no system tray). Use the tray menu's **Quit** to exit fully. |
+| Address | Shows the server address; **Change** reopens the address screen. |
+| Link to Arty Desktop | See [Link starfire Desktop with Arty Desktop](#5-link-starfire-desktop-with-arty-desktop-optional). |
+
+Starting starfire again while it is running does not open a second copy: it brings the existing window forward.
+
+### 5. Link starfire Desktop with Arty Desktop (optional)
+
+The link lets the chat in starfire Desktop ask Arty Desktop, running on the same PC, to look at your screen. Nothing
+reaches anything beyond this PC: the app only talks to `127.0.0.1`.
+
+You need Arty Desktop 1.5.8 or newer on the same PC, started and running. Then:
+
+1. In starfire Desktop open **Settings** and switch **Link to Arty Desktop** on. The light reads **Not paired** (or
+   **Arty Desktop is not running** if Arty Desktop is not up yet, in which case start it).
+2. In Arty Desktop open the tray menu, choose **Link starfire...** and make a code. It is 6 digits, works once and
+   expires after two minutes. Five wrong tries use it up.
+3. Type the 6 digits into the box that appeared under **Pair with Arty Desktop** (a space in the middle is fine) and press
+   **Pair**. Nothing sends the code itself: both apps prove they know it and work out the shared token on their own.
+4. The light turns **Connected** and the row says **Paired with Arty Desktop**. If it says computer control is off in
+   Arty Desktop, turn on its computer control (the HANDS setting) or every step will be refused.
+5. Optional check: press **Try it**. Arty Desktop shows an Allow card for a step that lists the open windows. Allow it and
+   starfire shows what Arty answered.
+
+To end the link, press **Unpair** (it forgets the pairing on both sides) or switch the link off. If you unlink inside
+Arty Desktop, Unpair in starfire as well and pair again later.
+
+### 6. "Look at my ..." and the Allow card
+
+With the link **Connected**, an **admin** account can write things like "look at my discord", "look at my screen" or
+"what is on my browser" in a chat opened in starfire Desktop. The chat then looks at your screen:
+
+1. The chat shows **Looking at Discord on your PC...** and then **Waiting for you to allow it in Arty**.
+2. Arty Desktop shows an **Allow card**. When it can find that app's window it names the window's real title and says only
+   that window is captured by itself; otherwise it says plainly that the whole screen would be sent.
+3. Nothing is captured until you press **Allow**. **Not now**, no answer within two minutes, or Stop, counts as no.
+4. After Allow, the chat shows **Looked at Discord** with a small thumbnail (click it to enlarge) and the model answers
+   from the picture. Use a model that can read images. The picture is part of that chat message and is not kept anywhere
+   else on the server.
+
+If something stops it, the chat says so on its own line and the model is told to say it could not look instead of
+guessing: you said no, Arty Desktop is not running or the link is off, computer control is off, no window matches the
+name, several windows match (ask again with the window's full title), the window changed after you were asked, or the
+window is one that is never looked at. The tool is not offered in an ordinary browser, to non-admin accounts, or in
+scheduled tasks. On Wayland, windows of apps that are not X11 apps may not be found by name, so the card can say the
+whole screen would be sent.
+
+### 7. Update
+
+- The starfire web app updates with your server: when the server is updated, the app shows the new version the next time
+  you open or reload it. Nothing to install.
+- The desktop shell itself (the window, tray, shortcut and link) has no built-in updater. For a new release, download it and
+  install it over the old one: `sudo apt install ./starfire_<new version>_amd64.deb`, replace the AppImage file, or run
+  the new Windows installer. Your address, shortcut and pairing are kept.
+
+### 8. Uninstall
+
+- **Debian package:** `sudo apt remove starfire`.
+- **AppImage:** delete the AppImage and the `~/.local/share/applications/starfire.desktop` entry you added.
+- **Windows:** Settings, Apps, starfire, Uninstall (or run the uninstaller from the installation folder).
+
+Your settings and the signed-in session stay behind on purpose, so a later reinstall picks up where you left off. To
+remove them as well, delete the config folder: `~/.config/starfire` on Linux, `%APPDATA%\starfire` on Windows. If you
+switched on Start with the PC, switch it off first or delete `~/.config/autostart/starfire-desktop.desktop` on Linux.
+Deleting the config folder also forgets the Arty link on this PC; unlink in Arty Desktop too.
+
+### 9. Troubleshooting
+
+| What you see | What to do |
+|---|---|
+| `Could not reach <host>. Check the address and your connection.` | The address is wrong, the server is down or you are offline. Open the same address in a web browser; if that fails too the problem is the server or network. |
+| `<host> answered, but it does not look like starfire.` | The address answers, but not as starfire: wrong port, a different service, or a proxy page in the way. Use the address you use for starfire in your browser. |
+| `<host> did not answer in time.` | The server is slow or blocked by a firewall; try again, or check it is reachable from this PC. |
+| `Only https is allowed outside your own network.` | A public address must start with `https://`. Fix the address or put https in front of the server. |
+| `http is only for localhost and your own network. Tick the box to allow it.` | The address is a local `http` one: tick the box on the address screen. |
+| **Cannot reach `<host>`** after it worked, with a reason line | The server is down, or the network changed. Press **Try again**, or **Change address**. |
+| The reason line names a certificate error (for example `ERR_CERT_AUTHORITY_INVALID`), or Connect says it could not reach a `https` address on your home network | The app never overrides certificate errors, so the server must present a certificate this PC trusts and that matches the name you typed. A certificate for a different name or an address typed as a bare IP will not match. Use the server's real https name (a public one, or a name with a certificate from an authority you have installed on this PC), or, on a private network without https, use `http` with the tick box. |
+| The sign-in page comes back after you change the address | A login only works on the host name it was made on, so sign in again after changing the address (for example from a LAN address to the public one). |
+| Link light says **Arty Desktop is not running** | Start Arty Desktop on this PC and wait for it to finish starting. |
+| `The pairing was not accepted...` or `Whatever answered did not prove it is Arty Desktop holding that code...` | The code expired (two minutes), was already used, was typed wrong five times or has a typo. Make a new code in Arty Desktop (**Link starfire...**) and type it again within two minutes. |
+| `The code from Arty Desktop is 6 digits.` | Type only the six digits. |
+| Light says **Arty Desktop did not prove itself** | Nothing was sent. Unpair in starfire, then pair again. If you did not unlink in Arty Desktop, something other than Arty Desktop may be answering on its port, so do not pair until you know what. |
+| "Look at my ..." does nothing or the chat answers without looking | You need an admin account, starfire Desktop (not a browser), the link **Connected** and the request made in a chat window of the app. A look is also refused while Arty Desktop's computer control is off, while Arty Desktop is already waiting on another step, or for a minute after three refusals in a row. |
+| The shortcut does nothing | Another program may hold it (starfire says so in Settings); choose a different one. On a Wayland desktop that does not pass global shortcuts through, bind a shortcut in your desktop's own settings to the command `starfire --quick-ask` (or `~/Applications/starfire.AppImage --quick-ask`). |
+| No tray icon or the window does not come back after closing it | Some desktops (plain GNOME) have no tray. Switch off **Closing the window keeps starfire in the tray**. |
+| Need to start over | Quit starfire and delete the config folder (see Uninstall). The next start shows the first-run screen again. |
+
+---
+
 ## Features
 
 - **First run** - a clean screen asks for the address. The app calls `/api/health` and only saves an address that
@@ -96,31 +263,14 @@ running app to show the quick-ask window. `STARFIRE_WAYLAND=1` starts the app as
 
 ---
 
-## Install (Linux)
+## Packaging notes
 
-```bash
-sudo apt install libfuse2t64   # FUSE, to run AppImages
-chmod +x starfire-1.0.0-x86_64.AppImage
-./starfire-1.0.0-x86_64.AppImage
-```
+The Linux menu entry, the settings location and the Windows build are covered in [Set up starfire Desktop](#set-up-starfire-desktop).
+`npm run deb` builds the Debian package into `release/` (the first build downloads electron-builder's packaging tool,
+`fpm`, once). The config is `~/.config/starfire/config.json` (address, shortcut and the switches), written with owner-only
+permissions; delete it to see the first-run screen again.
 
-Copy the AppImage to `~/Applications/starfire.AppImage` and add a `~/.local/share/applications/starfire.desktop`
-(`Exec` = that path, `Icon=starfire`, `StartupWMClass=starfire`) to get a menu entry.
-
-### Debian and Ubuntu package
-
-```bash
-sudo apt install ./starfire_1.0.0_amd64.deb
-```
-
-The package installs starfire under `/opt/starfire` with a `starfire` command, a menu entry (Network) and the icon. Your
-settings are in `~/.config/starfire`, outside the package. `npm run deb` builds it into `release/` (the first build
-downloads electron-builder's packaging tool, `fpm`, once).
-
-The config is `~/.config/starfire/config.json` (address, shortcut and the switches), written with owner-only permissions.
-Delete it to see the first-run screen again.
-
-### Windows
+### Windows build
 
 `npm run installer` builds an NSIS installer (`release/starfire-Setup-1.0.0.exe`, about 110 MB, per user, unsigned so
 Windows SmartScreen will warn). It must be built on Windows. It was built in a Windows 10 VM with the same Electron and

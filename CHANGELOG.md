@@ -152,6 +152,9 @@
   file.
 
 ### Added
+- **Set up starfire Desktop** guide in `desktop/README.md`: install on Linux (`.deb`, AppImage) and Windows, first start and sign in,
+  the first-run setup code of a brand-new server, the settings, linking with Arty Desktop, "look at my ..." and its Allow
+  card, updating, uninstalling and troubleshooting. The main README points to it.
 - **Look at my screen** (starfire Desktop with the Arty link connected, admin accounts only): a `look_at_screen` chat tool
   so "look at my discord" really looks. The page asks starfire Desktop through a narrow bridge, which sends only a
   screenshot request to Arty Desktop; you click Allow in Arty, the picture goes back as the tool result for a vision model, and
