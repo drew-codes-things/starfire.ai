@@ -323,7 +323,8 @@ TOOL_SCHEMAS = [
                 "type": "object",
                 "properties": {
                     "app": {"type": "string", "description": "the app or window to look for, such as Discord. "
-                                                              "Leave empty to look at the whole screen."},
+                                                              "If more than one window matches, use the window's "
+                                                              "full title. Leave empty to look at the whole screen."},
                 },
             },
         },

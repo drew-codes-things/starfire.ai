@@ -1,6 +1,6 @@
 'use strict';
 
-const LOOK_FAILURE_REASONS = new Set(['declined', 'timed_out', 'not_running', 'not_linked', 'not_found', 'unavailable', 'cannot_see', 'off_limits', 'busy', 'failed']);
+const LOOK_FAILURE_REASONS = new Set(['declined', 'timed_out', 'not_running', 'not_linked', 'not_found', 'unavailable', 'cannot_see', 'off_limits', 'busy', 'ambiguous', 'changed', 'failed']);
 const LOOK_MAX_DETAIL_CHARS = 300;
 const LOOK_PICTURE_TYPES = new Set(['image/jpeg', 'image/png']);
 const LOOK_BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;

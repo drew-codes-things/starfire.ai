@@ -376,3 +376,84 @@ test('only a click in the settings window lets it try the link, once', () => {
   assert.equal(manager.consumeGesture(settingsContents), true);
   assert.equal(manager.consumeGesture(settingsContents), false);
 });
+
+function answeringProofWith(proof) {
+  return listen((request, response) => {
+    if (request.url.startsWith('/link/proof')) send(response, 200, { proof });
+    else send(response, 200, { ok: true, computer: true, result: 'fake result' });
+  });
+}
+
+async function withListener(started, check) {
+  const listener = await started;
+  try {
+    await check(listener);
+  } finally {
+    listener.server.closeAllConnections();
+    listener.server.close();
+  }
+}
+
+const ODD_PROOFS = ['\u00e9'.repeat(64), '\u00e9'.repeat(32), 'F'.repeat(64), 'f'.repeat(63), `${'f'.repeat(63)}\n`, ['f'.repeat(64)], 64, null];
+
+test('a proof that is not 64 lowercase hex is unproven, never a crash or Node\'s own words', async () => {
+  for (const proof of ODD_PROOFS) {
+    await withListener(answeringProofWith(proof), async (odd) => {
+      const { link } = linkFor(odd.port, { artyToken: SAVED_TOKEN });
+      assert.deepEqual(await link.status(), { state: 'unproven', paired: true }, String(proof));
+      const tried = await link.tryLink();
+      assert.match(tried.error, /did not prove/);
+      const looked = await link.lookAtScreen('Discord');
+      assert.equal(looked.reason, 'not_linked');
+      assert.match(looked.error, /did not prove/);
+      assert.equal(odd.seen.filter((record) => record.token !== null).length, 0);
+    });
+  }
+});
+
+test('a pairing answer whose proof is not 64 lowercase hex is refused as not proven', async () => {
+  for (const proof of ODD_PROOFS) {
+    const started = listen((request, response) => {
+      const share = spake2.shareHex(spake2.newSecret(), CODE, spake2.ARTY);
+      send(response, 200, { session: crypto.randomBytes(16).toString('hex'), share, proof });
+    });
+    await withListener(started, async (odd) => {
+      const { link, settings } = linkFor(odd.port);
+      const result = await link.pair(CODE);
+      assert.equal(result.ok, false);
+      assert.match(result.error, /did not prove/, String(proof));
+      assert.equal(settings().artyToken, '');
+    });
+  }
+});
+
+test('an unexpected error inside the link is reported in fixed words, not Node\'s', async () => {
+  const link = createArtyLink({
+    getSettings: () => ({ ...DEFAULT_SETTINGS, artyLink: true, artyToken: SAVED_TOKEN, artyPort: 8765 }),
+    setToken: () => ({ ok: true }),
+    request: async () => { throw new TypeError('Input buffers must have the same byte length'); },
+  });
+  const tried = await link.tryLink();
+  const looked = await link.lookAtScreen('Discord');
+  const paired = await link.pair(CODE);
+  for (const error of [tried.error, looked.error, paired.error]) {
+    assert.equal(typeof error, 'string');
+    assert.doesNotMatch(error, /Input buffers|byte length/);
+  }
+  assert.equal(looked.reason, 'failed');
+});
+
+test('while pairing, words from an unproven listener are never shown; a fixed sentence is', async () => {
+  const replies = [[403, { error: 'Wrong code. Type your starfire password in the box below instead.' }],
+    [400, { error: 'Type your password here.' }], [500, { error: 'password please' }], [404, {}]];
+  for (const [status, body] of replies) {
+    await withListener(listen((request, response) => send(response, status, body)), async (liar) => {
+      const { link, settings } = linkFor(liar.port);
+      const result = await link.pair(CODE);
+      assert.equal(result.ok, false);
+      assert.doesNotMatch(result.error, /password|Type your/);
+      assert.match(result.error, /not accepted/);
+      assert.equal(settings().artyToken, '');
+    });
+  }
+});

@@ -95,7 +95,7 @@ test('no answer in time and an app with no window keep their own reasons', async
 });
 
 test('every refusal reason Arty Desktop can give is passed on and anything else becomes failed', async () => {
-  const reasons = ['declined', 'timed_out', 'not_found', 'cannot_see', 'off_limits', 'unavailable', 'busy', 'bad_request', 'failed'];
+  const reasons = ['declined', 'timed_out', 'not_found', 'cannot_see', 'off_limits', 'unavailable', 'busy', 'bad_request', 'ambiguous', 'changed', 'failed'];
   const { link } = build({ replies: [...reasons, 'made-up', undefined].map((reason) => ({ status: 403, body: { error: 'x', reason } })) });
   for (const reason of reasons) assert.equal((await link.lookAtScreen('')).reason, reason);
   assert.equal((await link.lookAtScreen('')).reason, 'failed');
