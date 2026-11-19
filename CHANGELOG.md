@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Security
+- First-run setup needs a one-time setup code. While no account exists, starfire prints a random code in its log
+  when it starts, and `/api/auth/setup` refuses to make the admin account without it (compared in constant time,
+  5 wrong codes from one address lock that address out for 15 minutes, a restart makes a new code). Before, whoever
+  reached a fresh copy first became the admin. Installs that already have an account never see the code.
 - starfire Desktop's link to Arty Desktop: pairing no longer sends the 6 digit code; both apps prove they know it with
   SPAKE2 and work out the token themselves, so something else listening on Arty Desktop's port gets neither the code nor
   a token. Before every call that carries the token, Arty Desktop must answer a fresh challenge keyed by the pairing, or

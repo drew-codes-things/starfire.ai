@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from auth import (ACCOUNT_LOCKOUT_SECONDS, ACCOUNT_MAX_FAILED_LOGINS, LOGIN_ATTEMPT_WINDOW_SECONDS,
                   LOGIN_ATTEMPTS_PER_ADDRESS, MAX_FIELD_CHARS, SESSION_COOKIE, WRONG_CURRENT_PASSWORD,
-                  AccountError, KnownAddresses, LoginLimiter, SessionStore, UserStore, client_address,
+                  AccountError, KnownAddresses, LoginLimiter, SessionStore, SetupCode, UserStore, client_address,
                   current_user, forget_legacy_cookie, normalise_email, parse_networks, request_host,
                   require_admin, all_session_tokens, set_session_cookie)
 from config import config
@@ -18,8 +18,16 @@ account_limiter = LoginLimiter(max_failures=ACCOUNT_MAX_FAILED_LOGINS, lockout_s
 address_attempts = LoginLimiter(max_failures=LOGIN_ATTEMPTS_PER_ADDRESS, lockout_seconds=LOGIN_ATTEMPT_WINDOW_SECONDS)
 password_change_limiter = LoginLimiter()
 known_addresses = KnownAddresses(config.data_dir)
+setup_code_limiter = LoginLimiter()
 logger = logging.getLogger(__name__)
 TRUSTED_PROXIES = parse_networks(config.trusted_proxies)
+
+
+def needs_first_account() -> bool:
+    return not users.has_users() and not users.was_set_up()
+
+
+setup_code = SetupCode(needs_first_account)
 
 MAX_FIELD_LENGTH = MAX_FIELD_CHARS
 
@@ -34,6 +42,7 @@ class SetupRequest(BaseModel):
     name: str = ""
     password: str
     confirm: str
+    code: str = ""
 
 
 class PasswordRequest(BaseModel):
@@ -120,12 +129,33 @@ def status():
     return {"has_users": users.has_users()}
 
 
+def _check_setup_code(code: str, request: Request) -> None:
+    if len(code) > MAX_FIELD_LENGTH:
+        raise HTTPException(status_code=400, detail="that setup code is too long")
+    address = client_address(request, TRUSTED_PROXIES, config.client_ip_header)
+    busy = address_attempts.take_attempt(address)
+    if busy:
+        raise HTTPException(status_code=429, headers={"Retry-After": str(busy)},
+                            detail=f"too many attempts from this address - try again in {busy} s")
+    wait = setup_code_limiter.seconds_locked(address)
+    if wait:
+        raise HTTPException(status_code=429, headers={"Retry-After": str(wait)},
+                            detail=f"too many wrong setup codes - try again in {wait // 60 + 1} min")
+    if not setup_code.matches(code):
+        setup_code_limiter.record_failure(address)
+        logger.warning("wrong setup code from %s", address)
+        raise HTTPException(status_code=401, detail="that setup code is wrong - starfire prints it in its log when it starts")
+    setup_code_limiter.reset(address)
+
+
 @router.post("/setup")
 def setup(body: SetupRequest, request: Request, response: Response):
+    _check_setup_code(body.code, request)
     try:
         user = users.create_first(body.email, body.name, body.password, body.confirm)
     except AccountError as error:
         raise HTTPException(status_code=400, detail=str(error))
+    setup_code.spend()
     registry = _registry()
     if registry is not None:
         registry.migrate_legacy(user.id)

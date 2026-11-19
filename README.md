@@ -55,8 +55,15 @@ It listens on `127.0.0.1` only by default.
 
 ### Logging in
 
-The first time you open starfire it shows a setup page: choose your name, email and a
-password (at least 10 characters). That makes the admin account, and the setup page closes
+The first time you open starfire it shows a setup page: enter the one-time setup code, then
+choose your name, email and a password (at least 10 characters). While no account exists,
+starfire prints the code in its log when it starts, in a line like
+`no account yet: open /setup.html and enter the setup code ...` (the terminal for
+`python server.py`, `docker compose logs` for Docker, `journalctl -u <service>` for a service).
+Only someone who can read that log can make the admin account, so a stranger who reaches a fresh
+copy first cannot. The code is random, lives in memory only (a restart makes a new one, and it
+is gone once the account exists), and 5 wrong codes from one address lock that address out of
+setup for 15 minutes. That makes the admin account, and the setup page closes
 for good (a `data/.setup-done` marker keeps it closed: if `data/users.json` ever goes missing,
 starfire answers 503 until it is restored, instead of offering setup to whoever comes first).
 Until then, every other page and API call is locked, so set it up straight away

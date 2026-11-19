@@ -127,9 +127,7 @@ async def lifespan(app: FastAPI):
     for server in routes.mcp_servers.list():
         await mcp_manager.disconnect(server.id)
 
-if not auth_routes.users.has_users():
-    print(f"starfire.ai: no account yet - open the app and choose your email and password on {auth.SETUP_PAGE} "
-          "(everything else stays locked until you do).", file=sys.stderr)
+auth_routes.setup_code.current()
 
 app = FastAPI(title="starfire.ai", lifespan=lifespan)
 
