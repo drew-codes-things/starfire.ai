@@ -49,8 +49,9 @@ so a new starfire release shows up in the app without updating it.
   screen", "what's on my browser") and the chat model calls the `look_at_screen` tool. The page asks starfire Desktop,
   which sends only a screenshot request (an optional app name) to Arty Desktop. Arty puts it to you as an Allow card that
   names the app, and nothing is captured unless you click Allow. When an app is named and Arty Desktop can find its
-  window (X11, or X11 windows under Wayland), that window is captured by itself and nothing else is sent; otherwise the
-  card says plainly that the whole screen would be sent. The chat shows each step (Looking at Discord on your
+  window (X11, or X11 windows under Wayland), the card names that window's real title, that window is captured by
+  itself and nothing else is sent; when several windows match, nothing is asked and the model is told to use the full
+  title; otherwise the card says plainly that the whole screen would be sent. The chat shows each step (Looking at Discord on your
   PC..., Waiting for you to allow it in Arty, Looked at Discord with a small thumbnail you can click to enlarge) and a
   clear line when you said no, Arty is not running or no window matches; the model is told to say it could not look. The
   tool is never offered in a normal browser or to an ordinary account, and the picture is not kept on the server beyond

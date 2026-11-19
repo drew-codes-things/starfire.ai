@@ -167,7 +167,7 @@ async def run_chat_collected(base_url: str, api_key: str | None, model: str, mes
                               ctx: "builtin_tools.ToolContext | None" = None,
                               think: bool | None = None, max_tools: int | None = None) -> str:
     enabled_server_ids = enabled_server_ids or set()
-    enabled_builtin_tools = enabled_builtin_tools or set()
+    enabled_builtin_tools = set(enabled_builtin_tools or ()) - {builtin_tools.SCREEN_TOOL}
 
     text_parts: list[str] = []
     error: str | None = None

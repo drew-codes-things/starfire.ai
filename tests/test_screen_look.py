@@ -115,6 +115,8 @@ def test_no_app_means_the_whole_screen():
     ("cannot_see", "cannot take screenshots"),
     ("off_limits", "never looked at"),
     ("busy", "already waiting"),
+    ("ambiguous", "more than one window"),
+    ("changed", "changed"),
     ("failed", "failed"),
 ])
 def test_every_way_it_can_fail_tells_the_model_to_say_so_and_gives_it_no_picture(reason, words):
@@ -404,6 +406,58 @@ def test_a_scheduled_task_never_gets_the_tool(monkeypatch):
     monkeypatch.setattr(agent_loop, "run_chat_collected", collected)
     asyncio.run(routes._task_chat_fn("e", "gpt-4o", "go", [], [TOOL, "manage_notes"]))
     assert seen["enabled_builtin_tools"] == {"manage_notes"}
+
+
+
+def task_model_that_offers(offered_runs):
+    async def model(base_url, api_key, model, messages, system, options, tools=None, think=None):
+        offered = [tool["function"]["name"] for tool in (tools or [])]
+        offered_runs.append(offered)
+        if TOOL in offered and not any(message["role"] == "tool" for message in messages):
+            yield "tool_calls", [{"id": "c1", "name": TOOL, "arguments": {"app": ""}}]
+            return
+        yield "delta", "done"
+    return model
+
+
+def test_a_task_run_now_from_a_desktop_chat_is_never_offered_the_tool(monkeypatch):
+    from task_store import ScheduledTask
+
+    offered_runs = []
+    monkeypatch.setattr(agent_loop, "stream_chat_once", task_model_that_offers(offered_runs))
+    monkeypatch.setattr(screen_look, "LOOK_TIMEOUT_SECONDS", 1)
+    task = ScheduledTask(id="t1", name="morning look", prompt="look at my screen", schedule="daily",
+                         enabled_builtin_tools=[TOOL, "manage_notes"], model="m")
+    runs = {}
+
+    def add_run(run):
+        run.id = "r1"
+        runs[run.id] = run
+        return run
+
+    def update_run(run_id, **fields):
+        for key, value in fields.items():
+            setattr(runs[run_id], key, value)
+
+    ctx = looking()
+    vars(ctx).update(base_url="https://models.example.com/v1", api_key=None, model="m", endpoint_id="e",
+                     tasks=SimpleNamespace(get=lambda task_id: task, update=lambda task_id, **fields: None),
+                     task_runs=SimpleNamespace(add=add_run, update=update_run))
+    result = asyncio.run(builtin_tools.call_builtin_tool("manage_tasks", {"action": "run_now", "task_id": "t1"}, ctx))
+    assert result == "ran"
+    assert offered_runs and all(TOOL not in offered for offered in offered_runs)
+    assert screen_look._pending == {}
+
+
+def test_no_collected_run_offers_the_tool_whatever_it_is_handed(monkeypatch):
+    offered_runs = []
+    monkeypatch.setattr(agent_loop, "stream_chat_once", task_model_that_offers(offered_runs))
+    monkeypatch.setattr(screen_look, "LOOK_TIMEOUT_SECONDS", 1)
+    answer = asyncio.run(agent_loop.run_chat_collected(
+        "https://models.example.com/v1", None, "m", [{"role": "user", "content": "look"}],
+        enabled_builtin_tools={TOOL, "manage_notes"}, ctx=looking()))
+    assert answer == "done"
+    assert offered_runs and all(TOOL not in offered for offered in offered_runs)
 
 
 def stage_for(client, app="Discord"):

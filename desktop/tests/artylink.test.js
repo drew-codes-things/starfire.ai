@@ -94,10 +94,12 @@ test('a code that is not six digits never leaves the app', async () => {
   assert.equal(calls.length, 0);
 });
 
-test('Arty Desktop refusing a code shows its reason and stores nothing', async () => {
+test('Arty Desktop refusing a code shows a fixed sentence, not its words, and stores nothing', async () => {
   const { link, settings } = build({ settings: { artyLink: true }, replies: [{ status: 403, body: { error: 'That code has expired. Make a new code in Arty Desktop.' } }] });
   const result = await link.pair('123456');
-  assert.deepEqual(result, { ok: false, error: 'That code has expired. Make a new code in Arty Desktop.' });
+  assert.equal(result.ok, false);
+  assert.doesNotMatch(result.error, /expired/);
+  assert.match(result.error, /not accepted/);
   assert.equal(settings().artyToken, '');
 });
 

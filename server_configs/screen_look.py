@@ -21,6 +21,8 @@ REASON_TEXTS = {
     "cannot_see": "this computer cannot take screenshots",
     "off_limits": "that is a window that is never looked at",
     "busy": "Arty Desktop was already waiting on another step",
+    "ambiguous": "more than one window matches that name, so none was picked; ask for the window by its full title",
+    "changed": "the window changed after the user was asked, so it was not captured",
     "failed": "the screenshot failed",
 }
 DEFAULT_REASON_TEXT = "it failed for a reason starfire Desktop could not name"

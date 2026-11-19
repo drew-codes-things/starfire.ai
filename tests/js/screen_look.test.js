@@ -112,6 +112,8 @@ test('each way of not looking gets a clear line and the server is told, so the m
     ['cannot_see', /Could not look at Discord/],
     ['off_limits', /Could not look at Discord/],
     ['busy', /Could not look at Discord/],
+    ['ambiguous', /Could not look at Discord/],
+    ['changed', /Could not look at Discord/],
     ['failed', /Could not look at Discord/],
   ];
   for (const [reason, pattern] of cases) {
@@ -126,7 +128,7 @@ test('each way of not looking gets a clear line and the server is told, so the m
     assert.equal(api.answers[0][1].reason, reason);
     assert.equal(api.answers[0][1].image, undefined);
   }
-  assert.deepEqual([...LOOK_FAILURE_REASONS].sort(), ['busy', 'cannot_see', 'declined', 'failed', 'not_found', 'not_linked', 'not_running', 'off_limits', 'timed_out', 'unavailable'].sort());
+  assert.deepEqual([...LOOK_FAILURE_REASONS].sort(), ['ambiguous', 'busy', 'cannot_see', 'changed', 'declined', 'failed', 'not_found', 'not_linked', 'not_running', 'off_limits', 'timed_out', 'unavailable'].sort());
 });
 
 test('a link that is not connected stops before Arty is asked anything', async () => {
