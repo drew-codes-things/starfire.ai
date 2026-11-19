@@ -107,6 +107,16 @@ chmod +x starfire-1.0.0-x86_64.AppImage
 Copy the AppImage to `~/Applications/starfire.AppImage` and add a `~/.local/share/applications/starfire.desktop`
 (`Exec` = that path, `Icon=starfire`, `StartupWMClass=starfire`) to get a menu entry.
 
+### Debian and Ubuntu package
+
+```bash
+sudo apt install ./starfire_1.0.0_amd64.deb
+```
+
+The package installs starfire under `/opt/starfire` with a `starfire` command, a menu entry (Network) and the icon. Your
+settings are in `~/.config/starfire`, outside the package. `npm run deb` builds it into `release/` (the first build
+downloads electron-builder's packaging tool, `fpm`, once).
+
 The config is `~/.config/starfire/config.json` (address, shortcut and the switches), written with owner-only permissions.
 Delete it to see the first-run screen again.
 
@@ -128,7 +138,7 @@ shortcut there), toast notifications, and the Arty Desktop link (Arty Desktop 1.
 ```bash
 cd desktop
 npm ci
-./build-app.sh        # runs the tests, then builds release/starfire-<version>-x86_64.AppImage
+./build-app.sh        # runs the tests, then builds release/starfire-<version>-x86_64.AppImage and release/starfire_<version>_amd64.deb
 ```
 
 `npm test` runs the unit tests (Node 20 or newer, nothing else to install). `npm start` runs the app from source.

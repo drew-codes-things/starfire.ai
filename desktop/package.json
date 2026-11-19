@@ -10,10 +10,15 @@
     "test": "node --test tests/*.test.js",
     "dist": "electron-builder --linux dir",
     "appimage": "electron-builder --linux AppImage",
-    "installer": "electron-builder --win nsis --x64"
+    "installer": "electron-builder --win nsis --x64",
+    "deb": "electron-builder --linux deb --x64"
   },
   "license": "Apache-2.0",
-  "author": "drew-codes-things",
+  "author": {
+    "name": "drew-codes-things",
+    "email": "81813325+drew-codes-things@users.noreply.github.com"
+  },
+  "homepage": "https://github.com/drew-codes-things/starfire.ai",
   "devDependencies": {
     "electron": "44.9.3",
     "electron-builder": "26.15.3"
@@ -46,6 +51,12 @@
           ]
         },
         {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
           "target": "dir",
           "arch": [
             "x64"
@@ -56,6 +67,11 @@
     },
     "appImage": {
       "artifactName": "starfire-${version}-${arch}.AppImage"
+    },
+    "deb": {
+      "packageName": "starfire",
+      "packageCategory": "net",
+      "artifactName": "starfire_${version}_${arch}.deb"
     },
     "afterPack": "build/afterPack.js",
     "win": {
