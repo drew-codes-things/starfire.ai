@@ -137,12 +137,11 @@ def _check_setup_code(code: str, request: Request) -> None:
     if busy:
         raise HTTPException(status_code=429, headers={"Retry-After": str(busy)},
                             detail=f"too many attempts from this address - try again in {busy} s")
-    wait = setup_code_limiter.seconds_locked(address)
+    wait = setup_code_limiter.take_attempt(address)
     if wait:
         raise HTTPException(status_code=429, headers={"Retry-After": str(wait)},
                             detail=f"too many wrong setup codes - try again in {wait // 60 + 1} min")
     if not setup_code.matches(code):
-        setup_code_limiter.record_failure(address)
         logger.warning("wrong setup code from %s", address)
         raise HTTPException(status_code=401, detail="that setup code is wrong - starfire prints it in its log when it starts")
     setup_code_limiter.reset(address)
