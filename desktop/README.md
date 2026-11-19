@@ -146,6 +146,32 @@ window is one that is never looked at. The tool is not offered in an ordinary br
 scheduled tasks. On Wayland, windows of apps that are not X11 apps may not be found by name, so the card can say the
 whole screen would be sent.
 
+### 6a. Capabilities and "open this page"
+
+When the link is **Connected** to Arty Desktop 1.6.0 or newer, it tells starfire Desktop what it can do, and Settings shows a **Capabilities**
+panel with each one marked available or not available: **Look at your screen**, **Open pages in your browsers** (with
+the names of the browsers connected to Arty, such as Firefox), **Arty's own browser**, **Use your mouse and keyboard**
+and **Quiz helper**. Only capabilities starfire Desktop knows are shown; anything else Arty sends, or anything that does
+not have the expected shape, is dropped rather than shown. The list refreshes with the link light.
+
+With **Open pages in your browsers** available, an **admin** can say "open example.org/docs in Firefox" in a chat in
+starfire Desktop and the model calls the `open_in_browser` tool:
+
+1. The chat shows **Opening https://example.org/docs in Firefox on your PC...** and then **Waiting for you to allow it in
+   Arty**.
+2. Arty Desktop shows its own **Allow card** naming the browser and the exact address. Nothing is opened until you press
+   **Allow**; no answer in about two minutes counts as no.
+3. After Allow the chat shows **Opened https://example.org/docs in Firefox** and the model is told which tab it opened.
+
+Nothing from the page comes back: the model never sees the page's text or a picture of it, and is told not to describe
+it. Only `http://` and `https://` addresses of at most 2000 characters with no spaces or hidden characters are accepted,
+and the browser must be empty (Arty uses the connected one) or one of Chrome, Edge, Brave, Opera, Vivaldi, Chromium
+or Firefox (a second copy is named like "Firefox 2"). starfire checks this on the server and starfire Desktop checks it
+again before anything reaches Arty Desktop. If it does not open, the chat says why on its own line (you said no,
+nobody answered, no browser is connected, several are and none was named, Arty is not running) and the model is told to
+say it could not open it. Like looking at the screen, the tool is offered only to an admin in starfire Desktop when Arty
+says the capability is available, never in an ordinary browser, and never in scheduled tasks.
+
 ### 7. Update
 
 - The starfire web app updates with your server: when the server is updated, the app shows the new version the next time
@@ -238,8 +264,9 @@ running app to show the quick-ask window. `STARFIRE_WAYLAND=1` starts the app as
 
 - `contextIsolation` on, `nodeIntegration` off, `sandbox` on and no remote module in every window. The starfire window
   has one narrow preload (`preload-web.js`): only the top frame of the configured starfire origin gets it, only while the
-  Arty link is on and paired, and it exposes just `linkStatus()` and `lookAtScreen(app)`. The main process checks the
-  sender again on every call. Nothing else in the page can reach the app.
+  Arty link is on and paired, and it exposes just `linkStatus()`, `lookAtScreen(app)` and `openInBrowser(url, browser)`.
+  The main process checks the sender and the exact shape of every request again on every call, and `linkStatus()` tells
+  the page only whether the link is connected and the checked capability list. Nothing else in the page can reach the app.
 - Navigation, redirects and new windows are limited to the configured starfire origin. Any other link opens in the
   system browser (web and mail links only), and only for the main frame right after a click or key press in the window
   (one opening per click); other schemes (`file:`, `javascript:`, `data:` and the like) are refused.

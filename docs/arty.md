@@ -38,3 +38,13 @@ Arty works without the other two. Arty CLI needs Arty. starfire.ai works with ot
 ## Looking at your screen
 
 With the Arty Desktop link on, an admin can ask the chat to "look at my discord": Arty asks you to Allow a screenshot and the model sees it. See [Set up starfire Desktop](../desktop/README.md#set-up-starfire-desktop).
+
+## Capabilities and opening pages
+
+Arty Desktop 1.6.0 and newer tells starfire Desktop which capabilities it has (look at the screen, open pages in your
+browsers, and later Arty's own browser, mouse and keyboard, and the quiz helper); starfire Desktop keeps only the ones it
+knows, in the expected shape, and lists them in its Settings. When **open pages in your browsers** is available, an admin
+can ask the chat to "open example.org in Firefox" and the model calls `open_in_browser`. Every open shows Arty's Allow
+card with the exact address and browser, and nothing happens until you allow it. Nothing from the page comes back to
+starfire or the model. Only http and https addresses are accepted, and scheduled tasks never get the tool. See
+[Capabilities and "open this page"](../desktop/README.md#6a-capabilities-and-open-this-page).

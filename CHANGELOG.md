@@ -152,6 +152,13 @@
   file.
 
 ### Added
+- **Open pages in your browsers** (starfire Desktop 1.1.0 with Arty Desktop 1.6.0, admin accounts only): Arty Desktop now
+  reports its capabilities and starfire Desktop keeps only known ones in the expected shape (ids, versions, connected
+  browser names) and lists them in a Capabilities panel in its Settings. A new `open_in_browser` chat tool opens an http or
+  https address in one of your browsers through Arty Desktop, which shows its own Allow card with the exact address and
+  browser. The address and browser are checked by the server and again by starfire Desktop; nothing from the page
+  comes back; the chat shows each step and a clear line when it does not open. The tool is offered only when the page
+  says the capability is available, never in a browser, to ordinary accounts or in scheduled tasks.
 - **Set up starfire Desktop** guide in `desktop/README.md`: install on Linux (`.deb`, AppImage) and Windows, first start and sign in,
   the first-run setup code of a brand-new server, the settings, linking with Arty Desktop, "look at my ..." and its Allow
   card, updating, uninstalling and troubleshooting. The main README points to it.
