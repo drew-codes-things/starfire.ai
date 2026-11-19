@@ -11,6 +11,7 @@ function showError(message) {
 }
 
 function problemWith(fields) {
+  if (!fields.code) return "Enter the setup code from starfire's log.";
   if (!fields.email.includes('@')) return 'Enter your email address.';
   if (fields.password.length < MIN_PASSWORD_CHARS) return `Use at least ${MIN_PASSWORD_CHARS} characters for the password.`;
   if (fields.password !== fields.confirm) return "The two passwords don't match.";
@@ -30,6 +31,7 @@ form.addEventListener('submit', async event => {
   event.preventDefault();
   errorBox.hidden = true;
   const fields = {
+    code: form.code.value.trim(),
     name: form.name.value.trim(),
     email: form.email.value.trim(),
     password: form.password.value,

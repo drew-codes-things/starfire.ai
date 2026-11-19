@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import ipaddress
 import json
+import logging
 import os
 import secrets
 import threading
@@ -19,6 +21,8 @@ from fastapi.responses import JSONResponse, RedirectResponse
 import user_data
 from atomic_io import atomic_write_json
 from config import config
+
+logger = logging.getLogger(__name__)
 
 LEGACY_SESSION_COOKIE = "starfire_session"
 SECURE_SESSION_COOKIE = "__Host-" + LEGACY_SESSION_COOKIE
@@ -44,6 +48,7 @@ SETUP_PATHS = frozenset({SETUP_PAGE, "/setup.js", "/api/auth/setup"})
 MIN_PASSWORD_CHARS = 10
 MAX_FIELD_CHARS = 256
 MAX_PASSWORD_BYTES = 72
+SETUP_CODE_BYTES = 12
 PUBLIC_PREFIXES = ("/assets/", "/vendor/fonts/")
 ROLES = ("admin", "user")
 UNUSED_HASH = bcrypt.hashpw(b"starfire-timing-equaliser", bcrypt.gensalt()).decode()
@@ -51,6 +56,33 @@ UNUSED_HASH = bcrypt.hashpw(b"starfire-timing-equaliser", bcrypt.gensalt()).deco
 
 class AccountError(ValueError):
     pass
+
+
+class SetupCode:
+
+    def __init__(self, needs_setup):
+        self._needs_setup = needs_setup
+        self._code: str | None = None
+        self._lock = threading.Lock()
+
+    def current(self) -> str | None:
+        with self._lock:
+            if self._code is None and self._needs_setup():
+                self._code = secrets.token_urlsafe(SETUP_CODE_BYTES)
+                logger.warning("no account yet: open %s and enter the setup code %s to make the admin account "
+                               "(everything else stays locked until then; a restart makes a new code)",
+                               SETUP_PAGE, self._code)
+            return self._code
+
+    def matches(self, given: str) -> bool:
+        expected = self.current()
+        if expected is None or not isinstance(given, str):
+            return False
+        return hmac.compare_digest(given.strip().encode(), expected.encode())
+
+    def spend(self) -> None:
+        with self._lock:
+            self._code = None
 
 
 def check_new_password(password: str, confirm: str) -> None:

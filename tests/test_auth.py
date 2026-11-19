@@ -206,13 +206,87 @@ def setup_client(users, sessions, monkeypatch):
     import auth_routes
     monkeypatch.setattr(auth_routes, "users", users)
     monkeypatch.setattr(auth_routes, "sessions", sessions)
+    monkeypatch.setattr(auth_routes, "setup_code", auth.SetupCode(auth_routes.needs_first_account))
+    monkeypatch.setattr(auth_routes, "setup_code_limiter", LoginLimiter())
     app = build_app(users, sessions)
     app.include_router(auth_routes.router)
     return TestClient(app, base_url="https://testserver")
 
 
+def current_setup_code() -> str:
+    import auth_routes
+    return auth_routes.setup_code.current() or ""
+
+
 def setup_body(**changes):
-    return {"email": "Drew@Example.com", "name": "Drew", "password": PASSWORD, "confirm": PASSWORD, **changes}
+    return {"email": "Drew@Example.com", "name": "Drew", "password": PASSWORD, "confirm": PASSWORD,
+            "code": current_setup_code(), **changes}
+
+
+def test_setup_needs_the_one_time_code_from_the_log(setup_client, users, caplog):
+    caplog.set_level("WARNING", logger="auth")
+    code = current_setup_code()
+    assert code and code in caplog.text and "/setup.html" in caplog.text
+    without = setup_client.post("/api/auth/setup", json={k: v for k, v in setup_body().items() if k != "code"})
+    wrong = setup_client.post("/api/auth/setup", json=setup_body(code=code[:-1] + ("A" if code[-1] != "A" else "B")))
+    assert without.status_code == 401 and wrong.status_code == 401
+    assert "log" in wrong.json()["detail"] and code not in wrong.text
+    assert not users.has_users()
+    assert setup_client.post("/api/auth/setup", json=setup_body(code=f" {code} ")).status_code == 200
+    assert users.first_admin().email == "drew@example.com"
+
+
+def test_each_start_makes_a_new_long_random_setup_code(users):
+    first = auth.SetupCode(lambda: True)
+    second = auth.SetupCode(lambda: True)
+    assert first.current() == first.current()
+    assert first.current() != second.current()
+    assert len(first.current()) >= 12
+    assert not second.matches(first.current())
+
+
+def test_the_setup_code_is_compared_in_constant_time(monkeypatch):
+    compared = []
+    real_compare = auth.hmac.compare_digest
+    monkeypatch.setattr(auth.hmac, "compare_digest", lambda a, b: compared.append((a, b)) or real_compare(a, b))
+    code = auth.SetupCode(lambda: True)
+    assert code.matches(code.current()) and not code.matches("guess")
+    assert len(compared) == 2
+
+
+def test_wrong_setup_codes_lock_out_the_address(setup_client, users):
+    for _ in range(auth.MAX_FAILED_LOGINS):
+        assert setup_client.post("/api/auth/setup", json=setup_body(code="guess")).status_code == 401
+    locked = setup_client.post("/api/auth/setup", json=setup_body())
+    assert locked.status_code == 429
+    assert not users.has_users()
+
+
+def test_bad_details_keep_the_setup_code_and_success_spends_it(setup_client, users, caplog):
+    code = current_setup_code()
+    short = setup_client.post("/api/auth/setup", json=setup_body(password="short", confirm="short"))
+    assert short.status_code == 400
+    assert setup_client.post("/api/auth/setup", json=setup_body(code=code)).status_code == 200
+    import auth_routes
+    caplog.clear()
+    assert auth_routes.setup_code.current() is None and not auth_routes.setup_code.matches(code)
+    assert "setup code" not in caplog.text
+
+
+@pytest.mark.parametrize("prepare", ["has_admin", "set_up_before"])
+def test_no_setup_code_is_made_once_setup_happened(users, caplog, monkeypatch, prepare):
+    import auth_routes
+    monkeypatch.setattr(auth_routes, "users", users)
+    assert auth_routes.needs_first_account()
+    users.upsert("drew@example.com", "Drew", "admin", fast_hash(PASSWORD))
+    if prepare == "set_up_before":
+        users.mark_set_up()
+        os.remove(users.path)
+    caplog.set_level("WARNING", logger="auth")
+    code = auth.SetupCode(auth_routes.needs_first_account)
+    assert not auth_routes.needs_first_account()
+    assert code.current() is None and not code.matches("")
+    assert "setup code" not in caplog.text
 
 
 @pytest.mark.parametrize("changes, message", [

@@ -36,10 +36,12 @@
       <span class="login-wordmark">starfire<span>.ai</span></span>
     </div>
     <h1>Create your account</h1>
-    <p class="login-sub">This is the admin account, and this page only works once.</p>
+    <p class="login-sub">This is the admin account, and this page only works once. starfire prints a setup code in its log when it starts: enter it below.</p>
     <form id="setupForm" novalidate>
+      <label for="setupCode">Setup code <span class="optional">(from starfire's log)</span></label>
+      <input id="setupCode" name="code" type="text" autocomplete="one-time-code" autocapitalize="off" spellcheck="false" maxlength="256" required autofocus />
       <label for="setupName">Name <span class="optional">(optional)</span></label>
-      <input id="setupName" name="name" type="text" autocomplete="name" maxlength="256" autofocus />
+      <input id="setupName" name="name" type="text" autocomplete="name" maxlength="256" />
       <label for="setupEmail">Email</label>
       <input id="setupEmail" name="email" type="email" autocomplete="username" required />
       <label for="setupPassword">Password <span class="optional">(at least 10 characters)</span></label>

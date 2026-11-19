@@ -295,3 +295,13 @@ def test_the_rule_account_select_is_filled_from_the_accounts_or_says_there_are_n
     assert "const choices = ruleAccountChoices(accounts);" in app
     assert "settingsEls.ruleAccountSelect.disabled = !choices.usable;" in app
     assert "settingsEls.createRuleBtn.disabled = !choices.usable;" in app
+
+
+def test_the_setup_page_asks_for_the_one_time_code_and_sends_it():
+    controls = {c.get("id"): c for c in Page(read("setup.html")).controls}
+    assert controls["setupCode"]["name"] == "code"
+    assert controls["setupCode"]["autocomplete"] == "one-time-code"
+    assert "required" in controls["setupCode"]
+    script = read("setup.js")
+    assert "code: form.code.value.trim()" in script
+    assert "setup code" in script
