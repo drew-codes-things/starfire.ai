@@ -152,6 +152,9 @@
   file.
 
 ### Added
+- Each reply in a chat shows when it was sent next to the model name: Today, Yesterday, a weekday for the last six
+  days, then the date (with the year for another year), followed by the time in your own clock format. Replies saved
+  without a time show nothing.
 - **starfire Desktop links to Arty Desktop by itself** when both run as the same user: Arty Desktop 1.6.0 leaves a
   private offer file while nothing is linked, and starfire Desktop (setting **Link to Arty Desktop by itself**, on by
   default) reads it only if it is a plain file of the user with no group or other

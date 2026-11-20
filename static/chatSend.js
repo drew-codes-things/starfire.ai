@@ -335,7 +335,7 @@ async function streamReply({ model, aiIdx, startsNewChat, open, giveBack }) {
       if (!gotToken) { gotToken = true; setStatus('ready', replyLabel()); }
       if (!aiLine) {
         typing.remove();
-        const created = appendMessageRow('ai', aiIdx, replyLabel());
+        const created = appendMessageRow('ai', aiIdx, replyLabel(), null, [], new Date().toISOString());
         aiLine = created.content; aiActions = created.actions; aiRow = created.row;
         aiRow.classList.add('fresh');
         aiLine.classList.add('streaming');

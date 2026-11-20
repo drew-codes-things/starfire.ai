@@ -963,6 +963,7 @@ html.sidebar-closed #sidebarOpenBtn, html.sidebar-closed .header-new-chat { disp
 }
 .msg-avatar img { width: 18px; height: 18px; filter: invert(1); }
 .msg-head .msg-model { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg-head .msg-time { color: var(--faint); font-size: var(--fs-xs); white-space: nowrap; }
 .msg-files, .msg-images { display: flex; flex-wrap: wrap; gap: var(--s-2); justify-content: flex-end; margin-bottom: var(--s-2); }
 .msg-image { max-width: 220px; max-height: 220px; border: 1px solid var(--line); border-radius: var(--r-lg); object-fit: cover; }
 

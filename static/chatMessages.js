@@ -51,7 +51,7 @@ function markdownRender(text) {
   return text.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 }
 
-function appendMessageRow(role, idx, modelName, files, media = []) {
+function appendMessageRow(role, idx, modelName, files, media = [], created = null) {
   const w = $('welcome');
   if (w) w.remove();
 
@@ -62,7 +62,8 @@ function appendMessageRow(role, idx, modelName, files, media = []) {
     const head = document.createElement('div');
     head.className = 'msg-head';
     head.innerHTML = '<span class="msg-avatar" aria-hidden="true"><img src="assets/logo.svg" alt="" /></span>' +
-      `<span class="msg-model">${escapeHtml(modelName || 'assistant')}</span>`;
+      `<span class="msg-model">${escapeHtml(modelName || 'assistant')}</span>` +
+      `<span class="msg-time">${escapeHtml(messageStamp(created))}</span>`;
     row.appendChild(head);
   }
   if (files && files.length) {
@@ -501,7 +502,7 @@ function autosizeEditTextarea(ta) {
 
 function renderStaticMessage(role, msg, idx) {
   const text = role === 'user' ? (msg.display ?? msg.content) : msg.content;
-  const { row, content, actions } = appendMessageRow(role, idx, msg.model ? replyModelLabel(msg) : msg.model, msg.files, msg.attachments);
+  const { row, content, actions } = appendMessageRow(role, idx, msg.model ? replyModelLabel(msg) : msg.model, msg.files, msg.attachments, msg.created);
   if (role === 'ai') renderAiContent(content, text, msg.code_checks);
   else content.textContent = text;
   addActionButtons(role, row, actions, idx);

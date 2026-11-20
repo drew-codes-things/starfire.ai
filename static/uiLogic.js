@@ -25,6 +25,29 @@ function dateGroupLabel(iso, now = new Date()) {
   return updated.toLocaleString(undefined, { month: 'long', year: 'numeric' });
 }
 
+const STAMP_LAST_WEEKDAY_NAMED = 6;
+
+function startOfLocalDay(date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function stampDayLabel(moment, now, locale) {
+  const daysAgo = Math.round((startOfLocalDay(now) - startOfLocalDay(moment)) / DAY_MS);
+  if (daysAgo === 0) return 'Today';
+  if (daysAgo === 1) return 'Yesterday';
+  if (daysAgo > 1 && daysAgo <= STAMP_LAST_WEEKDAY_NAMED) return moment.toLocaleDateString(locale, { weekday: 'short' });
+  const dayAndMonth = { day: 'numeric', month: 'short' };
+  if (moment.getFullYear() === now.getFullYear()) return moment.toLocaleDateString(locale, dayAndMonth);
+  return moment.toLocaleDateString(locale, { ...dayAndMonth, year: 'numeric' });
+}
+
+function messageStamp(iso, now = new Date(), locale = undefined) {
+  const moment = new Date(iso);
+  if (!iso || isNaN(moment)) return '';
+  const clock = moment.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
+  return stampDayLabel(moment, now, locale) + ' ' + clock;
+}
+
 function themeChoiceFrom(readSetting) {
   const saved = readSetting('sf_theme');
   if (THEME_CHOICES.includes(saved)) return saved;
@@ -470,7 +493,7 @@ if (typeof module !== 'undefined' && module.exports) {
     isLocalMediaUrl, isCodeLanguageClass, toolOutcome, toolOutcomeLine,
     modelPatternsFrom, modelAccessHint, modelAccessSummary,
     DAY_MS, TOAST_MS, TOAST_ERROR_MS, TOAST_FADE_MS,
-    sentenceCase, dateGroupLabel, themeChoiceFrom, themeIsLight, showToast, removalQuestion, confirmRemove,
+    sentenceCase, dateGroupLabel, messageStamp, themeChoiceFrom, themeIsLight, showToast, removalQuestion, confirmRemove,
     pendingApprovalCards, UNTRUSTED_APPROVAL_NOTE, UNSANDBOXED_SHELL_NOTE, shellApprovalNotes, approvalHeading, resolveChatControls, isLastAssistantMessage,
     CHAT_TITLE_CHARS, submitOnEnter, closeOnEscape, chatTitleFrom, firstUnusedModel,
     MAX_SPOKEN_CHARS, takeSpokenSentences, speakableText, spokenPieces,
