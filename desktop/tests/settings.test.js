@@ -22,6 +22,7 @@ test('defaults are no address, https only, Ctrl+Shift+Space, notifications on, n
     closeToTray: true,
     artyLink: false,
     artyAutoLink: true,
+    artyLinkTurnedOff: false,
     artyLinkedByItself: false,
     artyToken: '',
     artyPort: 8765,
@@ -218,4 +219,33 @@ test('forgetting the pairing also stops linking by itself, so Unpair does not li
   assert.equal(forgotten.artyToken, '');
   assert.equal(forgotten.artyAutoLink, false);
   assert.equal(forgotten.artyLinkedByItself, false);
+});
+
+test('turning the link switch off by hand is remembered apart from never having touched it', () => {
+  const fresh = { ...DEFAULT_SETTINGS };
+  assert.equal(fresh.artyLink, false);
+  assert.equal(fresh.artyLinkTurnedOff, false);
+  const off = applySettingsPatch(fresh, { artyLink: false }).settings;
+  assert.equal(off.artyLinkTurnedOff, true);
+  const on = applySettingsPatch(off, { artyLink: true }).settings;
+  assert.equal(on.artyLinkTurnedOff, false);
+  assert.equal(applySettingsPatch(fresh, { notifications: false }).settings.artyLinkTurnedOff, false);
+  const forced = applySettingsPatch(fresh, { artyLinkTurnedOff: false });
+  assert.equal(forced.ok, false);
+  assert.match(forced.error, /artyLinkTurnedOff/);
+});
+
+test('the turned-off mark survives a restart and a bad stored value means not turned off', () => {
+  const { dir, file } = scratchFile();
+  fs.writeFileSync(file, JSON.stringify({ artyLink: false, artyLinkTurnedOff: true }));
+  assert.equal(loadSettings(file).settings.artyLinkTurnedOff, true);
+  fs.writeFileSync(file, JSON.stringify({ artyLink: false, artyLinkTurnedOff: 'yes' }));
+  assert.equal(loadSettings(file).settings.artyLinkTurnedOff, false);
+  fs.rmSync(dir, { recursive: true });
+});
+
+test('a link made by itself switches the link on; a code token leaves the switch as it is', () => {
+  const byItself = withArtyToken({ ...DEFAULT_SETTINGS }, GOOD_TOKEN, { byItself: true }).settings;
+  assert.equal(byItself.artyLink, true);
+  assert.equal(withArtyToken({ ...DEFAULT_SETTINGS }, GOOD_TOKEN).settings.artyLink, false);
 });

@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 const http = require('node:http');
 const spake2 = require('../src/spake2');
 const { createArtyLink, LOOPBACK_HOST } = require('../src/artyLink');
-const { DEFAULT_SETTINGS } = require('../src/settings');
+const { DEFAULT_SETTINGS, applySettingsPatch, withArtyToken } = require('../src/settings');
 
 const OFFER = '0123456789abcdef0123456789abcdef';
 const SAVED_TOKEN = 'REALTOKEN_rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr';
@@ -144,8 +144,41 @@ test('no attempt while a link exists: the offer is not even read', async () => {
   });
 });
 
-test('no attempt with linking by itself switched off, or with the link switched off', async () => {
-  for (const settings of [{ artyAutoLink: false }, { artyLink: false }]) {
+test('a fresh install with an offer file links without anyone touching a switch, and the link is then on', async () => {
+  await withArty({}, async (arty) => {
+    let current = { ...DEFAULT_SETTINGS, artyPort: arty.port };
+    const link = createArtyLink({
+      getSettings: () => current,
+      setToken: (token, options) => {
+        const result = withArtyToken(current, token, options);
+        if (result.ok) current = result.settings;
+        return result;
+      },
+      readOffer: () => OFFER,
+    });
+    assert.equal(current.artyLink, false);
+    assert.deepEqual(await link.linkByItself(), { ok: true });
+    assert.equal(current.artyLink, true);
+    assert.equal(current.artyLinkedByItself, true);
+    const status = await link.status();
+    assert.equal(status.state, 'connected');
+    assert.equal(status.linkedByItself, true);
+  });
+});
+
+test('once Drew turns the link switch off himself it never links by itself and never contacts Arty', async () => {
+  const turnedOff = applySettingsPatch({ ...DEFAULT_SETTINGS }, { artyLink: false }).settings;
+  assert.equal(turnedOff.artyLinkTurnedOff, true);
+  await withArty({}, async (arty) => {
+    const { link, reads } = linkFor(arty.port, { settings: { ...turnedOff, artyPort: arty.port } });
+    assert.equal((await link.linkByItself()).ok, false);
+    assert.deepEqual(arty.seen, []);
+    assert.equal(reads.length, 0);
+  });
+});
+
+test('no attempt with linking by itself switched off, or with the link switched off by Drew', async () => {
+  for (const settings of [{ artyAutoLink: false }, { artyAutoLink: false, artyLink: false }, { artyLink: false, artyLinkTurnedOff: true }, { artyLink: true, artyLinkTurnedOff: true }]) {
     await withArty({}, async (arty) => {
       const { link, reads } = linkFor(arty.port, { settings });
       assert.equal((await link.linkByItself()).ok, false);

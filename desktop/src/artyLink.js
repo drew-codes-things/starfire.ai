@@ -288,7 +288,7 @@ function createArtyLink({ getSettings, setToken, request = requestArty, readOffe
   }
 
   function mayLinkByItself(settings) {
-    return settings.artyLink === true && settings.artyAutoLink === true && settings.artyToken === '';
+    return settings.artyAutoLink === true && settings.artyLinkTurnedOff !== true && settings.artyToken === '';
   }
 
   async function linkByItself() {

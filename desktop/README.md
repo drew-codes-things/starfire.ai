@@ -110,7 +110,9 @@ Starting starfire again while it is running does not open a second copy: it brin
 The link lets the chat in starfire Desktop ask Arty Desktop, running on the same PC, to look at your screen. Nothing
 reaches anything beyond this PC: the app only talks to `127.0.0.1`.
 
-You need Arty Desktop 1.5.8 or newer on the same PC, started and running. Then:
+With Arty Desktop 1.6.0 or newer running as you, the link is made by itself (see **Linking by itself** below) and you can
+skip these steps. Otherwise, or as the fallback, you need Arty Desktop 1.5.8 or newer on the same PC, started and
+running. Then:
 
 1. In starfire Desktop open **Settings** and switch **Link to Arty Desktop** on. The light reads **Not paired** (or
    **Arty Desktop is not running** if Arty Desktop is not up yet, in which case start it).
@@ -126,9 +128,10 @@ You need Arty Desktop 1.5.8 or newer on the same PC, started and running. Then:
 To end the link, press **Unpair** (it forgets the pairing on both sides) or switch the link off. If you unlink inside
 Arty Desktop, Unpair in starfire as well and pair again later.
 
-**Linking by itself.** With Arty Desktop 1.6.0 or newer running as the same user on the same PC, you can skip the code:
-switch **Link to Arty Desktop** on and leave **Link to Arty Desktop by itself** on (the default). While nothing is
-linked, Arty Desktop leaves a private offer file in its own data folder (`~/.config/Arty/.arty_link_offer` on Linux,
+**Linking by itself.** With Arty Desktop 1.6.0 or newer running as the same user on the same PC, there is nothing to do:
+with **Link to Arty Desktop by itself** on (the default), starfire Desktop links on its own and switches **Link to Arty
+Desktop** on when it does. It never does this if you switched **Link to Arty Desktop** off yourself, or switched linking
+by itself off; in either case it does not contact Arty Desktop at all. While nothing is linked, Arty Desktop leaves a private offer file in its own data folder (`~/.config/Arty/.arty_link_offer` on Linux,
 `%APPDATA%\Arty\.arty_link_offer` on Windows, `~/Library/Application Support/Arty/.arty_link_offer` on macOS). starfire
 Desktop reads it only when it is a plain file (not a link) of at most 64 bytes holding exactly 32 lowercase hex
 characters, and on Linux and macOS only when it belongs to you and no one else can read or write it. It then pairs

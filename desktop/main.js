@@ -109,7 +109,7 @@ function tryLinkingByItself() {
 }
 
 function turnedOnLinkingByItself(current, previous) {
-  return (current.artyLink && !previous.artyLink) || (current.artyAutoLink && !previous.artyAutoLink);
+  return (current.artyLink && !previous.artyLink) || (current.artyAutoLink && !previous.artyAutoLink) || (!current.artyLinkTurnedOff && previous.artyLinkTurnedOff);
 }
 
 function startApp() {

@@ -12,12 +12,13 @@ const DEFAULT_SETTINGS = Object.freeze({
   closeToTray: true,
   artyLink: false,
   artyAutoLink: true,
+  artyLinkTurnedOff: false,
   artyLinkedByItself: false,
   artyToken: '',
   artyPort: 8765,
 });
-const BOOLEAN_KEYS = ['allowInsecure', 'startWithSystem', 'notifications', 'closeToTray', 'artyLink', 'artyAutoLink', 'artyLinkedByItself'];
-const LOCKED_KEYS = ['artyToken', 'artyPort', 'artyLinkedByItself'];
+const BOOLEAN_KEYS = ['allowInsecure', 'startWithSystem', 'notifications', 'closeToTray', 'artyLink', 'artyAutoLink', 'artyLinkTurnedOff', 'artyLinkedByItself'];
+const LOCKED_KEYS = ['artyToken', 'artyPort', 'artyLinkTurnedOff', 'artyLinkedByItself'];
 const ARTY_TOKEN_FORMAT = /^[A-Za-z0-9_-]{20,200}$/;
 const MIN_ARTY_PORT = 1024;
 const MAX_ARTY_PORT = 65535;
@@ -88,6 +89,7 @@ function applySettingsPatch(current, patch) {
     if (typeof patch[key] !== 'boolean') return refuse(`${key} must be on or off.`);
     merged[key] = patch[key];
   }
+  if ('artyLink' in patch) merged.artyLinkTurnedOff = !patch.artyLink;
   if ('shortcut' in patch) {
     const shortcut = parseAccelerator(patch.shortcut);
     if (!shortcut.ok) return refuse(`Shortcut: ${shortcut.error}`);
@@ -111,7 +113,8 @@ function publicSettings(settings) {
 function withArtyToken(current, token, { byItself = false } = {}) {
   if (token !== '' && !isArtyToken(token)) return refuse('That does not look like a token from Arty Desktop.');
   if (token === '') return { ok: true, settings: { ...current, artyToken: '', artyLinkedByItself: false, artyAutoLink: false } };
-  return { ok: true, settings: { ...current, artyToken: token, artyLinkedByItself: byItself === true } };
+  if (byItself === true) return { ok: true, settings: { ...current, artyToken: token, artyLinkedByItself: true, artyLink: true } };
+  return { ok: true, settings: { ...current, artyToken: token, artyLinkedByItself: false } };
 }
 
 module.exports = { isArtyToken, DEFAULT_SETTINGS, loadSettings, saveSettings, applySettingsPatch, publicSettings, withArtyToken };
