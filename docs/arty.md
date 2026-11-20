@@ -39,6 +39,15 @@ Arty works without the other two. Arty CLI needs Arty. starfire.ai works with ot
 
 With the Arty Desktop link on, an admin can ask the chat to "look at my discord": Arty asks you to Allow a screenshot and the model sees it. See [Set up starfire Desktop](../desktop/README.md#set-up-starfire-desktop).
 
+## Linking starfire Desktop to Arty Desktop
+
+starfire Desktop links to Arty Desktop on the same PC with a 6 digit code from Arty's tray menu, or, with Arty Desktop
+1.6.0 or newer running as the same user, by itself: Arty leaves a private same-user offer file while nothing is linked and
+starfire Desktop pairs with it (the same SPAKE2 pairing as the code, so the offer never crosses the wire and Arty must
+prove it first). Unpair switches linking by itself off. Any program running as the same user could already reach Arty's
+token, so this adds no new trust; web pages and other users still get nothing. See
+[Link starfire Desktop with Arty Desktop](../desktop/README.md#5-link-starfire-desktop-with-arty-desktop-optional).
+
 ## Capabilities and opening pages
 
 Arty Desktop 1.6.0 and newer tells starfire Desktop which capabilities it has (look at the screen, open pages in your

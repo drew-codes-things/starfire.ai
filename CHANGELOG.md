@@ -152,6 +152,12 @@
   file.
 
 ### Added
+- **starfire Desktop links to Arty Desktop by itself** when both run as the same user: Arty Desktop 1.6.0 leaves a
+  private offer file while nothing is linked, and starfire Desktop (setting **Link to Arty Desktop by itself**, on by
+  default, only while the link switch is on) reads it only if it is a plain file of the user with no group or other
+  access holding exactly 32 hex characters, then pairs with the same SPAKE2 flow as the 6 digit code (marked
+  `local: true`). It tries at start and at most every 30 seconds, never while linked; Unpair switches it off. The code
+  stays as the fallback.
 - **Open pages in your browsers** (starfire Desktop 1.1.0 with Arty Desktop 1.6.0, admin accounts only): Arty Desktop now
   reports its capabilities and starfire Desktop keeps only known ones in the expected shape (ids, versions, connected
   browser names) and lists them in a Capabilities panel in its Settings. A new `open_in_browser` chat tool opens an http or
