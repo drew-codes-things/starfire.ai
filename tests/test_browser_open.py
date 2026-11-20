@@ -20,6 +20,7 @@ import builtin_tools
 import chat_stream
 import model_capabilities
 import routes
+import shell_tool
 import user_data
 from api_key_manager import APIKeyManager
 from auth import SessionStore, UserStore
@@ -480,3 +481,31 @@ def test_an_answer_cannot_carry_extra_fields_or_oversized_text(app, body):
     admin = login(app, "admin@example.com")
     request_id = stage_for(admin)
     assert admin.post(f"/api/browser-opens/{request_id}/result", json=body).status_code == 422
+
+
+def run_after_untrusted_content(approved, outcome):
+    async def go():
+        token = user_data.current_user_id.set("owner")
+        ctx = opening()
+        ctx.untrusted_read = True
+        try:
+            task = asyncio.ensure_future(builtin_tools.call_builtin_tool(TOOL, {"url": ADDRESS}, ctx))
+            asked = (await asyncio.wait_for(ctx.events.get(), 5))["shell_pending"]
+            assert browser_open._pending == {}
+            shell_tool.resolve(asked["pending_id"], approved, "owner")
+            seen = await answered(ctx, outcome) if approved else None
+            return await task, asked, seen
+        finally:
+            user_data.current_user_id.reset(token)
+    return asyncio.run(go())
+
+
+def test_after_untrusted_content_starfire_asks_with_its_warning_before_arty_is_asked():
+    result, asked, seen = run_after_untrusted_content(True, opened())
+    assert asked["tool"] == TOOL and asked["untrusted"] is True and ADDRESS in asked["command"]
+    assert seen["url"] == ADDRESS and result.startswith(f"Opened {ADDRESS}")
+
+
+def test_after_untrusted_content_a_rejected_open_never_reaches_arty():
+    result, _asked, _seen = run_after_untrusted_content(False, None)
+    assert result.startswith("error: the user rejected") and browser_open._pending == {}

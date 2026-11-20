@@ -811,6 +811,14 @@ def _browser_open_success(url: str, requested: str, outcome: dict) -> str:
     return (f"Opened {url} in {where}. Nothing from the page was read: you have not seen what it shows, "
             "so do not describe its content.")
 
+async def _ask_first_after_untrusted_content(arguments: dict, ctx: ToolContext) -> str | None:
+    if not has_read_untrusted_content(ctx):
+        return None
+    shown = _approval_summary(BROWSER_TOOL, arguments)
+    if shown is None:
+        return _too_long_for_a_card(BROWSER_TOOL)
+    return await wait_for_approval(ctx, BROWSER_TOOL, shown, f"this {BROWSER_TOOL} call")
+
 async def _open_in_browser(arguments: dict, ctx: ToolContext) -> str:
     if not ctx.may_use_host_tools:
         return f"error: only an admin account can use {BROWSER_TOOL}, because it acts on their computer"
@@ -820,6 +828,7 @@ async def _open_in_browser(arguments: dict, ctx: ToolContext) -> str:
         return NO_ONE_TO_ASK
     url, browser = arguments.get("url"), arguments.get("browser", "")
     refusal = _refused_web_address(url) or _refused_browser_name(browser)
+    refusal = refusal or await _ask_first_after_untrusted_content(arguments, ctx)
     if refusal:
         return refusal
     request_id = browser_open.stage(url, browser, user_data.current_user_id.get())
