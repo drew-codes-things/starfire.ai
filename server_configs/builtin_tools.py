@@ -788,6 +788,8 @@ def _refused_web_address(url) -> str | None:
         return "error: url must not contain spaces, line breaks or hidden characters"
     if not url.startswith(browser_open.WEB_SCHEMES) or not urlsplit(url).hostname:
         return "error: url must be a full http:// or https:// web address"
+    if not browser_open.site_is_shown_in_full(urlsplit(url).hostname):
+        return "error: the url's site name is too long to show on the Allow card"
     return None
 
 def _refused_browser_name(browser) -> str | None:

@@ -178,6 +178,21 @@ test('off or unpaired sends nothing and says it is not linked', async () => {
   }
 });
 
+test('a site too long to show on the Allow card never leaves the app', async () => {
+  const { link, calls } = build();
+  const addresses = [
+    `https://accounts.google.com.${'a'.repeat(1900)}.example/`,
+    `https://${'a'.repeat(64)}.example/`,
+    `https://${Array(5).fill('a'.repeat(60)).join('.')}.example/`,
+  ];
+  for (const url of addresses) {
+    const result = await link.openInBrowser(url, '');
+    assert.equal(result.ok, false, url.slice(0, 60));
+    assert.equal(result.reason, 'bad_request');
+  }
+  assert.equal(calls.length, 0);
+});
+
 test('an address or browser that cannot be shown plainly on the Allow card never leaves the app', async () => {
   const { link, calls } = build();
   const addresses = [

@@ -26,6 +26,8 @@ const BROWSER_NAME_FORMAT = /^(Chrome|Edge|Brave|Opera|Vivaldi|Chromium|Firefox)
 const BROWSER_STATES = new Set(['connected']);
 const MAX_BROWSER_CHARS = 40;
 const MAX_URL_CHARS = 2000;
+const MAX_HOST_CHARS = 253;
+const MAX_LABEL_CHARS = 63;
 const WEB_ADDRESS_START = /^https?:\/\//;
 const ARTY_VERSION_FORMAT = /^\d+\.\d+\.\d+$/;
 const MAX_ARTY_VERSION_CHARS = 20;
@@ -142,11 +144,16 @@ function isBrowserName(name) {
   return typeof name === 'string' && name.length <= MAX_BROWSER_CHARS && BROWSER_NAME_FORMAT.test(name);
 }
 
+function isSiteShownInFull(hostname) {
+  return hostname !== '' && hostname.length <= MAX_HOST_CHARS
+    && hostname.split('.').every((label) => label.length <= MAX_LABEL_CHARS);
+}
+
 function isWebAddress(url) {
   if (typeof url !== 'string' || url.length > MAX_URL_CHARS || HIDDEN_CHARACTER.test(url)) return false;
   if (!WEB_ADDRESS_START.test(url)) return false;
   try {
-    return new URL(url).hostname !== '';
+    return isSiteShownInFull(new URL(url).hostname);
   } catch (error) {
     return false;
   }

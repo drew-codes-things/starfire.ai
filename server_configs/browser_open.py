@@ -11,6 +11,7 @@ MAX_BROWSER_CHARS = 40
 MAX_DETAIL_CHARS = 300
 MAX_TAB = 2**53
 WEB_SCHEMES = ("http://", "https://")
+MAX_HOST_CHARS = 253
 BROWSER_NAMES = ("Chrome", "Edge", "Brave", "Opera", "Vivaldi", "Chromium", "Firefox")
 BROWSER_NAME_FORMAT = re.compile(rf"(?:{'|'.join(BROWSER_NAMES)})(?: [2-9])?")
 REASON_TEXTS = {
@@ -100,3 +101,11 @@ async def wait_for_open(request_id: str) -> dict:
         return {"ok": False, "reason": "timed_out"}
     finally:
         _pending.pop(request_id, None)
+
+
+def site_is_shown_in_full(host: str) -> bool:
+    try:
+        ascii_host = host.encode("idna")
+    except UnicodeError:
+        return False
+    return 0 < len(ascii_host) <= MAX_HOST_CHARS

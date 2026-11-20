@@ -173,6 +173,17 @@ def test_a_bad_address_is_refused_before_anything_is_staged(arguments):
     assert ctx.events.empty()
 
 
+@pytest.mark.parametrize("url", ["https://accounts.google.com." + "a" * 1900 + ".example/", "https://" + "a" * 64 + ".example/",
+                                 "https://" + ".".join(["a" * 60] * 5) + ".example/"],
+                         ids=["very long host", "label over 63", "host over 253"])
+def test_a_site_too_long_to_show_on_the_card_is_refused_before_anything_is_staged(url, monkeypatch):
+    monkeypatch.setattr(browser_open, "OPEN_TIMEOUT_SECONDS", 0.1)
+    ctx = opening()
+    result, _request = run_tool(ctx, {"url": url}, None)
+    assert result.startswith("error: ") and "site" in result
+    assert browser_open._pending == {}
+
+
 @pytest.mark.parametrize("browser", [5, None, ["Firefox"], "Netscape", "firefox", "Firefox 1", "Firefox 10", "Fire‮fox",
                                      "Firefox\n", "x" * 41, " Firefox"])
 def test_a_bad_browser_is_refused_before_anything_is_staged(browser):
