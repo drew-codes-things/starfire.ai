@@ -118,13 +118,28 @@ You need Arty Desktop 1.5.8 or newer on the same PC, started and running. Then:
    expires after two minutes. Five wrong tries use it up.
 3. Type the 6 digits into the box that appeared under **Pair with Arty Desktop** (a space in the middle is fine) and press
    **Pair**. Nothing sends the code itself: both apps prove they know it and work out the shared token on their own.
-4. The light turns **Connected** and the row says **Paired with Arty Desktop**. If it says computer control is off in
+4. The light turns **Connected** and the row says **Linked to Arty Desktop**. If it says computer control is off in
    Arty Desktop, turn on its computer control (the HANDS setting) or every step will be refused.
 5. Optional check: press **Try it**. Arty Desktop shows an Allow card for a step that lists the open windows. Allow it and
    starfire shows what Arty answered.
 
 To end the link, press **Unpair** (it forgets the pairing on both sides) or switch the link off. If you unlink inside
 Arty Desktop, Unpair in starfire as well and pair again later.
+
+**Linking by itself.** With Arty Desktop 1.6.0 or newer running as the same user on the same PC, you can skip the code:
+switch **Link to Arty Desktop** on and leave **Link to Arty Desktop by itself** on (the default). While nothing is
+linked, Arty Desktop leaves a private offer file in its own data folder (`~/.config/Arty/.arty_link_offer` on Linux,
+`%APPDATA%\Arty\.arty_link_offer` on Windows, `~/Library/Application Support/Arty/.arty_link_offer` on macOS). starfire
+Desktop reads it only when it is a plain file (not a link) of at most 64 bytes holding exactly 32 lowercase hex
+characters, and on Linux and macOS only when it belongs to you and no one else can read or write it. It then pairs
+exactly as with a code, using the offer instead of the 6 digits: Arty Desktop must prove it holds the same offer before
+starfire sends its own proof, and the offer itself never crosses the wire. It tries when it starts and then at most every
+30 seconds while unlinked, never while a link exists. The row then says **Linked to Arty Desktop (it linked by itself)**.
+**Unpair** also switches linking by itself off, so it does not link straight back; switch it on again when you want it.
+The code above stays as the fallback, for example when the two apps run as different users.
+
+Any program running as the same user could already read Arty Desktop's own files, including its link token, so the
+offer file adds no new trust. Web pages and other users on the PC still get nothing.
 
 ### 6. "Look at my ..." and the Allow card
 
@@ -229,7 +244,8 @@ Deleting the config folder also forgets the Arty link on this PC; unlink in Arty
   notification says so. Click it to open the window. Off in Settings if you prefer.
 - **Start with the PC** - off by default. On Linux it writes `~/.config/autostart/starfire-desktop.desktop`; on Windows it
   uses the login item. It starts hidden in the tray.
-- **Link to Arty Desktop** - a switch in Settings with a light that says Off, Not paired, Arty Desktop is not running,
+- **Link to Arty Desktop** - a switch in Settings, with a second switch to link by itself when Arty Desktop runs as the
+  same user (see step 5), and a light that says Off, Not paired, Arty Desktop is not running,
   Arty Desktop did not prove itself, or Connected. Switched on, you pair once: Arty Desktop's tray menu has **Link
   starfire...**, which shows a 6 digit code (one use, two minutes); type it into Settings. After that starfire Desktop can
   ask Arty Desktop's computer control to take a step (Settings has a **Try it** button that asks for the list of open

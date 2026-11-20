@@ -5,12 +5,16 @@
   const shortcutChange = document.getElementById('shortcut-change');
   const shortcutHelp = document.getElementById('shortcut-help');
   const addressValue = document.getElementById('address-value');
-  const TOGGLES = ['startWithSystem', 'notifications', 'closeToTray', 'artyLink'];
+  const TOGGLES = ['startWithSystem', 'notifications', 'closeToTray', 'artyLink', 'artyAutoLink'];
   const linkLight = document.getElementById('link-light');
   const linkLabel = document.getElementById('link-label');
   const linkPairing = document.getElementById('link-pairing');
   const linkPaired = document.getElementById('link-paired');
   const linkDetail = document.getElementById('link-detail');
+  const linkPairedTitle = document.getElementById('link-paired-title');
+  const linkPairingHelp = document.getElementById('link-pairing-help');
+  const CODE_HELP = 'In Arty Desktop open the tray menu, choose Link starfire, then Make a code. Type the 6 digits here within two minutes.';
+  const AUTO_LINK_HELP = 'starfire links by itself when Arty Desktop is running as you on this PC. If it does not, pair with a code:';
   const linkCode = document.getElementById('link-code');
   const linkPairButton = document.getElementById('link-pair');
   const capabilityPanel = document.getElementById('link-capabilities');
@@ -21,6 +25,7 @@
   const STEP_PREVIEW_CHARS = 300;
   const DEFAULT_HELP = shortcutHelp.textContent;
   let capturing = false;
+  let autoLinkOn = true;
 
   function say(text, kind) {
     status.textContent = text;
@@ -31,6 +36,7 @@
     shortcutValue.textContent = settings.shortcut;
     addressValue.textContent = settings.address || 'Not set';
     for (const key of TOGGLES) document.getElementById(key).checked = settings[key];
+    autoLinkOn = settings.artyAutoLink === true;
     if (shortcutProblem) say(shortcutProblem, 'bad');
   }
 
@@ -69,6 +75,8 @@
     linkPairing.hidden = state.state !== 'unpaired';
     linkPaired.hidden = !(state.paired && state.state !== 'off');
     linkDetail.textContent = linkPaired.hidden ? '' : linkDetailFor(state);
+    linkPairedTitle.textContent = state.linkedByItself ? 'Linked to Arty Desktop (it linked by itself)' : 'Linked to Arty Desktop';
+    linkPairingHelp.textContent = `Not linked. ${autoLinkOn ? AUTO_LINK_HELP : CODE_HELP}`;
     renderCapabilities(state);
   }
 

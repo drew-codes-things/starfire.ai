@@ -11,11 +11,13 @@ const DEFAULT_SETTINGS = Object.freeze({
   notifications: true,
   closeToTray: true,
   artyLink: false,
+  artyAutoLink: true,
+  artyLinkedByItself: false,
   artyToken: '',
   artyPort: 8765,
 });
-const BOOLEAN_KEYS = ['allowInsecure', 'startWithSystem', 'notifications', 'closeToTray', 'artyLink'];
-const LOCKED_KEYS = ['artyToken', 'artyPort'];
+const BOOLEAN_KEYS = ['allowInsecure', 'startWithSystem', 'notifications', 'closeToTray', 'artyLink', 'artyAutoLink', 'artyLinkedByItself'];
+const LOCKED_KEYS = ['artyToken', 'artyPort', 'artyLinkedByItself'];
 const ARTY_TOKEN_FORMAT = /^[A-Za-z0-9_-]{20,200}$/;
 const MIN_ARTY_PORT = 1024;
 const MAX_ARTY_PORT = 65535;
@@ -106,9 +108,10 @@ function publicSettings(settings) {
   return { ...shown, artyPaired: artyToken !== '' };
 }
 
-function withArtyToken(current, token) {
+function withArtyToken(current, token, { byItself = false } = {}) {
   if (token !== '' && !isArtyToken(token)) return refuse('That does not look like a token from Arty Desktop.');
-  return { ok: true, settings: { ...current, artyToken: token } };
+  if (token === '') return { ok: true, settings: { ...current, artyToken: '', artyLinkedByItself: false, artyAutoLink: false } };
+  return { ok: true, settings: { ...current, artyToken: token, artyLinkedByItself: byItself === true } };
 }
 
 module.exports = { isArtyToken, DEFAULT_SETTINGS, loadSettings, saveSettings, applySettingsPatch, publicSettings, withArtyToken };

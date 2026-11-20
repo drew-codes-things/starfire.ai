@@ -95,6 +95,7 @@ async function openSettingsPage(linkState) {
   vm.runInNewContext(script, context);
   await new Promise((resolve) => setImmediate(resolve));
   return {
+    element: (id) => document.getElementById(id),
     list: document.getElementById('capability-list'),
     panel: document.getElementById('link-capabilities'),
     refresh: async (state) => { currentState = state; await timers[0](); },
@@ -147,4 +148,20 @@ test('the capabilities panel follows the link status as it refreshes', async () 
 test('a capability the page has no label for is not shown, and names arrive only as text', async () => {
   const page = await openSettingsPage({ ...CONNECTED, capabilities: [{ id: 'shell.run', version: 1, available: true }, { id: 'browser.open', version: 1, available: true, browsers: [{ name: '<img src=x onerror=alert(1)>', state: 'connected' }] }] });
   assert.deepEqual(page.list.children.map(textOf), ['Open pages in your browsers (<img src=x onerror=alert(1)>)available']);
+});
+
+test('settings has a switch for linking by itself', () => {
+  assert.match(html, /<input id="artyAutoLink" type="checkbox"/);
+  assert.match(script, /'artyAutoLink'/);
+  assert.match(html, /id="link-paired-title"/);
+});
+
+test('the paired row says the link was made by itself only when it was', async () => {
+  const page = await openSettingsPage({ ...CONNECTED, linkedByItself: true });
+  assert.equal(page.element('link-paired-title').textContent, 'Linked to Arty Desktop (it linked by itself)');
+  await page.refresh({ ...CONNECTED, linkedByItself: false });
+  assert.equal(page.element('link-paired-title').textContent, 'Linked to Arty Desktop');
+  await page.refresh({ state: 'unpaired', paired: false, capabilities: [], artyDesktop: '', linkedByItself: false });
+  assert.equal(page.element('link-pairing').hidden, false);
+  assert.match(page.element('link-pairing-help').textContent, /^Not linked\./);
 });

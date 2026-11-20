@@ -52,17 +52,24 @@
       </div>
       <label class="switch"><input id="artyLink" type="checkbox" aria-label="Link to Arty Desktop"><span class="track"></span></label>
     </div>
+    <div class="row">
+      <div class="what">
+        <strong>Link to Arty Desktop by itself</strong>
+        <small>When Arty Desktop runs as you on this PC, link without a code. Unpair turns this off.</small>
+      </div>
+      <label class="switch"><input id="artyAutoLink" type="checkbox" aria-label="Link to Arty Desktop by itself"><span class="track"></span></label>
+    </div>
     <div class="row" id="link-pairing" hidden>
       <div class="what">
         <strong>Pair with Arty Desktop</strong>
-        <small>In Arty Desktop open the tray menu, choose Link starfire, then Make a code. Type the 6 digits here within two minutes.</small>
+        <small id="link-pairing-help">Not linked. In Arty Desktop open the tray menu, choose Link starfire, then Make a code. Type the 6 digits here within two minutes.</small>
         <input id="link-code" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" maxlength="7" placeholder="123 456" aria-label="Code from Arty Desktop">
       </div>
       <button id="link-pair" type="button">Pair</button>
     </div>
     <div class="row" id="link-paired" hidden>
       <div class="what">
-        <strong>Paired with Arty Desktop</strong>
+        <strong id="link-paired-title">Linked to Arty Desktop</strong>
         <small id="link-detail"></small>
       </div>
       <div class="pair-actions">

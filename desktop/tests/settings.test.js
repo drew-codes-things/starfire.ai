@@ -21,6 +21,8 @@ test('defaults are no address, https only, Ctrl+Shift+Space, notifications on, n
     notifications: true,
     closeToTray: true,
     artyLink: false,
+    artyAutoLink: true,
+    artyLinkedByItself: false,
     artyToken: '',
     artyPort: 8765,
   });
@@ -178,4 +180,42 @@ test('a new token is checked, and an empty one forgets the pairing', () => {
   assert.equal(withArtyToken(current, 'nope').ok, false);
   assert.equal(withArtyToken(current, '').settings.artyToken, '');
   assert.equal(withArtyToken({ ...DEFAULT_SETTINGS }, GOOD_TOKEN).settings.artyToken, GOOD_TOKEN);
+});
+
+test('linking by itself can be switched, but whether a link was made by itself cannot be set from a page', () => {
+  const current = { ...DEFAULT_SETTINGS };
+  assert.equal(applySettingsPatch(current, { artyAutoLink: false }).settings.artyAutoLink, false);
+  assert.equal(applySettingsPatch(current, { artyAutoLink: 'no' }).ok, false);
+  const marked = applySettingsPatch(current, { artyLinkedByItself: true });
+  assert.equal(marked.ok, false);
+  assert.match(marked.error, /artyLinkedByItself/);
+});
+
+test('a stored link-by-itself switch that is not a boolean falls back to on', () => {
+  const { dir, file } = scratchFile();
+  for (const bad of ['false', 0, null]) {
+    fs.writeFileSync(file, JSON.stringify({ artyAutoLink: bad, artyLinkedByItself: 'yes' }));
+    const { settings } = loadSettings(file);
+    assert.equal(settings.artyAutoLink, true, String(bad));
+    assert.equal(settings.artyLinkedByItself, false);
+  }
+  fs.writeFileSync(file, JSON.stringify({ artyAutoLink: false, artyLinkedByItself: true }));
+  assert.equal(loadSettings(file).settings.artyAutoLink, false);
+  assert.equal(loadSettings(file).settings.artyLinkedByItself, true);
+  fs.rmSync(dir, { recursive: true });
+});
+
+test('a token says whether it came from linking by itself', () => {
+  const byItself = withArtyToken({ ...DEFAULT_SETTINGS }, GOOD_TOKEN, { byItself: true }).settings;
+  assert.equal(byItself.artyLinkedByItself, true);
+  assert.equal(withArtyToken({ ...DEFAULT_SETTINGS, artyLinkedByItself: true }, GOOD_TOKEN).settings.artyLinkedByItself, false);
+  assert.equal(withArtyToken({ ...DEFAULT_SETTINGS }, GOOD_TOKEN, { byItself: 'yes' }).settings.artyLinkedByItself, false);
+});
+
+test('forgetting the pairing also stops linking by itself, so Unpair does not link straight back', () => {
+  const current = { ...DEFAULT_SETTINGS, artyToken: GOOD_TOKEN, artyAutoLink: true, artyLinkedByItself: true };
+  const forgotten = withArtyToken(current, '').settings;
+  assert.equal(forgotten.artyToken, '');
+  assert.equal(forgotten.artyAutoLink, false);
+  assert.equal(forgotten.artyLinkedByItself, false);
 });

@@ -2,6 +2,7 @@ const electron = require('electron');
 const path = require('node:path');
 const { createSettingsController } = require('./src/controller');
 const { createArtyLink } = require('./src/artyLink');
+const { offerFile, readOffer } = require('./src/linkOffer');
 const { loadSettings } = require('./src/settings');
 const { applyAutostart } = require('./src/autostart');
 const { acceleratorFromKeyEvent } = require('./src/shortcut');
@@ -26,6 +27,7 @@ const CONNECTED_PAUSE_MS = 700;
 const SETTINGS_PAGE = 'settings.html';
 const TRY_NEEDS_A_CLICK = { ok: false, error: 'Click Try it in this window to try the link.' };
 const CHAT_STREAM_FILTER = { urls: ['*://*/api/chat_stream*'] };
+const AUTO_LINK_EVERY_MS = 30000;
 
 let windows = null;
 let controller = null;
@@ -100,6 +102,16 @@ function handleLaunch(argv) {
   windows.showMain();
 }
 
+function tryLinkingByItself() {
+  artyLink.linkByItself().then((result) => {
+    if (!result.ok && !result.skipped) console.error(`Could not link to Arty Desktop by itself: ${result.error}`);
+  }).catch((error) => console.error(`Linking to Arty Desktop by itself failed: ${error.message}`));
+}
+
+function turnedOnLinkingByItself(current, previous) {
+  return (current.artyLink && !previous.artyLink) || (current.artyAutoLink && !previous.artyAutoLink);
+}
+
 function startApp() {
   app.setAppUserModelId(APP_ID);
   const settingsFile = path.join(app.getPath('userData'), 'config.json');
@@ -115,9 +127,15 @@ function startApp() {
     onChange: (current, previous) => {
       if (trayHandle) trayHandle.refresh();
       if (windows && isBridgeOffered(current) !== isBridgeOffered(previous)) windows.reloadMain();
+      if (artyLink && turnedOnLinkingByItself(current, previous)) tryLinkingByItself();
     },
   });
-  artyLink = createArtyLink({ getSettings: () => controller.get(), setToken: (token) => controller.setArtyToken(token) });
+  const linkOfferFile = offerFile(app.getPath('appData'));
+  artyLink = createArtyLink({
+    getSettings: () => controller.get(),
+    setToken: (token, options) => controller.setArtyToken(token, options),
+    readOffer: () => readOffer(linkOfferFile),
+  });
   windows = createWindowManager({ electron, controller, pagesDir: PAGES_DIR, preloadPath: PRELOAD_PATH, webPreloadPath: WEB_PRELOAD_PATH, iconPath: ICON_PATH });
 
   installStarfireSession();
@@ -157,6 +175,9 @@ function startApp() {
       console.error(`Could not refresh the start-with-the-PC entry: ${error.message}`);
     }
   }
+
+  tryLinkingByItself();
+  setInterval(tryLinkingByItself, AUTO_LINK_EVERY_MS);
 
   buildMenu();
   trayHandle = createTray({

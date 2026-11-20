@@ -38,6 +38,12 @@ const TRY_STEP = Object.freeze({ tool: 'computer_apps', arguments: Object.freeze
 const NOT_PROVEN = 'Arty Desktop did not prove it is the app you paired with, so nothing was sent.';
 const NOT_ARTY_WHILE_PAIRING = 'Whatever answered did not prove it is Arty Desktop holding that code, so nothing was sent or saved. Check the 6 digits and try again.';
 const NOT_ACCEPTED_WHILE_PAIRING = 'The pairing was not accepted. Check that the code is still showing in Arty Desktop and type it again, or make a new code there.';
+const NOT_ARTY_WHILE_LINKING = 'Whatever answered did not prove it is Arty Desktop holding this PC\'s link offer, so nothing was sent or saved.';
+const NOT_ACCEPTED_WHILE_LINKING = 'Arty Desktop did not accept linking by itself. It makes a new offer after too many tries.';
+const MIN_AUTO_LINK_GAP_MS = 30000;
+const OFFER_FORMAT = /^[0-9a-f]{32}$/;
+const CODE_PAIRING = Object.freeze({ local: false, notArty: NOT_ARTY_WHILE_PAIRING, notAccepted: NOT_ACCEPTED_WHILE_PAIRING });
+const SAME_USER_PAIRING = Object.freeze({ local: true, notArty: NOT_ARTY_WHILE_LINKING, notAccepted: NOT_ACCEPTED_WHILE_LINKING });
 const NETWORK_FAILURES = ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EPIPE'];
 const OWN_FAILURES = ['EREDIRECT', 'ETOOLARGE', 'EBADBODY', 'ETIMEDOUT'];
 const NOT_RUNNING = 'Arty Desktop is not running on this computer, or it has not finished starting.';
@@ -184,12 +190,16 @@ function validArtyVersion(raw) {
   return typeof raw === 'string' && raw.length <= MAX_ARTY_VERSION_CHARS && ARTY_VERSION_FORMAT.test(raw) ? raw : '';
 }
 
-function linkState(state, paired) {
-  return { state, paired, capabilities: [], artyDesktop: '' };
+function linkState(state, paired, linkedByItself = false) {
+  return { state, paired, linkedByItself: paired && linkedByItself, capabilities: [], artyDesktop: '' };
 }
 
-function connectedState(body) {
-  return { state: 'connected', paired: true, computer: body.computer === true, capabilities: validCapabilities(body.capabilities), artyDesktop: validArtyVersion(body.arty_desktop) };
+function connectedState(body, linkedByItself) {
+  return { ...linkState('connected', true, linkedByItself), computer: body.computer === true, capabilities: validCapabilities(body.capabilities), artyDesktop: validArtyVersion(body.arty_desktop) };
+}
+
+function withLocalMark(body, kind) {
+  return kind.local ? { ...body, local: true } : body;
 }
 
 function lookFailure(reason, error) {
@@ -212,7 +222,8 @@ function openedTab(tab) {
   return Number.isSafeInteger(tab) && tab >= 0 ? tab : null;
 }
 
-function createArtyLink({ getSettings, setToken, request = requestArty }) {
+function createArtyLink({ getSettings, setToken, request = requestArty, readOffer = () => null, now = Date.now }) {
+  let lastAutoLinkAt = -Infinity;
   async function isProvenArty(settings) {
     const nonce = randomBytes(NONCE_BYTES).toString('hex');
     const answer = await request({ method: 'GET', path: `/link/proof?nonce=${nonce}`, port: settings.artyPort, timeoutMs: STATUS_TIMEOUT_MS });
@@ -222,33 +233,50 @@ function createArtyLink({ getSettings, setToken, request = requestArty }) {
   async function status() {
     const settings = getSettings();
     const paired = settings.artyToken !== '';
-    if (!settings.artyLink) return linkState('off', paired);
+    const byItself = settings.artyLinkedByItself === true;
+    if (!settings.artyLink) return linkState('off', paired, byItself);
     if (!paired) return linkState('unpaired', false);
     let answer;
     try {
-      if (!(await isProvenArty(settings))) return linkState('unproven', true);
+      if (!(await isProvenArty(settings))) return linkState('unproven', true, byItself);
       answer = await request({ method: 'GET', path: '/link/status', token: settings.artyToken, port: settings.artyPort, timeoutMs: STATUS_TIMEOUT_MS });
     } catch (error) {
-      return linkState('unreachable', true);
+      return linkState('unreachable', true, byItself);
     }
-    if (answer.status === 403) return linkState('unproven', true);
-    if (answer.status !== 200 || bodyOf(answer).ok !== true) return linkState('unreachable', true);
-    return connectedState(bodyOf(answer));
+    if (answer.status === 403) return linkState('unproven', true, byItself);
+    if (answer.status !== 200 || bodyOf(answer).ok !== true) return linkState('unreachable', true, byItself);
+    return connectedState(bodyOf(answer), byItself);
   }
 
-  async function finishPairing(settings, code, secret, share, started) {
+  async function finishPairing(settings, password, kind, secret, share, started) {
     let key;
     try {
-      key = spake2.sharedKey(secret, code, spake2.APP, share, started.share);
+      key = spake2.sharedKey(secret, password, spake2.APP, share, started.share);
     } catch (error) {
-      return refuse(NOT_ARTY_WHILE_PAIRING);
+      return refuse(kind.notArty);
     }
-    if (!isSameProof(started.proof, spake2.proof(key, spake2.ARTY))) return refuse(NOT_ARTY_WHILE_PAIRING);
-    const answer = await request({ method: 'POST', path: '/link/pair/finish', body: { session: started.session, proof: spake2.proof(key, spake2.APP) }, port: settings.artyPort, timeoutMs: PAIR_TIMEOUT_MS });
+    if (!isSameProof(started.proof, spake2.proof(key, spake2.ARTY))) return refuse(kind.notArty);
+    const finish = withLocalMark({ session: started.session, proof: spake2.proof(key, spake2.APP) }, kind);
+    const answer = await request({ method: 'POST', path: '/link/pair/finish', body: finish, port: settings.artyPort, timeoutMs: PAIR_TIMEOUT_MS });
     const body = bodyOf(answer);
     if (answer.status !== 200 || body.ok !== true) return refuse(typeof body.error === 'string' ? shownText(body.error) : 'Arty Desktop did not finish the pairing.');
-    const saved = setToken(spake2.linkToken(key));
+    const saved = setToken(spake2.linkToken(key), { byItself: kind.local });
     return saved.ok ? { ok: true } : saved;
+  }
+
+  async function pairWithPassword(settings, password, kind) {
+    const secret = spake2.newSecret();
+    const share = spake2.shareHex(secret, password, spake2.APP);
+    try {
+      const start = withLocalMark({ name: APP_NAME, share }, kind);
+      const answer = await request({ method: 'POST', path: '/link/pair/start', body: start, port: settings.artyPort, timeoutMs: PAIR_TIMEOUT_MS });
+      const body = bodyOf(answer);
+      if (answer.status !== 200) return refuse(kind.notAccepted);
+      if (!isPairingAnswer(body)) return refuse(kind.notArty);
+      return await finishPairing(settings, password, kind, secret, share, body);
+    } catch (error) {
+      return refuse(describeFailure(error));
+    }
   }
 
   async function pair(rawCode) {
@@ -256,17 +284,21 @@ function createArtyLink({ getSettings, setToken, request = requestArty }) {
     if (!settings.artyLink) return refuse('Switch the link to Arty Desktop on first.');
     const code = typeof rawCode === 'string' ? rawCode.replace(/\s+/g, '') : '';
     if (!PAIRING_CODE_FORMAT.test(code)) return refuse('The code from Arty Desktop is 6 digits.');
-    const secret = spake2.newSecret();
-    const share = spake2.shareHex(secret, code, spake2.APP);
-    try {
-      const answer = await request({ method: 'POST', path: '/link/pair/start', body: { name: APP_NAME, share }, port: settings.artyPort, timeoutMs: PAIR_TIMEOUT_MS });
-      const body = bodyOf(answer);
-      if (answer.status !== 200) return refuse(NOT_ACCEPTED_WHILE_PAIRING);
-      if (!isPairingAnswer(body)) return refuse(NOT_ARTY_WHILE_PAIRING);
-      return await finishPairing(settings, code, secret, share, body);
-    } catch (error) {
-      return refuse(describeFailure(error));
-    }
+    return pairWithPassword(settings, code, CODE_PAIRING);
+  }
+
+  function mayLinkByItself(settings) {
+    return settings.artyLink === true && settings.artyAutoLink === true && settings.artyToken === '';
+  }
+
+  async function linkByItself() {
+    const settings = getSettings();
+    if (!mayLinkByItself(settings)) return refuse('Linking by itself is off, or a link already exists.', { skipped: true });
+    if (now() - lastAutoLinkAt < MIN_AUTO_LINK_GAP_MS) return refuse('Linking by itself was tried less than 30 seconds ago.', { skipped: true });
+    const offer = readOffer();
+    if (typeof offer !== 'string' || !OFFER_FORMAT.test(offer)) return refuse('Arty Desktop has not offered to link by itself.', { skipped: true });
+    lastAutoLinkAt = now();
+    return pairWithPassword(settings, offer, SAME_USER_PAIRING);
   }
 
   async function unpair() {
@@ -335,7 +367,7 @@ function createArtyLink({ getSettings, setToken, request = requestArty }) {
     return { ok: true, browser: isBrowserName(body.browser) ? body.browser : '', tab: openedTab(body.tab) };
   }
 
-  return { status, pair, unpair, tryLink, lookAtScreen, openInBrowser };
+  return { status, pair, linkByItself, unpair, tryLink, lookAtScreen, openInBrowser };
 }
 
 module.exports = { createArtyLink, requestArty, LOOPBACK_HOST };

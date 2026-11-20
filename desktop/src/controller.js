@@ -73,8 +73,8 @@ function createSettingsController({ file, initial, globalShortcut, onQuickAsk, s
     return { ok: true, settings: get() };
   }
 
-  function setArtyToken(token) {
-    const result = withArtyToken(current, token);
+  function setArtyToken(token, options) {
+    const result = withArtyToken(current, token, options);
     if (!result.ok) return result;
     try {
       saveSettings(file, result.settings);
