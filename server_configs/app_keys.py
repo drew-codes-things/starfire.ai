@@ -17,7 +17,9 @@ KEY_PREFIX = "sf_"
 KEY_RANDOM_BYTES = 32
 KEY_SHAPE = re.compile(r"^sf_[A-Za-z0-9_-]{43,64}$")
 MAX_KEY_NAME_CHARS = 80
-MAX_KEY_MODELS = 100
+MAX_KEY_GRANTS = 100
+EVERY_MODEL = "*"
+MAX_ENDPOINT_ID_CHARS = 64
 MAX_MODEL_NAME_CHARS = 200
 MAX_DAILY_REPLIES = 1_000_000
 MAX_EXPIRY_DAYS = 3650
@@ -35,7 +37,8 @@ class AppKey:
     name: str
     user_id: str
     digest: str
-    models: list[str] | None = None
+    grants: list[dict] = field(default_factory=list)
+    allow_own_tools: bool = False
     daily_limit: int | None = None
     expires: float | None = None
     created: float = 0.0
@@ -48,7 +51,8 @@ class AppKey:
         return self.expires is not None and now >= self.expires
 
     def public(self) -> dict:
-        return {"id": self.id, "name": self.name, "user_id": self.user_id, "models": self.models,
+        return {"id": self.id, "name": self.name, "user_id": self.user_id, "grants": self.grants,
+                "allow_own_tools": self.allow_own_tools,
                 "daily_limit": self.daily_limit, "expires": self.expires, "created": self.created,
                 "last_used": self.last_used, "shown_start": self.shown_start}
 
@@ -87,17 +91,22 @@ def cleaned_name(name: str) -> str:
     return kept
 
 
-def cleaned_models(models) -> list[str] | None:
-    if models is None:
-        return None
-    if not isinstance(models, list) or not all(isinstance(model, str) for model in models):
-        raise AppKeyError("models must be a list of model names, or null for every model the account may use")
-    kept = list(dict.fromkeys(model.strip() for model in models if model.strip()))
+def _is_grant(grant) -> bool:
+    return (isinstance(grant, dict) and set(grant) == {"endpoint_id", "model"}
+            and isinstance(grant["endpoint_id"], str) and 0 < len(grant["endpoint_id"].strip()) <= MAX_ENDPOINT_ID_CHARS
+            and isinstance(grant["model"], str) and 0 < len(grant["model"].strip()) <= MAX_MODEL_NAME_CHARS)
+
+
+def cleaned_grants(grants) -> list[dict]:
+    if not isinstance(grants, list) or not all(_is_grant(grant) for grant in grants):
+        raise AppKeyError("grants must be a list of {endpoint_id, model} pairs, model \"*\" for every model of that "
+                          "connection")
+    kept = list({(g["endpoint_id"].strip(), g["model"].strip()): None for g in grants})
     if not kept:
-        raise AppKeyError("pick at least one model, or allow every model the account may use")
-    if len(kept) > MAX_KEY_MODELS or any(len(model) > MAX_MODEL_NAME_CHARS for model in kept):
-        raise AppKeyError(f"at most {MAX_KEY_MODELS} models of up to {MAX_MODEL_NAME_CHARS} characters each")
-    return kept
+        raise AppKeyError("pick at least one model or connection")
+    if len(kept) > MAX_KEY_GRANTS:
+        raise AppKeyError(f"at most {MAX_KEY_GRANTS} models and connections per key")
+    return [{"endpoint_id": endpoint_id, "model": model} for endpoint_id, model in kept]
 
 
 def cleaned_daily_limit(limit) -> int | None:
@@ -120,8 +129,9 @@ def names_the_model(listed_name: str, wanted: str) -> bool:
     return listed_name.strip().lower() == wanted.strip().lower()
 
 
-def key_allows_model(key: AppKey, model: str) -> bool:
-    return key.models is None or any(names_the_model(allowed, model) for allowed in key.models)
+def key_grants(key: AppKey, endpoint_id: str, model: str) -> bool:
+    return any(grant["endpoint_id"] == endpoint_id and (grant["model"] == EVERY_MODEL or names_the_model(grant["model"], model))
+               for grant in key.grants)
 
 
 @dataclass
@@ -160,11 +170,13 @@ class AppKeyStore:
         return self._load()
 
     @holds_file_lock()
-    def create(self, name: str, user_id: str, models=None, daily_limit=None, expires_in_days=None) -> tuple[AppKey, str]:
+    def create(self, name: str, user_id: str, grants, daily_limit=None, expires_in_days=None,
+               allow_own_tools: bool = False) -> tuple[AppKey, str]:
         now = self.clock()
         secret = make_key()
         key = AppKey(id=uuid.uuid4().hex[:12], name=cleaned_name(name), user_id=user_id, digest=key_digest(secret),
-                     models=cleaned_models(models), daily_limit=cleaned_daily_limit(daily_limit),
+                     grants=cleaned_grants(grants), allow_own_tools=allow_own_tools is True,
+                     daily_limit=cleaned_daily_limit(daily_limit),
                      expires=expiry_after(expires_in_days, now), created=now,
                      shown_start=secret[:len(KEY_PREFIX) + 4])
         keys = self._load()

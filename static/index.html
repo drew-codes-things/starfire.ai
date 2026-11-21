@@ -1103,11 +1103,15 @@
                   <input id="appKeyName" type="text" maxlength="80" aria-label="Key name" placeholder="Name, such as Arty phone" autocomplete="off" spellcheck="false" />
                   <select aria-label="Account the key acts as" id="appKeyAccount"></select>
                 </div>
-                <div class="settings-row"><label class="theme-toggle"><input type="checkbox" id="appKeyAllModels" checked /><span>Every model this account may use</span></label></div>
-                <div id="appKeyModels" hidden></div>
+                <p class="settings-hint">Pick the connections or models the key may use. A model id in the API names its connection, so a key never reaches a model with the same name on another connection.</p>
+                <div id="appKeyModels"></div>
+                <div id="appKeyOwnToolsRow" hidden>
+                  <div class="settings-row"><label class="theme-toggle"><input type="checkbox" id="appKeyOwnTools" /><span>Let this key use Arty</span></label></div>
+                  <p class="settings-hint warning-text">This key can act as you through Arty: memory, mail, files, and approving its own actions. It is worth as much as Arty's own key; leave it off unless the app needs Arty.</p>
+                </div>
                 <div class="settings-row">
-                  <input id="appKeyDailyLimit" type="number" min="1" step="1" aria-label="Replies a day (optional)" placeholder="Replies a day (optional)" />
-                  <input id="appKeyExpiryDays" type="number" min="1" max="3650" step="1" aria-label="Expires after this many days (optional)" placeholder="Expires after days (optional)" />
+                  <input id="appKeyDailyLimit" type="number" min="1" step="1" value="500" aria-label="Replies a day (empty for no daily limit)" placeholder="Replies a day" />
+                  <input id="appKeyExpiryDays" type="number" min="1" max="3650" step="1" value="90" aria-label="Expires after this many days (empty for never)" placeholder="Expires after days" />
                   <button class="btn send" type="submit" id="createAppKeyBtn">Make key</button>
                 </div>
               </form>

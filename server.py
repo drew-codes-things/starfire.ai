@@ -110,6 +110,7 @@ async def lifespan(app: FastAPI):
 
     scheduler_task = asyncio.create_task(routes.scheduler.run_loop())
     email_rule_task = asyncio.create_task(routes.email_rule_checker.run_loop())
+    connection_check_task = asyncio.create_task(routes.connection_health.run_loop())
 
     yield
 
@@ -117,7 +118,9 @@ async def lifespan(app: FastAPI):
     scheduler_task.cancel()
     routes.email_rule_checker.stop()
     email_rule_task.cancel()
-    for task in (scheduler_task, email_rule_task):
+    routes.connection_health.stop()
+    connection_check_task.cancel()
+    for task in (scheduler_task, email_rule_task, connection_check_task):
         try:
             await task
         except asyncio.CancelledError:

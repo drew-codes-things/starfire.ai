@@ -83,7 +83,12 @@ async function refreshEndpointList() {
       li.innerHTML =
         `<span class="endpoint-label">${escapeHtml(ep.label || ep.base_url)}</span>` +
         `<span class="endpoint-meta">${escapeHtml(ep.provider)}</span>` +
+        `<span class="endpoint-meta endpoint-health"></span>` +
         `<button class="endpoint-remove" type="button" title="Remove" aria-label="Remove">×</button>`;
+      const badge = connectionHealthBadge(ep.health, Date.now() / 1000);
+      const health = li.querySelector('.endpoint-health');
+      health.textContent = badge.text;
+      health.classList.add(badge.cls);
       li.querySelector('.endpoint-remove').onclick = async () => {
         if (!await confirmRemove(ep.label || ep.base_url)) return;
         await fetch('/api/model-endpoints/' + ep.id, { method: 'DELETE' });

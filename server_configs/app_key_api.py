@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import time
@@ -8,41 +9,52 @@ import uuid
 import httpx
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field, StrictInt
+from pydantic import BaseModel, Field, StrictBool, StrictInt
 
 import auth_routes
 import routes
 import user_data
-from app_keys import MAX_KEY_NAME_CHARS, MAX_MODEL_NAME_CHARS, AppKey, AppKeyError, AppKeyStore, key_allows_model
+from app_keys import (EVERY_MODEL, MAX_ENDPOINT_ID_CHARS, MAX_KEY_NAME_CHARS, MAX_MODEL_NAME_CHARS, AppKey,
+                      AppKeyError, key_grants)
 from auth import LOCKOUT_SECONDS, LoginLimiter, client_address
 from chat_stream import stream_chat_once
 from config import config
+from connection_health import CHECK_EVERY_SECONDS
+from generation_quota import GenerationQuota
 from providers import build_chat_url, build_headers
 
 logger = logging.getLogger(__name__)
 
 admin_router = APIRouter(prefix="/api/app-keys")
 openai_router = APIRouter(prefix="/v1")
-app_keys = AppKeyStore(config.data_dir)
 BAD_KEY_MAX_FAILURES = 10
 bad_key_limiter = LoginLimiter(max_failures=BAD_KEY_MAX_FAILURES, lockout_seconds=LOCKOUT_SECONDS)
+key_minutes = GenerationQuota()
 upstream_transport: httpx.AsyncBaseTransport | None = None
 
 UPSTREAM_TIMEOUT = httpx.Timeout(600.0, connect=10.0)
 BEARER = "bearer"
 MAX_MESSAGES = 4096
-MAX_ERROR_CHARS = 500
+MAX_JSON_DEPTH = 64
 KEY_RECHECK_SECONDS = 1.0
 UPSTREAM_KEY_REFUSED = {401, 403}
 PASSED_ON_STATUSES = {400, 404, 409, 413, 422, 429}
+SERVER_FAILURE_FROM = 500
 OPENAI_PROVIDER = "openai"
 ANTHROPIC_PROVIDER = "anthropic"
+ADMIN_ROLE = "admin"
 MAX_USER_ID_CHARS = 64
+ID_SEPARATOR = "/"
 OPTION_NAMES = {"temperature": "temperature", "top_p": "top_p", "top_k": "top_k", "seed": "seed",
                 "max_tokens": "num_predict", "max_completion_tokens": "num_predict"}
+OPENAI_FIELDS = frozenset({"model", "messages", "stream", "temperature", "top_p", "max_tokens", "tools", "tool_choice",
+                           "stop"})
+OPENAI_MESSAGE_FIELDS = frozenset({"role", "content", "name", "tool_calls", "tool_call_id"})
 NOT_VALID = "this app key is not valid: it is wrong, revoked or expired, or its account is closed"
 NO_KEY = "send an app key as 'Authorization: Bearer sf_...'"
 STOPPED = "the app key was revoked or its account was closed, so the reply was stopped"
+UPSTREAM_FAILED = "the model server could not answer this request"
+STARFIRE_FAILED = "starfire could not answer this request"
 
 
 class ApiRefusal(Exception):
@@ -54,6 +66,10 @@ class ApiRefusal(Exception):
         self.code = code
         self.headers = headers or {}
 
+    @property
+    def is_upstream_failure(self) -> bool:
+        return self.code == "upstream_error" and self.status >= SERVER_FAILURE_FROM
+
 
 def error_body(message: str, code: str) -> dict:
     return {"error": {"message": message, "type": code, "code": code}}
@@ -61,6 +77,10 @@ def error_body(message: str, code: str) -> dict:
 
 def refusal_response(refusal: ApiRefusal) -> JSONResponse:
     return JSONResponse(error_body(refusal.message, refusal.code), status_code=refusal.status, headers=refusal.headers)
+
+
+def bad_request(message: str) -> ApiRefusal:
+    return ApiRefusal(400, message, "invalid_request_error")
 
 
 def presented_key(request: Request) -> str:
@@ -73,42 +93,82 @@ def open_account(user_id: str):
     return account if account and not account.disabled else None
 
 
+def is_admin_account(user_id: str) -> bool:
+    account = open_account(user_id)
+    return account is not None and account.role == ADMIN_ROLE
+
+
 def caller_address(request: Request) -> str:
     return client_address(request, auth_routes.TRUSTED_PROXIES, config.client_ip_header)
 
 
-def authenticate(request: Request) -> AppKey:
+def refuse_wrong_key(request: Request) -> ApiRefusal:
     address = caller_address(request)
     wait = bad_key_limiter.seconds_locked(address)
     if wait:
-        raise ApiRefusal(429, f"too many wrong app keys from this address - try again in {wait} s",
-                         "rate_limit_exceeded", {"Retry-After": str(wait)})
+        return ApiRefusal(429, f"too many wrong app keys from this address - try again in {wait} s",
+                          "rate_limit_exceeded", {"Retry-After": str(wait)})
+    bad_key_limiter.record_failure(address)
+    logger.warning("refused a wrong app key on %s from %s", request.url.path, address)
+    return ApiRefusal(401, NOT_VALID, "invalid_api_key")
+
+
+def take_a_minute_slot(key: AppKey) -> None:
+    refusal = key_minutes.take(key.id, config.app_key_requests_per_minute, 0)
+    if refusal:
+        raise ApiRefusal(429, f"this app key may make {config.app_key_requests_per_minute} requests a minute; try again "
+                         f"in {refusal.retry_after_seconds} s", "rate_limit_exceeded",
+                         {"Retry-After": str(refusal.retry_after_seconds)})
+
+
+def authenticate(request: Request) -> AppKey:
     secret = presented_key(request)
-    key = app_keys.find(secret) if secret else None
+    if not secret:
+        raise ApiRefusal(401, NO_KEY, "invalid_api_key")
+    key = auth_routes.app_keys.find(secret)
     if key is None or open_account(key.user_id) is None:
-        bad_key_limiter.record_failure(address)
-        logger.warning("refused an app key request to %s from %s: %s", request.url.path, address,
-                       "no key" if not secret else "key not valid")
-        raise ApiRefusal(401, NO_KEY if not secret else NOT_VALID, "invalid_api_key")
+        raise refuse_wrong_key(request)
+    take_a_minute_slot(key)
     return key
 
 
-def is_allowed(key: AppKey, model: str) -> bool:
-    with user_data.run_as(key.user_id):
-        return key_allows_model(key, model) and routes._may_use_model(model)
+def public_id(endpoint_id: str, model: str) -> str:
+    return f"{endpoint_id}{ID_SEPARATOR}{model}"
 
 
-async def usable_models(key: AppKey) -> list[dict]:
+def split_id(model_id: str) -> tuple[str, str]:
+    endpoint_id, separator, model = model_id.partition(ID_SEPARATOR)
+    if not separator or not endpoint_id or not model:
+        raise ApiRefusal(404, f"{model_id} is not a model id from GET /v1/models (they look like <connection>/<model>)",
+                         "model_not_found")
+    return endpoint_id, model
+
+
+def brings_own_tools(model: str) -> bool:
+    return routes._brings_own_tools(model)
+
+
+def may_offer(key: AppKey, endpoint_id: str, model: str) -> bool:
+    if not key_grants(key, endpoint_id, model):
+        return False
+    if brings_own_tools(model) and not (key.allow_own_tools and is_admin_account(key.user_id)):
+        return False
     with user_data.run_as(key.user_id):
-        listed = await routes._listed_models()
-    seen, usable = set(), []
-    for model in listed:
-        name = model.get("id")
-        if not isinstance(name, str) or name in seen or not is_allowed(key, name):
-            continue
-        seen.add(name)
-        usable.append(model)
-    return usable
+        return routes._may_use_model(model)
+
+
+async def checked_connections() -> list[tuple]:
+    await routes.connection_health.check_all(only_unchecked=True)
+    checked = []
+    for endpoint in routes.endpoints.list():
+        state = routes.connection_health.state(endpoint.id)
+        if state is not None:
+            checked.append((endpoint, state))
+    return checked
+
+
+def model_names(state) -> list[str]:
+    return list(dict.fromkeys(m["id"] for m in state.models if isinstance(m.get("id"), str)))
 
 
 def log_outcome(key: AppKey, path: str, model: str, status: int) -> None:
@@ -121,36 +181,69 @@ async def list_models(request: Request):
         key = authenticate(request)
     except ApiRefusal as refusal:
         return refusal_response(refusal)
-    models = await usable_models(key)
+    offered = [{"id": public_id(endpoint.id, name), "object": "model", "created": 0, "owned_by": "starfire",
+                "available": state.available}
+               for endpoint, state in await checked_connections() for name in model_names(state)
+               if may_offer(key, endpoint.id, name)]
     log_outcome(key, request.url.path, "", 200)
-    return {"object": "list", "data": [{"id": m["id"], "object": "model", "created": 0, "owned_by": "starfire"}
-                                       for m in models]}
+    return {"object": "list", "data": offered}
+
+
+def nesting_is_within(value, limit: int) -> bool:
+    waiting = [(value, 1)]
+    while waiting:
+        item, depth = waiting.pop()
+        if depth > limit:
+            return False
+        children = item.values() if isinstance(item, dict) else item if isinstance(item, list) else ()
+        waiting.extend((child, depth + 1) for child in children)
+    return True
+
+
+def is_tool_call(call) -> bool:
+    function = call.get("function") if isinstance(call, dict) else None
+    return (isinstance(function, dict) and isinstance(function.get("name"), str)
+            and isinstance(function.get("arguments", ""), (str, dict)))
+
+
+def check_message(index: int, message) -> None:
+    if not isinstance(message, dict) or not isinstance(message.get("role"), str):
+        raise bad_request(f"message {index} must be a JSON object with a role")
+    if not isinstance(message.get("content"), (str, list, type(None))):
+        raise bad_request(f"message {index}: content must be text, a list of parts or null")
+    calls = message.get("tool_calls")
+    if calls is not None and not (isinstance(calls, list) and all(is_tool_call(call) for call in calls)):
+        raise bad_request(f"message {index}: tool_calls must be a list of {{function: {{name, arguments}}}} objects")
 
 
 async def read_request(request: Request) -> dict:
     try:
         body = json.loads(await request.body())
-    except (ValueError, UnicodeDecodeError) as error:
-        raise ApiRefusal(400, "the request body must be JSON", "invalid_request_error") from error
+    except (ValueError, UnicodeDecodeError, RecursionError) as error:
+        raise bad_request("the request body must be JSON") from error
     if not isinstance(body, dict):
-        raise ApiRefusal(400, "the request body must be a JSON object", "invalid_request_error")
-    model, messages = body.get("model"), body.get("messages")
-    if not isinstance(model, str) or not 0 < len(model) <= MAX_MODEL_NAME_CHARS:
-        raise ApiRefusal(400, "model must be a model name from GET /v1/models", "invalid_request_error")
+        raise bad_request("the request body must be a JSON object")
+    if not nesting_is_within(body, MAX_JSON_DEPTH):
+        raise bad_request(f"the request is nested more than {MAX_JSON_DEPTH} levels deep")
+    model, messages, tools = body.get("model"), body.get("messages"), body.get("tools")
+    if not isinstance(model, str) or not 0 < len(model) <= MAX_ENDPOINT_ID_CHARS + MAX_MODEL_NAME_CHARS + 1:
+        raise bad_request("model must be a model id from GET /v1/models")
     if not isinstance(messages, list) or not 0 < len(messages) <= MAX_MESSAGES:
-        raise ApiRefusal(400, f"messages must be a list of 1 to {MAX_MESSAGES} messages", "invalid_request_error")
-    if not all(isinstance(message, dict) for message in messages):
-        raise ApiRefusal(400, "each message must be a JSON object", "invalid_request_error")
+        raise bad_request(f"messages must be a list of 1 to {MAX_MESSAGES} messages")
+    for index, message in enumerate(messages):
+        check_message(index, message)
+    if tools is not None and not (isinstance(tools, list) and all(isinstance(tool, dict) for tool in tools)):
+        raise bad_request("tools must be a list of objects")
     if not isinstance(body.get("stream", False), bool):
-        raise ApiRefusal(400, "stream must be true or false", "invalid_request_error")
+        raise bad_request("stream must be true or false")
     if body.get("n", 1) != 1:
-        raise ApiRefusal(400, "starfire gives one reply per request: leave n out or set it to 1", "invalid_request_error")
+        raise bad_request("starfire gives one reply per request: leave n out or set it to 1")
     return body
 
 
 def take_replies(key: AppKey) -> None:
     try:
-        reached = app_keys.take_reply(key.id)
+        reached = auth_routes.app_keys.take_reply(key.id)
     except AppKeyError as error:
         raise ApiRefusal(401, NOT_VALID, "invalid_api_key") from error
     if reached:
@@ -159,23 +252,30 @@ def take_replies(key: AppKey) -> None:
     with user_data.run_as(key.user_id):
         refusal = routes._generation_refusal()
     if refusal:
-        app_keys.give_back_reply(key.id)
+        auth_routes.app_keys.give_back_reply(key.id)
         raise ApiRefusal(429, refusal.message, "rate_limit_exceeded", {"Retry-After": str(refusal.retry_after_seconds)})
 
 
-async def chosen_endpoint(key: AppKey, model: str):
-    if not is_allowed(key, model):
-        raise ApiRefusal(403, f"this app key may not use the model {model}", "model_not_allowed")
-    listed = next((m for m in await usable_models(key) if m["id"] == model), None)
-    endpoint = routes.endpoints.get(listed["endpoint_id"]) if listed else None
+async def owning_connection(key: AppKey, model_id: str):
+    endpoint_id, model = split_id(model_id)
+    endpoint = routes.endpoints.get(endpoint_id)
     if endpoint is None:
-        raise ApiRefusal(404, f"no connection offers the model {model}; GET /v1/models lists what this key may use",
+        raise ApiRefusal(404, f"no connection offers {model_id}; GET /v1/models lists what this key may use",
                          "model_not_found")
-    return endpoint
+    if not may_offer(key, endpoint_id, model):
+        raise ApiRefusal(403, f"this app key may not use {model_id}", "model_not_allowed")
+    state = {endpoint.id: state for endpoint, state in await checked_connections()}.get(endpoint_id)
+    if state is None or not state.available:
+        raise ApiRefusal(503, f"the model server for {model_id} is not answering right now; try again later",
+                         "model_unavailable", {"Retry-After": str(int(CHECK_EVERY_SECONDS))})
+    if model not in model_names(state):
+        raise ApiRefusal(404, f"the connection does not offer {model}; GET /v1/models lists what this key may use",
+                         "model_not_found")
+    return endpoint, model
 
 
 def key_still_works(key: AppKey) -> bool:
-    return app_keys.is_live(key.id) and open_account(key.user_id) is not None
+    return auth_routes.app_keys.is_live(key.id) and open_account(key.user_id) is not None
 
 
 async def while_the_key_works(chunks, key: AppKey):
@@ -197,13 +297,12 @@ def sse(payload: dict) -> bytes:
     return f"data: {json.dumps(payload)}\n\n".encode()
 
 
-def upstream_refusal(status: int, content: bytes) -> ApiRefusal:
-    text = content.decode(errors="replace")[:MAX_ERROR_CHARS] or "no details"
+def upstream_refusal(status: int) -> ApiRefusal:
     if status in UPSTREAM_KEY_REFUSED:
         return ApiRefusal(502, "the model server refused starfire's key for it", "upstream_error")
     if status in PASSED_ON_STATUSES:
-        return ApiRefusal(status, f"the model server answered {status}: {text}", "upstream_error")
-    return ApiRefusal(502, f"the model server answered {status}: {text}", "upstream_error")
+        return ApiRefusal(status, f"the model server refused this request ({status})", "upstream_refused")
+    return ApiRefusal(502, UPSTREAM_FAILED, "upstream_error")
 
 
 def upstream_client() -> httpx.AsyncClient:
@@ -219,6 +318,13 @@ async def relayed_bytes(client: httpx.AsyncClient, upstream: httpx.Response):
         await client.aclose()
 
 
+def standard_fields_only(body: dict) -> dict:
+    kept = {name: value for name, value in body.items() if name in OPENAI_FIELDS}
+    kept["messages"] = [{name: value for name, value in message.items() if name in OPENAI_MESSAGE_FIELDS}
+                        for message in body["messages"]]
+    return kept
+
+
 async def forward_as_is(endpoint, api_key: str | None, body: dict, key: AppKey) -> Response:
     url, headers = build_chat_url(endpoint.base_url), build_headers(api_key, endpoint.base_url)
     client = upstream_client()
@@ -227,14 +333,17 @@ async def forward_as_is(endpoint, api_key: str | None, body: dict, key: AppKey) 
                                      stream=bool(body.get("stream")))
     except httpx.HTTPError as error:
         await client.aclose()
-        logger.warning("app key %r: model server %s did not answer: %s", key.name, endpoint.base_url, type(error).__name__)
-        raise ApiRefusal(502, "the model server did not answer", "upstream_error") from error
+        logger.warning("app key %r: the model server for %r did not answer (%s)", key.name, body["model"],
+                       type(error).__name__)
+        raise ApiRefusal(502, UPSTREAM_FAILED, "upstream_error") from error
     if upstream.is_error or not body.get("stream"):
         content = await upstream.aread()
         await upstream.aclose()
         await client.aclose()
         if upstream.is_error:
-            raise upstream_refusal(upstream.status_code, content)
+            logger.warning("app key %r: the model server for %r answered %d", key.name, body["model"],
+                           upstream.status_code)
+            raise upstream_refusal(upstream.status_code)
         return Response(content, media_type=upstream.headers.get("content-type", "application/json"))
     return StreamingResponse(while_the_key_works(relayed_bytes(client, upstream), key),
                              media_type=upstream.headers.get("content-type", "text/event-stream"),
@@ -291,32 +400,41 @@ class Reply:
         return {**whole, "usage": usage} if usage else whole
 
 
-def translated_events(endpoint, api_key: str | None, body: dict):
+def translated_events(endpoint, api_key: str | None, body: dict, model: str):
     messages, system = split_system(body["messages"], endpoint.provider)
     tools = body.get("tools") if isinstance(body.get("tools"), list) else None
-    return stream_chat_once(endpoint.base_url, api_key, body["model"], messages, system, translated_options(body), tools)
+    return stream_chat_once(endpoint.base_url, api_key, model, messages, system, translated_options(body), tools)
 
 
-async def translated_stream(events, reply: Reply):
+def log_translated_failure(key: AppKey, model: str) -> None:
+    logger.warning("app key %r: the model server for %r failed", key.name, model)
+
+
+async def translated_stream(events, reply: Reply, key: AppKey, give_back):
     yield sse(reply.chunk({"role": "assistant", "content": ""}))
-    calls, usage = [], None
+    calls, usage, said_anything = [], None, False
     async for kind, item in events:
         if kind == "delta":
+            said_anything = True
             yield sse(reply.chunk({"content": item}))
         elif kind == "tool_calls":
+            said_anything = True
             made = openai_tool_calls(item, len(calls))
             calls += made
             yield sse(reply.chunk({"tool_calls": made}))
         elif kind == "usage":
             usage = openai_usage(item)
         elif kind == "error":
-            yield sse(error_body(str(item)[:MAX_ERROR_CHARS], "upstream_error"))
+            log_translated_failure(key, reply.model)
+            if not said_anything:
+                give_back()
+            yield sse(error_body(UPSTREAM_FAILED, "upstream_error"))
             return
     yield sse(reply.chunk({}, "tool_calls" if calls else "stop", usage))
     yield b"data: [DONE]\n\n"
 
 
-async def translated_whole(events, reply: Reply) -> dict:
+async def translated_whole(events, reply: Reply, key: AppKey) -> dict:
     text, calls, usage = [], [], None
     async for kind, item in events:
         if kind == "delta":
@@ -326,65 +444,88 @@ async def translated_whole(events, reply: Reply) -> dict:
         elif kind == "usage":
             usage = openai_usage(item)
         elif kind == "error":
-            raise ApiRefusal(502, f"the model server failed: {str(item)[:MAX_ERROR_CHARS]}", "upstream_error")
+            log_translated_failure(key, reply.model)
+            raise ApiRefusal(502, UPSTREAM_FAILED, "upstream_error")
     return reply.whole("".join(text), calls, usage)
 
 
-async def answer(endpoint, body: dict, key: AppKey) -> Response:
+async def answer(endpoint, model: str, body: dict, key: AppKey) -> Response:
     api_key = routes._api_key_for(endpoint.id, endpoint.provider)
+    sent = {**(standard_fields_only(body) if brings_own_tools(model) else body), "model": model}
     if endpoint.provider == OPENAI_PROVIDER:
-        return await forward_as_is(endpoint, api_key, body, key)
+        return await forward_as_is(endpoint, api_key, sent, key)
     reply = Reply(body["model"])
-    events = translated_events(endpoint, api_key, body)
+    events = translated_events(endpoint, api_key, sent, model)
     if body.get("stream"):
-        return StreamingResponse(while_the_key_works(translated_stream(events, reply), key),
+        give_back = functools.partial(auth_routes.app_keys.give_back_reply, key.id)
+        return StreamingResponse(while_the_key_works(translated_stream(events, reply, key, give_back), key),
                                  media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
-    return JSONResponse(await translated_whole(events, reply))
+    return JSONResponse(await translated_whole(events, reply, key))
+
+
+async def answer_counted(endpoint, model: str, body: dict, key: AppKey) -> Response:
+    take_replies(key)
+    try:
+        return await answer(endpoint, model, body, key)
+    except ApiRefusal as refusal:
+        if refusal.is_upstream_failure:
+            auth_routes.app_keys.give_back_reply(key.id)
+        raise
+    except Exception as error:
+        auth_routes.app_keys.give_back_reply(key.id)
+        logger.exception("app key %r: starfire failed while answering for %r", key.name, model)
+        raise ApiRefusal(500, STARFIRE_FAILED, "server_error") from error
 
 
 @openai_router.post("/chat/completions")
 async def chat_completions(request: Request):
-    model = ""
+    model_id = ""
     try:
         key = authenticate(request)
     except ApiRefusal as refusal:
         return refusal_response(refusal)
     try:
         body = await read_request(request)
-        model = body["model"]
-        endpoint = await chosen_endpoint(key, model)
-        take_replies(key)
-        response = await answer(endpoint, body, key)
+        model_id = body["model"]
+        endpoint, model = await owning_connection(key, model_id)
+        response = await answer_counted(endpoint, model, body, key)
     except ApiRefusal as refusal:
-        log_outcome(key, request.url.path, model, refusal.status)
+        log_outcome(key, request.url.path, model_id, refusal.status)
         return refusal_response(refusal)
-    log_outcome(key, request.url.path, model, response.status_code)
+    log_outcome(key, request.url.path, model_id, response.status_code)
     return response
+
+
+class GrantBody(BaseModel):
+    endpoint_id: str = Field(min_length=1, max_length=MAX_ENDPOINT_ID_CHARS)
+    model: str = Field(min_length=1, max_length=MAX_MODEL_NAME_CHARS)
 
 
 class NewKeyBody(BaseModel):
     name: str = Field(min_length=1, max_length=MAX_KEY_NAME_CHARS)
     user_id: str = Field(min_length=1, max_length=MAX_USER_ID_CHARS)
-    models: list[str] | None = None
+    grants: list[GrantBody] = Field(min_length=1)
+    allow_own_tools: StrictBool = False
     daily_limit: StrictInt | None = None
     expires_in_days: StrictInt | None = None
 
 
 def require_admin(request: Request) -> None:
     user = getattr(request.state, "user", None)
-    if user is None or user.role != "admin" or user.disabled:
+    if user is None or user.role != ADMIN_ROLE or user.disabled:
         raise HTTPException(403, "only an admin can manage app keys")
+
+
+def connection_label(endpoint_id: str) -> str:
+    endpoint = routes.endpoints.get(endpoint_id)
+    return (endpoint.label or endpoint.base_url) if endpoint else ""
 
 
 def key_view(key: AppKey) -> dict:
     account = auth_routes.users.find_by_id(key.user_id)
-    return {**key.public(), "account": account.email if account else "",
+    grants = [{**grant, "connection": connection_label(grant["endpoint_id"])} for grant in key.grants]
+    return {**key.public(), "grants": grants, "account": account.email if account else "",
             "account_open": bool(account) and not account.disabled}
-
-
-async def models_for_account(user_id: str) -> list[str]:
-    with user_data.run_as(user_id):
-        return list(dict.fromkeys(m["id"] for m in await routes._usable_models()))
 
 
 def require_open_account(user_id: str) -> None:
@@ -392,29 +533,55 @@ def require_open_account(user_id: str) -> None:
         raise HTTPException(404, "no open account with that id")
 
 
+def offered_to_account(user_id: str, model: str) -> bool:
+    if brings_own_tools(model) and not is_admin_account(user_id):
+        return False
+    with user_data.run_as(user_id):
+        return routes._may_use_model(model)
+
+
 @admin_router.get("")
 async def list_keys(request: Request):
     require_admin(request)
-    return {"keys": [key_view(key) for key in app_keys.list()]}
+    return {"keys": [key_view(key) for key in auth_routes.app_keys.list()]}
 
 
 @admin_router.get("/models/{user_id}")
 async def account_models(request: Request, user_id: str):
     require_admin(request)
     require_open_account(user_id)
-    return {"models": await models_for_account(user_id)}
+    connections = [{"endpoint_id": endpoint.id, "label": endpoint.label or endpoint.base_url,
+                    "available": state.available,
+                    "models": [{"name": name, "own_tools": brings_own_tools(name)} for name in model_names(state)
+                               if offered_to_account(user_id, name)]}
+                   for endpoint, state in await checked_connections()]
+    return {"admin": is_admin_account(user_id), "connections": connections}
+
+
+def grant_problem(grant: GrantBody, body: NewKeyBody) -> str:
+    if routes.endpoints.get(grant.endpoint_id) is None:
+        return f"there is no connection {grant.endpoint_id}"
+    if grant.model == EVERY_MODEL:
+        return ""
+    if brings_own_tools(grant.model) and not body.allow_own_tools:
+        return f"{grant.model} acts for the account with its own tools: tick the Arty option to allow it"
+    if not offered_to_account(body.user_id, grant.model):
+        return f"that account may not use {grant.model}"
+    return ""
 
 
 @admin_router.post("")
 async def make_key(request: Request, body: NewKeyBody, response: Response):
     require_admin(request)
     require_open_account(body.user_id)
-    with user_data.run_as(body.user_id):
-        refused = [model for model in body.models or [] if not routes._may_use_model(model)]
-    if refused:
-        raise HTTPException(400, f"that account may not use {', '.join(refused)}")
+    if body.allow_own_tools and not is_admin_account(body.user_id):
+        raise HTTPException(400, "only a key for an admin account may use models that bring their own tools")
+    problems = [problem for problem in (grant_problem(grant, body) for grant in body.grants) if problem]
+    if problems:
+        raise HTTPException(400, "; ".join(problems))
     try:
-        key, secret = app_keys.create(body.name, body.user_id, body.models, body.daily_limit, body.expires_in_days)
+        key, secret = auth_routes.app_keys.create(body.name, body.user_id, [grant.model_dump() for grant in body.grants],
+                                                  body.daily_limit, body.expires_in_days, body.allow_own_tools)
     except AppKeyError as error:
         raise HTTPException(400, str(error)) from error
     logger.info("app key %r made for account %s", key.name, key.user_id)
@@ -425,7 +592,7 @@ async def make_key(request: Request, body: NewKeyBody, response: Response):
 @admin_router.delete("/{key_id}")
 async def revoke_key(request: Request, key_id: str):
     require_admin(request)
-    gone = app_keys.revoke(key_id)
+    gone = auth_routes.app_keys.revoke(key_id)
     if gone is None:
         raise HTTPException(404, "no app key with that id")
     logger.info("app key %r revoked", gone.name)

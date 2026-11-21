@@ -4,14 +4,28 @@
 
 ### Added
 - App keys and an OpenAI-compatible API. An admin makes keys under Settings → Accounts → App keys: each acts as one
-  account, may be limited to some models, to a number of replies a day and to a number of days, is shown once
-  (`sf_` and 32 random bytes) and is stored only as a SHA-256 hash. Apps send the key as `Authorization: Bearer` to
-  `GET /v1/models` and `POST /v1/chat/completions` (streamed or not); requests to OpenAI-compatible connections and
-  their answers pass through as they are, tool calls included, and Ollama and Anthropic connections are answered in
-  OpenAI form. The account's reply limits and model rules apply (restricted models stay admin-only), ten wrong keys
-  from one address lock it out for 15 minutes, bodies over 16 MB are refused, and the log names the key, model and
-  status, never the key or the prompt. Session cookies and passwords never open `/v1`. See
+  account and is bound to connections (every model of a connection, or single models on it), has a daily reply limit
+  (500 suggested) and an expiry (90 days suggested), is shown once (`sf_` and 32 random bytes) and is stored only as a
+  SHA-256 hash. Apps send the key as `Authorization: Bearer` to `GET /v1/models` and `POST /v1/chat/completions`
+  (streamed or not); model ids are `<connection id>/<model>`, so a request only ever goes to the connection it names.
+  Requests to OpenAI-compatible connections and their answers pass through as they are, tool calls included, and
+  Ollama and Anthropic connections are answered in OpenAI form. The account's reply limits and model rules apply
+  (restricted models stay admin-only), every key has `APP_KEY_REQUESTS_PER_MINUTE` (30) requests a minute, ten wrong
+  keys from one address make its wrong keys wait 15 minutes while right keys keep working, bodies over 16 MB or nested
+  over 64 levels are refused, model server error text is never shown, and the log names the key, model and status,
+  never the key or the prompt. Session cookies and passwords never open `/v1`. See
   [App keys and the API](docs/app-keys.md).
+- Models that bring their own tools (`OWN_TOOLS_MODELS`, Arty) are left out of every app key unless an admin
+  account's key was made with "Let this key use Arty"; such a key is worth Arty's own key, and only standard OpenAI
+  fields are passed on to those models.
+- App keys are deleted when their account is disabled or deleted or an admin resets its password, backups leave
+  `app_keys.json` out and a restore never brings it back.
+- Connection checks: every 60 seconds starfire asks each model connection for its model list (5 s limit, no prompt)
+  and keeps whether it answered, when, what went wrong (timeout, unreachable, unauthorized, server error, never a
+  secret) and its last model list. Settings → Connections shows Available or Unavailable with when it was checked.
+  `GET /v1/models` marks each model `"available": true` or `false` and keeps a down connection's last known models;
+  `POST /v1/chat/completions` answers 503 `model_unavailable` at once for a model whose connection is down and never
+  tries another connection.
 
 ### Security
 - First-run setup needs a one-time setup code. While no account exists, starfire prints a random code in its log
