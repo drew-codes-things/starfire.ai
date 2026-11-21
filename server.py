@@ -43,6 +43,7 @@ load_dotenv()
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+import app_key_api
 import arty_cli_remote
 import arty_devices
 import arty_memory
@@ -160,6 +161,8 @@ app.include_router(routes.router)
 app.include_router(arty_devices.router)
 app.include_router(arty_cli_remote.router)
 app.include_router(arty_memory.router)
+app.include_router(app_key_api.admin_router)
+app.include_router(app_key_api.openai_router)
 app.mount("/", static_files.compressed_static("static"), name="static")
 
 if __name__ == "__main__":

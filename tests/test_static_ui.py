@@ -9,7 +9,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATIC = os.path.join(ROOT, "static")
 PAGES = ["index.html", "login.html", "setup.html"]
 APP_JS_PARTS = ["appState.js", "chatMessages.js", "codeBlocks.js", "chatCards.js", "chatSend.js", "helperTasks.js",
-                "settings.js", "settingsMemoryTasks.js", "settingsArtyMemory.js", "settingsEmail.js", "settingsNotes.js",
+                "settings.js", "settingsMemoryTasks.js", "settingsArtyMemory.js", "settingsAppKeys.js",
+                "settingsEmail.js", "settingsNotes.js",
                 "settingsSystem.js", "compare.js", "palette.js", "app.js"]
 WORKSPACE_JS_PARTS = ["workspaceCore.js", "sidebar.js", "sidebarMenus.js", "chatManagement.js", "prompts.js",
                       "modelPicker.js", "chatControls.js", "composerTools.js", "attachments.js", "composerPopup.js",

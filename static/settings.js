@@ -12,7 +12,7 @@ const SETTINGS_TAB_LISTS = {
   presets: ['presetList'],
   prompts: ['promptList'],
   localgen: ['workflowList'],
-  accounts: ['accountList'],
+  accounts: ['accountList', 'appKeyList'],
 };
 
 const SETTINGS_TAB_LOADERS = {
@@ -30,7 +30,7 @@ const SETTINGS_TAB_LOADERS = {
   providers: () => { refreshEndpointList(); refreshAutoModelSettings(); },
   localgen: () => { refreshLocalGen(); },
   hardware: () => { refreshHardware(); refreshOllamaStatus(); },
-  accounts: () => { refreshAccounts(); },
+  accounts: () => { refreshAccounts(); refreshAppKeys(); },
 };
 
 function showSettingsTab(tab) {

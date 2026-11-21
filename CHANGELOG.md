@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Added
+- App keys and an OpenAI-compatible API. An admin makes keys under Settings → Accounts → App keys: each acts as one
+  account, may be limited to some models, to a number of replies a day and to a number of days, is shown once
+  (`sf_` and 32 random bytes) and is stored only as a SHA-256 hash. Apps send the key as `Authorization: Bearer` to
+  `GET /v1/models` and `POST /v1/chat/completions` (streamed or not); requests to OpenAI-compatible connections and
+  their answers pass through as they are, tool calls included, and Ollama and Anthropic connections are answered in
+  OpenAI form. The account's reply limits and model rules apply (restricted models stay admin-only), ten wrong keys
+  from one address lock it out for 15 minutes, bodies over 16 MB are refused, and the log names the key, model and
+  status, never the key or the prompt. Session cookies and passwords never open `/v1`. See
+  [App keys and the API](docs/app-keys.md).
+
 ### Security
 - First-run setup needs a one-time setup code. While no account exists, starfire prints a random code in its log
   when it starts, and `/api/auth/setup` refuses to make the admin account without it (compared in constant time,

@@ -1095,6 +1095,29 @@
               <h3>Accounts</h3>
               <ul class="endpoint-list" id="accountList"></ul>
             </div>
+            <div class="settings-card">
+              <h3>App keys</h3>
+              <p class="settings-hint">A key lets an app such as Arty or ArtyCode use starfire's models through the OpenAI-compatible API at /v1, acting as the account you pick and under that account's rules. starfire shows the key once and keeps only a hash of it.</p>
+              <form id="appKeyForm" novalidate>
+                <div class="settings-row">
+                  <input id="appKeyName" type="text" maxlength="80" aria-label="Key name" placeholder="Name, such as Arty phone" autocomplete="off" spellcheck="false" />
+                  <select aria-label="Account the key acts as" id="appKeyAccount"></select>
+                </div>
+                <div class="settings-row"><label class="theme-toggle"><input type="checkbox" id="appKeyAllModels" checked /><span>Every model this account may use</span></label></div>
+                <div id="appKeyModels" hidden></div>
+                <div class="settings-row">
+                  <input id="appKeyDailyLimit" type="number" min="1" step="1" aria-label="Replies a day (optional)" placeholder="Replies a day (optional)" />
+                  <input id="appKeyExpiryDays" type="number" min="1" max="3650" step="1" aria-label="Expires after this many days (optional)" placeholder="Expires after days (optional)" />
+                  <button class="btn send" type="submit" id="createAppKeyBtn">Make key</button>
+                </div>
+              </form>
+              <p class="settings-hint" id="appKeyResult" role="status"></p>
+              <div class="settings-row" id="appKeyShown" hidden>
+                <input id="appKeySecret" type="text" readonly aria-label="The new key, shown only now" autocomplete="off" spellcheck="false" />
+                <button class="btn ghost" type="button" id="copyAppKeyBtn">Copy</button>
+              </div>
+              <ul class="endpoint-list" id="appKeyList"></ul>
+            </div>
           </div>
         </div>
       </div>
@@ -1207,6 +1230,7 @@
   <script src="settings.js"></script>
   <script src="settingsMemoryTasks.js"></script>
   <script src="settingsArtyMemory.js"></script>
+  <script src="settingsAppKeys.js"></script>
   <script src="settingsEmail.js"></script>
   <script src="settingsNotes.js"></script>
   <script src="settingsSystem.js"></script>

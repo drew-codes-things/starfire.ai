@@ -50,6 +50,8 @@ MAX_FIELD_CHARS = 256
 MAX_PASSWORD_BYTES = 72
 SETUP_CODE_BYTES = 12
 PUBLIC_PREFIXES = ("/assets/", "/vendor/fonts/")
+APP_KEY_PREFIX = "/v1/"
+APP_KEY_PATHS = frozenset({"/v1/models", "/v1/chat/completions"})
 ROLES = ("admin", "user")
 UNUSED_HASH = bcrypt.hashpw(b"starfire-timing-equaliser", bcrypt.gensalt()).decode()
 
@@ -110,7 +112,7 @@ def _now_iso() -> str:
 ADMIN_ONLY_PREFIXES = ("/api/model-endpoints", "/api/mcp/servers", "/api/comfyui", "/api/piper",
                        "/api/custom-workflows", "/api/hardware", "/api/restore", "/api/auth/users")
 ADMIN_ONLY_PATHS = frozenset({"/api/backup"})
-ADMIN_ONLY_FOR_EVERY_METHOD = ("/api/arty-devices", "/api/arty-cli", "/api/arty-memory", "/api/browse-dir", "/api/discover",
+ADMIN_ONLY_FOR_EVERY_METHOD = ("/api/app-keys", "/api/arty-devices", "/api/arty-cli", "/api/arty-memory", "/api/browse-dir", "/api/discover",
                                "/api/hardware", "/api/model-endpoints", "/api/comfyui/config", "/api/piper/config")
 READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
@@ -613,6 +615,11 @@ def install(app: FastAPI, users: UserStore, sessions: SessionStore) -> None:
             if path.startswith("/api/"):
                 return JSONResponse({"detail": "an account already exists - log in instead"}, status_code=409)
             return RedirectResponse(LOGIN_PAGE, status_code=303)
+        if path.startswith(APP_KEY_PREFIX):
+            if path in APP_KEY_PATHS:
+                return await call_next(request)
+            return JSONResponse({"error": {"message": "starfire offers GET /v1/models and POST /v1/chat/completions",
+                                           "type": "not_found", "code": "not_found"}}, status_code=404)
         if is_public(path):
             return await call_next(request)
         user = current_user(request, users, sessions)

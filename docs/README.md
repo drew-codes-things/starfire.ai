@@ -7,6 +7,7 @@ The [README](../README.md) covers what starfire is and how to start it. These pa
 | [Install](install.md) | Requirements, running from source, Docker |
 | [Logging in and accounts](accounts.md) | First-run setup code, passwords, the admin and other accounts |
 | [Model servers and providers](model-servers.md) | How Ollama and ArtyEngine are found, hosted providers, hardware and pulling models |
+| [App keys and the API](app-keys.md) | Keys for Arty, ArtyCode and other apps to use starfire's models through its OpenAI-compatible `/v1` API |
 | [Interface](interface.md) | Sidebar, model picker, message box, settings, keyboard shortcuts, command palette |
 | [Chat](chat.md) | Arty Auto, replies, code checks, status line, saved chats, prompts, compare, presets, usage |
 | [Tools](tools.md) | MCP servers, signing in to online services, built-in tools, tool levels |
