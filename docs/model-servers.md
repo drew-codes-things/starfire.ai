@@ -81,7 +81,7 @@ Settings → Connections → "Add API provider": pick OpenAI, Anthropic, or "Oth
 A model server on another machine, such as llama.cpp's `llama-server` started with `--api-key`
 behind a tunnel at `https://<name>.example.com/v1`, is added the same way with "Other
 (OpenAI-compatible)": its models are listed from `<address>/models` and it is used for chat only.
-To let apps use it through starfire, give them an app key: see [App keys and the API](app-keys.md).
+To let apps use it through starfire, give them an app key: see [App keys and the API](remote-ai-to-starfire.md).
 
 ## Hardware
 

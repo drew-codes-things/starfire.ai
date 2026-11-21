@@ -98,6 +98,7 @@ function appKeyCheckbox(text, value, dataset) {
 }
 
 function appKeyConnectionBlock(connection, showOwnTools) {
+  if (connection.own_tools && !showOwnTools) return null;
   const block = appKeyElement('div', 'app-key-connection');
   const state = connection.available ? 'available' : 'unavailable';
   block.append(appKeyCheckbox(`Every model of ${connection.label} (${state})`, connection.endpoint_id,
@@ -113,7 +114,7 @@ function appKeyConnectionBlock(connection, showOwnTools) {
 function renderAppKeyModels() {
   appKeyEls.ownToolsRow.hidden = !appKeyChoices.admin;
   if (!appKeyChoices.admin) appKeyEls.ownTools.checked = false;
-  const blocks = appKeyChoices.connections.map(c => appKeyConnectionBlock(c, appKeyEls.ownTools.checked));
+  const blocks = appKeyChoices.connections.map(c => appKeyConnectionBlock(c, appKeyEls.ownTools.checked)).filter(Boolean);
   appKeyEls.models.replaceChildren(...blocks);
   if (!blocks.length) appKeyEls.models.append(appKeyElement('p', 'settings-hint', 'no connections yet'));
 }

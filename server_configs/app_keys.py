@@ -125,13 +125,8 @@ def expiry_after(days, now: float) -> float | None:
     return now + days * DAY_SECONDS
 
 
-def names_the_model(listed_name: str, wanted: str) -> bool:
-    return listed_name.strip().lower() == wanted.strip().lower()
-
-
 def key_grants(key: AppKey, endpoint_id: str, model: str) -> bool:
-    return any(grant["endpoint_id"] == endpoint_id and (grant["model"] == EVERY_MODEL or names_the_model(grant["model"], model))
-               for grant in key.grants)
+    return any(grant["endpoint_id"] == endpoint_id and grant["model"] in (EVERY_MODEL, model) for grant in key.grants)
 
 
 @dataclass

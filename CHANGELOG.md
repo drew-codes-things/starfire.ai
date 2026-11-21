@@ -14,7 +14,7 @@
   keys from one address make its wrong keys wait 15 minutes while right keys keep working, bodies over 16 MB or nested
   over 64 levels are refused, model server error text is never shown, and the log names the key, model and status,
   never the key or the prompt. Session cookies and passwords never open `/v1`. See
-  [App keys and the API](docs/app-keys.md).
+  [App keys and the API](docs/remote-ai-to-starfire.md).
 - Models that bring their own tools (`OWN_TOOLS_MODELS`, Arty) are left out of every app key unless an admin
   account's key was made with "Let this key use Arty"; such a key is worth Arty's own key, and only standard OpenAI
   fields are passed on to those models.
@@ -26,6 +26,14 @@
   `GET /v1/models` marks each model `"available": true` or `false` and keeps a down connection's last known models;
   `POST /v1/chat/completions` answers 503 `model_unavailable` at once for a model whose connection is down and never
   tries another connection.
+- Connection checks are bounded: 5 s for the whole answer, at most 1 MB, a list of at most 1000 models with string ids
+  of at most 200 characters; anything else marks the connection unavailable (`bad_answer`) and keeps its last good
+  list. Connections are checked side by side, one check at a time each, and an API request waits only on the
+  connections its key was given.
+- The Arty rule goes by connection: every model of a connection that lists an `OWN_TOOLS_MODELS` name, or whose
+  address is `ARTY_BASE_URL`, needs "Let this key use Arty" on an admin account's key and gets only standard
+  OpenAI fields. Grants match the model name exactly, `*` only as the whole-connection grant, and a model server
+  redirect (3xx) on a chat request is answered 502 `upstream_error` without using a reply.
 
 ### Security
 - First-run setup needs a one-time setup code. While no account exists, starfire prints a random code in its log

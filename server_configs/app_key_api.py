@@ -148,27 +148,50 @@ def brings_own_tools(model: str) -> bool:
     return routes._brings_own_tools(model)
 
 
-def may_offer(key: AppKey, endpoint_id: str, model: str) -> bool:
-    if not key_grants(key, endpoint_id, model):
+def model_names(state) -> list[str]:
+    return list(dict.fromkeys(m["id"] for m in state.models if isinstance(m.get("id"), str))) if state else []
+
+
+def server_address(url: str) -> str:
+    address = url.strip().rstrip("/").lower()
+    return address.removesuffix("/v1").rstrip("/")
+
+
+def is_arty_address(endpoint) -> bool:
+    arty = server_address(config.arty_base_url)
+    return bool(arty) and server_address(endpoint.base_url) == arty
+
+
+def is_own_tools_connection(endpoint, state) -> bool:
+    return is_arty_address(endpoint) or any(brings_own_tools(name) for name in model_names(state))
+
+
+def needs_arty_option(endpoint, state, model: str) -> bool:
+    return brings_own_tools(model) or is_own_tools_connection(endpoint, state)
+
+
+def may_offer(key: AppKey, endpoint, state, model: str) -> bool:
+    if not key_grants(key, endpoint.id, model):
         return False
-    if brings_own_tools(model) and not (key.allow_own_tools and is_admin_account(key.user_id)):
+    if needs_arty_option(endpoint, state, model) and not (key.allow_own_tools and is_admin_account(key.user_id)):
         return False
     with user_data.run_as(key.user_id):
         return routes._may_use_model(model)
 
 
-async def checked_connections() -> list[tuple]:
-    await routes.connection_health.check_all(only_unchecked=True)
+async def checked_connections(endpoint_ids=None) -> list[tuple]:
+    endpoints = [e for e in routes.endpoints.list() if endpoint_ids is None or e.id in endpoint_ids]
+    await routes.connection_health.check_unchecked([endpoint.id for endpoint in endpoints])
     checked = []
-    for endpoint in routes.endpoints.list():
+    for endpoint in endpoints:
         state = routes.connection_health.state(endpoint.id)
         if state is not None:
             checked.append((endpoint, state))
     return checked
 
 
-def model_names(state) -> list[str]:
-    return list(dict.fromkeys(m["id"] for m in state.models if isinstance(m.get("id"), str)))
+def granted_connections(key: AppKey) -> set[str]:
+    return {grant["endpoint_id"] for grant in key.grants}
 
 
 def log_outcome(key: AppKey, path: str, model: str, status: int) -> None:
@@ -183,8 +206,8 @@ async def list_models(request: Request):
         return refusal_response(refusal)
     offered = [{"id": public_id(endpoint.id, name), "object": "model", "created": 0, "owned_by": "starfire",
                 "available": state.available}
-               for endpoint, state in await checked_connections() for name in model_names(state)
-               if may_offer(key, endpoint.id, name)]
+               for endpoint, state in await checked_connections(granted_connections(key)) for name in model_names(state)
+               if may_offer(key, endpoint, state, name)]
     log_outcome(key, request.url.path, "", 200)
     return {"object": "list", "data": offered}
 
@@ -262,16 +285,19 @@ async def owning_connection(key: AppKey, model_id: str):
     if endpoint is None:
         raise ApiRefusal(404, f"no connection offers {model_id}; GET /v1/models lists what this key may use",
                          "model_not_found")
-    if not may_offer(key, endpoint_id, model):
+    if not key_grants(key, endpoint_id, model):
         raise ApiRefusal(403, f"this app key may not use {model_id}", "model_not_allowed")
-    state = {endpoint.id: state for endpoint, state in await checked_connections()}.get(endpoint_id)
+    await routes.connection_health.check_unchecked([endpoint_id])
+    state = routes.connection_health.state(endpoint_id)
+    if not may_offer(key, endpoint, state, model):
+        raise ApiRefusal(403, f"this app key may not use {model_id}", "model_not_allowed")
     if state is None or not state.available:
         raise ApiRefusal(503, f"the model server for {model_id} is not answering right now; try again later",
                          "model_unavailable", {"Retry-After": str(int(CHECK_EVERY_SECONDS))})
     if model not in model_names(state):
         raise ApiRefusal(404, f"the connection does not offer {model}; GET /v1/models lists what this key may use",
                          "model_not_found")
-    return endpoint, model
+    return endpoint, model, needs_arty_option(endpoint, state, model)
 
 
 def key_still_works(key: AppKey) -> bool:
@@ -336,11 +362,11 @@ async def forward_as_is(endpoint, api_key: str | None, body: dict, key: AppKey) 
         logger.warning("app key %r: the model server for %r did not answer (%s)", key.name, body["model"],
                        type(error).__name__)
         raise ApiRefusal(502, UPSTREAM_FAILED, "upstream_error") from error
-    if upstream.is_error or not body.get("stream"):
+    if not upstream.is_success or not body.get("stream"):
         content = await upstream.aread()
         await upstream.aclose()
         await client.aclose()
-        if upstream.is_error:
+        if not upstream.is_success:
             logger.warning("app key %r: the model server for %r answered %d", key.name, body["model"],
                            upstream.status_code)
             raise upstream_refusal(upstream.status_code)
@@ -449,9 +475,9 @@ async def translated_whole(events, reply: Reply, key: AppKey) -> dict:
     return reply.whole("".join(text), calls, usage)
 
 
-async def answer(endpoint, model: str, body: dict, key: AppKey) -> Response:
+async def answer(endpoint, model: str, own_tools: bool, body: dict, key: AppKey) -> Response:
     api_key = routes._api_key_for(endpoint.id, endpoint.provider)
-    sent = {**(standard_fields_only(body) if brings_own_tools(model) else body), "model": model}
+    sent = {**(standard_fields_only(body) if own_tools else body), "model": model}
     if endpoint.provider == OPENAI_PROVIDER:
         return await forward_as_is(endpoint, api_key, sent, key)
     reply = Reply(body["model"])
@@ -463,10 +489,10 @@ async def answer(endpoint, model: str, body: dict, key: AppKey) -> Response:
     return JSONResponse(await translated_whole(events, reply, key))
 
 
-async def answer_counted(endpoint, model: str, body: dict, key: AppKey) -> Response:
+async def answer_counted(endpoint, model: str, own_tools: bool, body: dict, key: AppKey) -> Response:
     take_replies(key)
     try:
-        return await answer(endpoint, model, body, key)
+        return await answer(endpoint, model, own_tools, body, key)
     except ApiRefusal as refusal:
         if refusal.is_upstream_failure:
             auth_routes.app_keys.give_back_reply(key.id)
@@ -487,8 +513,8 @@ async def chat_completions(request: Request):
     try:
         body = await read_request(request)
         model_id = body["model"]
-        endpoint, model = await owning_connection(key, model_id)
-        response = await answer_counted(endpoint, model, body, key)
+        endpoint, model, own_tools = await owning_connection(key, model_id)
+        response = await answer_counted(endpoint, model, own_tools, body, key)
     except ApiRefusal as refusal:
         log_outcome(key, request.url.path, model_id, refusal.status)
         return refusal_response(refusal)
@@ -533,11 +559,20 @@ def require_open_account(user_id: str) -> None:
         raise HTTPException(404, "no open account with that id")
 
 
-def offered_to_account(user_id: str, model: str) -> bool:
-    if brings_own_tools(model) and not is_admin_account(user_id):
+def offered_to_account(user_id: str, model: str, own_tools: bool) -> bool:
+    if own_tools and not is_admin_account(user_id):
         return False
     with user_data.run_as(user_id):
         return routes._may_use_model(model)
+
+
+def connection_choices(user_id: str, endpoint, state) -> dict:
+    own_tools_connection = is_own_tools_connection(endpoint, state)
+    models = [{"name": name, "own_tools": own_tools_connection or brings_own_tools(name)}
+              for name in model_names(state) if name != EVERY_MODEL]
+    return {"endpoint_id": endpoint.id, "label": endpoint.label or endpoint.base_url,
+            "available": state.available, "own_tools": own_tools_connection,
+            "models": [model for model in models if offered_to_account(user_id, model["name"], model["own_tools"])]}
 
 
 @admin_router.get("")
@@ -550,22 +585,22 @@ async def list_keys(request: Request):
 async def account_models(request: Request, user_id: str):
     require_admin(request)
     require_open_account(user_id)
-    connections = [{"endpoint_id": endpoint.id, "label": endpoint.label or endpoint.base_url,
-                    "available": state.available,
-                    "models": [{"name": name, "own_tools": brings_own_tools(name)} for name in model_names(state)
-                               if offered_to_account(user_id, name)]}
-                   for endpoint, state in await checked_connections()]
+    connections = [connection_choices(user_id, endpoint, state) for endpoint, state in await checked_connections()]
     return {"admin": is_admin_account(user_id), "connections": connections}
 
 
 def grant_problem(grant: GrantBody, body: NewKeyBody) -> str:
-    if routes.endpoints.get(grant.endpoint_id) is None:
+    endpoint = routes.endpoints.get(grant.endpoint_id)
+    if endpoint is None:
         return f"there is no connection {grant.endpoint_id}"
+    state = routes.connection_health.state(endpoint.id)
+    own_tools = needs_arty_option(endpoint, state, grant.model)
+    named = endpoint.label or endpoint.id if grant.model == EVERY_MODEL else grant.model
+    if own_tools and not body.allow_own_tools:
+        return f"{named} acts for the account with its own tools: tick the Arty option to allow it"
     if grant.model == EVERY_MODEL:
         return ""
-    if brings_own_tools(grant.model) and not body.allow_own_tools:
-        return f"{grant.model} acts for the account with its own tools: tick the Arty option to allow it"
-    if not offered_to_account(body.user_id, grant.model):
+    if not offered_to_account(body.user_id, grant.model, own_tools):
         return f"that account may not use {grant.model}"
     return ""
 
@@ -576,6 +611,7 @@ async def make_key(request: Request, body: NewKeyBody, response: Response):
     require_open_account(body.user_id)
     if body.allow_own_tools and not is_admin_account(body.user_id):
         raise HTTPException(400, "only a key for an admin account may use models that bring their own tools")
+    await checked_connections({grant.endpoint_id for grant in body.grants})
     problems = [problem for problem in (grant_problem(grant, body) for grant in body.grants) if problem]
     if problems:
         raise HTTPException(400, "; ".join(problems))

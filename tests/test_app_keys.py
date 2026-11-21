@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import sys
+import time
 import zipfile
 
 import bcrypt
@@ -18,6 +19,7 @@ sys.path.insert(0, os.path.join(ROOT, "server_configs"))
 import app_key_api
 import auth
 import auth_routes
+import connection_health
 import routes
 import upload_limits
 import user_data
@@ -34,7 +36,9 @@ PASSWORD = "correct horse battery staple"
 HEADERS = {"X-Starfire-Client": "1"}
 FRIEND_URL = "https://friend.drew-gnr.xyz/v1"
 FRIEND_KEY = "llama-server-key-for-tests"
-LISTED = ["friend-model", "other-model", "example-9b-abl", "Arty"]
+LISTED = ["friend-model", "other-model", "example-9b-abl"]
+BRAIN_URL = "https://brain.example.com/v1"
+BRAIN_LISTED = ["Arty", "solo/plain:latest"]
 OTHER_URL = "https://local.example.com/v1"
 NESTED_TOO_DEEP = json.loads("[" * 80 + "]" * 80)
 PROMPT = "a private question about the garden"
@@ -73,6 +77,9 @@ class FakeModelServers:
         self.ollama_lines = []
         self.model_lists = 0
         self.friend_down = None
+        self.friend_list = None
+        self.friend_chat = None
+        self.brain_listed = list(BRAIN_LISTED)
 
     def friend_failure(self, request: httpx.Request) -> httpx.Response:
         if self.friend_down == "refused":
@@ -80,6 +87,13 @@ class FakeModelServers:
         if self.friend_down == "timeout":
             raise httpx.ReadTimeout("timed out", request=request)
         return httpx.Response(int(self.friend_down), json={"error": "down"})
+
+    def model_list(self, host: str) -> httpx.Response:
+        if host == "brain.example.com":
+            return httpx.Response(200, json={"data": [{"id": name} for name in self.brain_listed]})
+        if self.friend_list is not None and host == "friend.drew-gnr.xyz":
+            return self.friend_list()
+        return httpx.Response(200, json={"data": [{"id": name} for name in LISTED]})
 
     def answer(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -90,9 +104,11 @@ class FakeModelServers:
         if path.endswith("/api/tags"):
             return httpx.Response(200, json={"models": [{"name": "local-ollama:8b"}]})
         if path.endswith("/models"):
-            return httpx.Response(200, json={"data": [{"id": name} for name in LISTED]})
+            return self.model_list(request.url.host)
         sent = json.loads(request.content)
         self.chats.append({"url": str(request.url), "auth": request.headers.get("authorization"), "body": sent})
+        if self.friend_chat is not None and request.url.host == "friend.drew-gnr.xyz":
+            return self.friend_chat
         if path.endswith("/api/chat"):
             return httpx.Response(200, content=b"".join(json.dumps(line).encode() + b"\n" for line in self.ollama_lines))
         if sent.get("stream"):
@@ -170,6 +186,14 @@ def friend(admin, servers):
     return added.json()
 
 
+@pytest.fixture
+def brain(admin, servers):
+    added = admin.post("/api/model-endpoints", json={"base_url": BRAIN_URL, "api_key": "brain-key", "kind": "api-key",
+                                                     "label": "Arty"})
+    assert added.status_code == 200, added.text
+    return added.json()
+
+
 def user_id(email):
     return auth_routes.users.find_by_email(email).id
 
@@ -191,8 +215,10 @@ def make_key(admin, email="sam@example.com", **details):
 
 
 def connection_of(name):
+    if name in BRAIN_LISTED:
+        return next(e for e in routes.endpoints.list() if e.base_url == BRAIN_URL)
     wants_ollama = name == "local-ollama:8b"
-    return next(e for e in routes.endpoints.list() if (e.provider == "ollama") == wants_ollama)
+    return next(e for e in routes.endpoints.list() if (e.provider == "ollama") == wants_ollama and e.base_url != BRAIN_URL)
 
 
 def model_id(name, endpoint=None):
@@ -255,10 +281,9 @@ def test_the_form_lists_each_connection_with_the_models_the_account_may_use(admi
     offered = admin.get(f"/api/app-keys/models/{user_id('sam@example.com')}").json()
     assert offered["admin"] is False
     assert offered["connections"] == [{"endpoint_id": friend["id"], "label": "Other (OpenAI-compatible)", "available": True,
-                                       "models": [{"name": "friend-model", "own_tools": False},
+                                       "own_tools": False, "models": [{"name": "friend-model", "own_tools": False},
                                                   {"name": "other-model", "own_tools": False}]}]
-    mine = admin.get(f"/api/app-keys/models/{user_id('admin@example.com')}").json()
-    assert {"name": "Arty", "own_tools": True} in mine["connections"][0]["models"]
+
 
 
 def test_v1_models_ids_name_their_connection(app, admin, friend):
@@ -307,17 +332,67 @@ def test_an_admin_account_key_may_use_a_restricted_model(app, admin, friend, ser
     assert ask(app, secret, model="example-9b-abl").status_code == 200
 
 
-def test_arty_is_left_out_of_every_key_by_default(app, admin, friend, servers):
+def key_made_before_the_brain_answered(admin, servers):
+    servers.brain_listed = []
     secret = make_key(admin, email="admin@example.com")["key"]
+    servers.brain_listed = list(BRAIN_LISTED)
+    check_connections()
+    return secret
+
+
+def test_arty_is_left_out_of_every_key_by_default(app, admin, friend, brain, servers):
+    secret = key_made_before_the_brain_answered(admin, servers)
     assert model_id("Arty") not in [m["id"] for m in outside(app).get("/v1/models", headers=bearer(secret)).json()["data"]]
     refused = ask(app, secret, model="Arty")
     assert refused.status_code == 403
     assert servers.chats == []
 
 
-def test_arty_cannot_be_named_in_a_key_without_the_opt_in(admin, friend):
-    refused = new_key(admin, email="admin@example.com", grants=[{"endpoint_id": friend["id"], "model": "Arty"}])
+def test_arty_cannot_be_named_in_a_key_without_the_opt_in(admin, brain):
+    refused = new_key(admin, email="admin@example.com", grants=[{"endpoint_id": brain["id"], "model": "Arty"}])
     assert refused.status_code == 400 and "Arty" in refused.json()["detail"]
+
+
+def test_every_model_on_the_arty_connection_needs_the_opt_in(app, admin, friend, brain, servers):
+    secret = key_made_before_the_brain_answered(admin, servers)
+    assert [m["id"] for m in listed_models(app, secret)] == [model_id(name) for name in LISTED]
+    refused = ask(app, secret, model=model_id("solo/plain:latest"))
+    assert refused.status_code == 403 and refused.json()["error"]["code"] == "model_not_allowed"
+    assert servers.chats == []
+
+
+def test_no_model_of_the_arty_connection_can_be_granted_without_the_opt_in(admin, brain):
+    for model in ("*", "solo/plain:latest"):
+        refused = new_key(admin, email="admin@example.com", grants=[{"endpoint_id": brain["id"], "model": model}])
+        assert refused.status_code == 400 and "Arty option" in refused.json()["detail"]
+
+
+def test_the_form_marks_the_whole_arty_connection(admin, friend, brain):
+    mine = {c["endpoint_id"]: c for c in admin.get(f"/api/app-keys/models/{user_id('admin@example.com')}").json()["connections"]}
+    assert mine[brain["id"]]["own_tools"] is True
+    assert mine[brain["id"]]["models"] == [{"name": "Arty", "own_tools": True},
+                                           {"name": "solo/plain:latest", "own_tools": True}]
+    sams = {c["endpoint_id"]: c for c in admin.get(f"/api/app-keys/models/{user_id('sam@example.com')}").json()["connections"]}
+    assert sams[brain["id"]]["models"] == []
+
+
+def test_other_models_on_the_arty_connection_get_standard_fields_only(app, admin, brain, servers):
+    secret = make_key(admin, email="admin@example.com", allow_own_tools=True)["key"]
+    answered = outside(app).post("/v1/chat/completions", headers=bearer(secret), json={
+        "model": model_id("solo/plain:latest"), "messages": [{"role": "user", "content": PROMPT}],
+        "arty_client_tools": True, "client": "probe", "features": ["all"]})
+    assert answered.status_code == 200
+    assert set(servers.chats[-1]["body"]) == {"model", "messages"}
+
+
+def test_the_configured_arty_address_is_an_arty_connection_whatever_it_lists(app, admin, brain, servers, monkeypatch):
+    monkeypatch.setattr(config, "arty_base_url", "https://BRAIN.example.com/")
+    servers.brain_listed = ["plain-model"]
+    refused = new_key(admin, email="admin@example.com", grants=[{"endpoint_id": brain["id"], "model": "plain-model"}])
+    assert refused.status_code == 400
+    secret = make_key(admin, email="admin@example.com", allow_own_tools=True)["key"]
+    assert ask(app, secret, model=f"{brain['id']}/plain-model").status_code == 200
+    assert set(servers.chats[-1]["body"]) == {"model", "messages", "stream"}
 
 
 def test_only_an_admin_account_key_may_opt_in_to_arty(admin, friend):
@@ -325,7 +400,7 @@ def test_only_an_admin_account_key_may_opt_in_to_arty(admin, friend):
     assert refused.status_code == 400
 
 
-def test_an_opted_in_key_reaches_arty_with_standard_fields_only(app, admin, friend, servers):
+def test_an_opted_in_key_reaches_arty_with_standard_fields_only(app, admin, friend, brain, servers):
     secret = make_key(admin, email="admin@example.com", allow_own_tools=True)["key"]
     assert model_id("Arty") in [m["id"] for m in outside(app).get("/v1/models", headers=bearer(secret)).json()["data"]]
     answered = outside(app).post("/v1/chat/completions", headers=bearer(secret), json={
@@ -337,7 +412,7 @@ def test_an_opted_in_key_reaches_arty_with_standard_fields_only(app, admin, frie
     assert sent["model"] == "Arty" and sent["messages"] == [{"role": "user", "content": PROMPT}]
 
 
-def test_an_arty_key_stops_working_for_arty_when_its_account_is_no_longer_admin(app, admin, friend, servers):
+def test_an_arty_key_stops_working_for_arty_when_its_account_is_no_longer_admin(app, admin, friend, brain, servers):
     users = auth_routes.users
     users.upsert("second@example.com", "Second", "admin", users.find_by_email("admin@example.com").password_hash)
     secret = make_key(admin, email="second@example.com", allow_own_tools=True)["key"]
@@ -729,8 +804,8 @@ def test_a_connection_that_answers_again_is_available_again(app, admin, friend, 
 
 
 def test_a_connection_never_seen_up_offers_no_models(app, admin, friend, servers):
-    secret = make_key(admin)["key"]
     servers.friend_down = "refused"
+    secret = make_key(admin)["key"]
     check_connections()
     assert listed_models(app, secret) == []
     assert ask(app, secret).status_code == 503
@@ -787,3 +862,127 @@ def test_the_checker_stops_when_told(servers):
         await asyncio.wait_for(running, timeout=2)
 
     asyncio.run(run_and_stop())
+
+
+QUICK_DEADLINE_SECONDS = 0.3
+DRIP_PAUSE_SECONDS = 0.05
+ANSWER_WITHIN_SECONDS = 2.0
+
+
+async def dripping_body():
+    while True:
+        yield b" "
+        await asyncio.sleep(DRIP_PAUSE_SECONDS)
+
+
+@pytest.fixture
+def quick_deadline(monkeypatch):
+    monkeypatch.setattr(connection_health, "CHECK_DEADLINE_SECONDS", QUICK_DEADLINE_SECONDS)
+
+
+def timed(call):
+    started = time.monotonic()
+    result = call()
+    return result, time.monotonic() - started
+
+
+def test_a_dripping_model_list_never_holds_up_a_key_for_another_connection(app, admin, friend, other, servers,
+                                                                             quick_deadline):
+    servers.friend_list = lambda: httpx.Response(200, content=dripping_body())
+    secret = make_key(admin, grants=[{"endpoint_id": other["id"], "model": "*"}])["key"]
+    for _ in range(3):
+        answered, took = timed(lambda: ask(app, secret, model=f"{other['id']}/friend-model"))
+        assert answered.status_code == 200 and took < ANSWER_WITHIN_SECONDS
+
+
+def test_a_dripping_model_list_is_cut_off_at_the_deadline(app, admin, friend, other, servers, quick_deadline):
+    servers.friend_list = lambda: httpx.Response(200, content=dripping_body())
+    secret = make_key(admin)["key"]
+    listed, took = timed(lambda: listed_models(app, secret))
+    assert took < ANSWER_WITHIN_SECONDS
+    assert {m["id"].split("/")[0] for m in listed} == {other["id"]}
+    assert routes.connection_health.state(friend["id"]).error_kind == "timeout"
+    _, round_took = timed(check_connections)
+    assert round_took < ANSWER_WITHIN_SECONDS
+    assert routes.connection_health.state(other["id"]).available is True
+
+
+TOO_LONG_ID = "m" * 201
+BAD_MODEL_LISTS = {
+    "data is null": {"data": None},
+    "data is a number": {"data": 5},
+    "an id is a number": {"data": [{"id": 5}]},
+    "an entry is a string": {"data": ["friend-model"]},
+    "an id is too long": {"data": [{"id": TOO_LONG_ID}]},
+    "too many models": {"data": [{"id": f"model-{n}"} for n in range(1001)]},
+    "not an object": [1, 2, 3],
+}
+
+
+@pytest.mark.parametrize("answer", BAD_MODEL_LISTS.values(), ids=BAD_MODEL_LISTS.keys())
+def test_a_bad_model_list_marks_the_connection_down_and_keeps_the_last_good_list(app, admin, friend, other, servers,
+                                                                                answer):
+    secret = make_key(admin)["key"]
+    check_connections()
+    servers.friend_list = lambda: httpx.Response(200, json=answer)
+    check_connections()
+    friend_state = routes.connection_health.state(friend["id"])
+    assert friend_state.available is False and friend_state.error_kind == "bad_answer"
+    assert [m["id"] for m in friend_state.models] == LISTED
+    assert ask(app, secret, model=f"{other['id']}/friend-model").status_code == 200
+    assert listed_models(app, secret)[0] == {"id": model_id("friend-model", connection_of_id(friend["id"])),
+                                             "object": "model", "created": 0, "owned_by": "starfire", "available": False}
+
+
+def connection_of_id(endpoint_id):
+    return routes.endpoints.get(endpoint_id)
+
+
+def test_a_huge_model_list_is_not_read_past_the_cap(app, admin, friend, other, servers):
+    padding = "x" * (connection_health.MAX_LIST_BYTES + 1)
+    servers.friend_list = lambda: httpx.Response(200, json={"data": [{"id": "friend-model"}], "padding": padding})
+    check_connections()
+    assert routes.connection_health.state(friend["id"]).error_kind == "bad_answer"
+    assert routes.connection_health.state(other["id"]).available is True
+
+
+def test_any_failure_inside_one_check_is_kept_to_that_connection(app, admin, friend, other, monkeypatch):
+    def key_for(endpoint):
+        if endpoint.id == friend["id"]:
+            raise RuntimeError("the key store broke")
+        return None
+
+    monkeypatch.setattr(routes.connection_health, "api_key_fn", key_for)
+    check_connections()
+    assert routes.connection_health.state(friend["id"]).error_kind == "bad_answer"
+    assert routes.connection_health.state(other["id"]).available is True
+
+
+def test_a_grant_names_its_model_exactly(app, admin, friend, servers):
+    servers.friend_list = lambda: httpx.Response(200, json={"data": [{"id": name} for name in
+                                                                     ("friend-model", "FRIEND-MODEL", "friend-model ")]})
+    secret = make_key(admin, grants=[{"endpoint_id": friend["id"], "model": "friend-model"}])["key"]
+    assert [m["id"] for m in listed_models(app, secret)] == [f"{friend['id']}/friend-model"]
+    assert ask(app, secret, model=f"{friend['id']}/FRIEND-MODEL").status_code == 403
+    assert servers.chats == []
+
+
+def test_a_model_named_star_is_never_the_whole_connection(app, admin, friend, servers):
+    servers.friend_list = lambda: httpx.Response(200, json={"data": [{"id": "*"}, {"id": "friend-model"}]})
+    offered = admin.get(f"/api/app-keys/models/{user_id('sam@example.com')}").json()["connections"][0]["models"]
+    assert [model["name"] for model in offered] == ["friend-model"]
+    secret = make_key(admin, grants=[{"endpoint_id": friend["id"], "model": "friend-model"}])["key"]
+    assert ask(app, secret, model=f"{friend['id']}/*").status_code == 403
+    assert servers.chats == []
+
+
+@pytest.mark.parametrize("status", [301, 302, 307])
+def test_an_upstream_redirect_is_an_upstream_error_and_the_reply_is_given_back(app, admin, friend, servers, status):
+    secret = make_key(admin, daily_limit=1)["key"]
+    servers.friend_chat = httpx.Response(status, headers={"location": "https://elsewhere.example.com/"},
+                                         content=b"moved, here is a private note")
+    refused = ask(app, secret)
+    assert refused.status_code == 502 and refused.json()["error"]["code"] == "upstream_error"
+    assert "private note" not in refused.text
+    servers.friend_chat = None
+    assert ask(app, secret).status_code == 200
