@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+### Added
+- App keys and an OpenAI-compatible API. An admin makes keys under Settings → Accounts → App keys: each acts as one
+  account and is bound to connections (every model of a connection, or single models on it), has a daily reply limit
+  (500 suggested) and an expiry (90 days suggested), is shown once (`sf_` and 32 random bytes) and is stored only as a
+  SHA-256 hash. Apps send the key as `Authorization: Bearer` to `GET /v1/models` and `POST /v1/chat/completions`
+  (streamed or not); model ids are `<connection id>/<model>`, so a request only ever goes to the connection it names.
+  Requests to OpenAI-compatible connections and their answers pass through as they are, tool calls included, and
+  Ollama and Anthropic connections are answered in OpenAI form. The account's reply limits and model rules apply
+  (restricted models stay admin-only), every key has `APP_KEY_REQUESTS_PER_MINUTE` (30) requests a minute, ten wrong
+  keys from one address make its wrong keys wait 15 minutes while right keys keep working, bodies over 16 MB or nested
+  over 64 levels are refused, model server error text is never shown, and the log names the key, model and status,
+  never the key or the prompt. Session cookies and passwords never open `/v1`. See
+  [App keys and the API](docs/remote-ai-to-starfire.md).
+- Models that bring their own tools (`OWN_TOOLS_MODELS`, Arty) are left out of every app key unless an admin
+  account's key was made with "Let this key use Arty"; such a key is worth Arty's own key, and only standard OpenAI
+  fields are passed on to those models.
+- App keys are deleted when their account is disabled or deleted or an admin resets its password, backups leave
+  `app_keys.json` out and a restore never brings it back.
+- Connection checks: every 60 seconds starfire asks each model connection for its model list (5 s limit, no prompt)
+  and keeps whether it answered, when, what went wrong (timeout, unreachable, unauthorized, server error, never a
+  secret) and its last model list. Settings → Connections shows Available or Unavailable with when it was checked.
+  `GET /v1/models` marks each model `"available": true` or `false` and keeps a down connection's last known models;
+  `POST /v1/chat/completions` answers 503 `model_unavailable` at once for a model whose connection is down and never
+  tries another connection.
+- Connection checks are bounded: 5 s for the whole answer, at most 1 MB, a list of at most 1000 models with string ids
+  of at most 200 characters; anything else marks the connection unavailable (`bad_answer`) and keeps its last good
+  list. Connections are checked side by side, one check at a time each, and an API request waits only on the
+  connections its key was given.
+- The Arty rule goes by connection: every model of a connection that lists an `OWN_TOOLS_MODELS` name, or whose
+  address is `ARTY_BASE_URL`, needs "Let this key use Arty" on an admin account's key and gets only standard
+  OpenAI fields. Grants match the model name exactly, `*` only as the whole-connection grant, and a model server
+  redirect (3xx) on a chat request is answered 502 `upstream_error` without using a reply.
+
 ### Security
 - First-run setup needs a one-time setup code. While no account exists, starfire prints a random code in its log
   when it starts, and `/api/auth/setup` refuses to make the admin account without it (compared in constant time,

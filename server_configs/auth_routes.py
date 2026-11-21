@@ -8,11 +8,13 @@ from auth import (ACCOUNT_LOCKOUT_SECONDS, ACCOUNT_MAX_FAILED_LOGINS, LOGIN_ATTE
                   AccountError, KnownAddresses, LoginLimiter, SessionStore, SetupCode, UserStore, client_address,
                   current_user, forget_legacy_cookie, normalise_email, parse_networks, request_host,
                   require_admin, all_session_tokens, set_session_cookie)
+from app_keys import AppKeyStore
 from config import config
 
 router = APIRouter(prefix="/api/auth")
 users = UserStore(config.data_dir)
 sessions = SessionStore(config.data_dir, identity_check_hosts=config.identity_check_hosts())
+app_keys = AppKeyStore(config.data_dir)
 limiter = LoginLimiter()
 account_limiter = LoginLimiter(max_failures=ACCOUNT_MAX_FAILED_LOGINS, lockout_seconds=ACCOUNT_LOCKOUT_SECONDS)
 address_attempts = LoginLimiter(max_failures=LOGIN_ATTEMPTS_PER_ADDRESS, lockout_seconds=LOGIN_ATTEMPT_WINDOW_SECONDS)
@@ -191,6 +193,7 @@ def update_user(user_id: str, body: UpdateUserRequest, request: Request):
         raise HTTPException(status_code=404 if "no such" in str(error) else 400, detail=str(error))
     if user.disabled:
         sessions.revoke_all_for(user.id)
+        app_keys.revoke_all_for(user.id)
     return user.public()
 
 
@@ -204,6 +207,7 @@ def reset_user_password(user_id: str, body: ResetPasswordRequest, request: Reque
     except AccountError as error:
         raise HTTPException(status_code=404 if "no such" in str(error) else 400, detail=str(error))
     sessions.revoke_all_for(user_id)
+    app_keys.revoke_all_for(user_id)
     return {"ok": True}
 
 
@@ -219,6 +223,7 @@ def delete_user(user_id: str, request: Request):
     if not removed:
         raise HTTPException(status_code=404, detail="no such account")
     sessions.revoke_all_for(user_id)
+    app_keys.revoke_all_for(user_id)
     registry = _registry()
     if registry is not None:
         registry.delete_user_data(user_id)

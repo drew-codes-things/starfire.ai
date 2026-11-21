@@ -488,6 +488,26 @@ function artyMemoryRows(entities, query) {
   return rows;
 }
 
+const CONNECTION_FAILURE_WORDS = {
+  timeout: 'timed out', unreachable: 'unreachable', unauthorized: 'key refused', server_error: 'server error',
+  http_error: 'error answer', bad_answer: 'unreadable answer',
+};
+const SECONDS_PER_MINUTE = 60;
+
+function checkedAgo(lastChecked, nowSeconds) {
+  const seconds = Math.max(0, Math.round(nowSeconds - lastChecked));
+  if (seconds < SECONDS_PER_MINUTE) return `checked ${seconds}s ago`;
+  return `checked ${Math.floor(seconds / SECONDS_PER_MINUTE)} min ago`;
+}
+
+function connectionHealthBadge(health, nowSeconds) {
+  if (!health) return { text: 'not checked yet', cls: 'mcp-state-signed-out' };
+  const ago = checkedAgo(health.last_checked, nowSeconds);
+  if (health.available) return { text: `Available · ${ago}`, cls: 'mcp-state-connected' };
+  const why = CONNECTION_FAILURE_WORDS[health.error_kind] || 'not answering';
+  return { text: `Unavailable (${why}) · ${ago}`, cls: 'mcp-state-failed' };
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     isLocalMediaUrl, isCodeLanguageClass, toolOutcome, toolOutcomeLine,
@@ -505,6 +525,6 @@ if (typeof module !== 'undefined' && module.exports) {
     AUTO_MODEL_ID, AUTO_MODEL_NAME, AUTO_MODEL_HINT, AUTO_CHOICE, isAutoChoice, modelChoiceToShow, autoPickLabel, replyModelLabel,
     autoModelEntry, PICKER_MODE_AUTO, PICKER_MODE_CHOSEN, pickerMode, distinctModels, modelMenuEntries,
     BACKEND_RUNS_ON_ITS_OWN, NO_LOCAL_OLLAMA, FOUND_NOT_ADDED, backendStatusPlan, scanEndpointBody, scanSummary, addedLocalMessage,
-    artyMemoryRows,
+    artyMemoryRows, connectionHealthBadge,
   };
 }

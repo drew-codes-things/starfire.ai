@@ -39,6 +39,7 @@ from agent_loop import run_chat_with_tools
 from attachments import AttachmentError, AttachmentNoRoom, expand_attachments
 from api_key_manager import APIKeyManager
 from approval_policy import ApprovalPolicy
+from connection_health import CheckFailed, ConnectionHealth, models_in_answer
 from model_choice import ModelChoice
 from reply_runs import ReplyRuns, TooManyReplies, finished_reply
 from generation_quota import GenerationQuota
@@ -58,7 +59,7 @@ from model_endpoints import (LOCAL_SERVER_KINDS, OLLAMA_KIND, ModelEndpointStore
                              detect_ollama, discover_servers, filing_for_local_server, identify_backend,
                              lists_ollama_models, ollama_tags_url)
 from ollama_runner import for_runner
-from providers import build_models_url, is_embedding_model
+from providers import build_models_url
 from task_scheduler import TaskScheduler, compute_next_run
 from upload_limits import MIB, require_room, room_on_disk, too_large
 from task_store import ScheduledTask
@@ -188,10 +189,17 @@ class TestEndpointBody(BaseModel):
     base_url: str
     api_key: str | None = None
 
+connection_health = ConnectionHealth(lambda: endpoints.list(), lambda e: _api_key_for(e.id, e.provider))
+
+def _health_view(endpoint_id: str) -> dict | None:
+    state = connection_health.state(endpoint_id)
+    return state.public() if state else None
+
 @router.get("/model-endpoints")
 async def list_endpoints():
     return {"endpoints": [
-        {"id": e.id, "base_url": e.base_url, "kind": e.kind, "provider": e.provider, "label": e.label}
+        {"id": e.id, "base_url": e.base_url, "kind": e.kind, "provider": e.provider, "label": e.label,
+         "health": _health_view(e.id)}
         for e in endpoints.list()
     ]}
 
@@ -299,15 +307,10 @@ async def _listed_models() -> list[dict]:
             except (httpx.HTTPError, ValueError) as ex:
                 logger.warning("model list probe failed for %s: %s", e.base_url, ex)
                 continue
-            if e.provider == "ollama":
-                for m in data.get("models", []):
-                    if is_embedding_model(m.get("name")):
-                        continue
-                    result.append({"id": m.get("name"), "endpoint_id": e.id, "provider": "ollama",
-                                    "size": m.get("size")})
-            else:
-                for m in data.get("data", []):
-                    result.append({"id": m.get("id"), "endpoint_id": e.id, "provider": e.provider})
+            try:
+                result.extend(models_in_answer(e, data))
+            except CheckFailed:
+                logger.warning("model list from %s was not a JSON object", e.base_url)
     return result
 
 async def _usable_models() -> list[dict]:
@@ -2365,7 +2368,7 @@ def _chunks_then_close(handle):
 
 MCP_SERVERS_FILE = "mcp_servers.json"
 CREDENTIAL_FILE_OR_COPY = re.compile(
-    r"\.?(?:\.key|\.env|sessions\.json|api_keys\.json|mcp_servers\.json)(?:[.~_-].*)?", re.S)
+    r"\.?(?:\.key|\.env|sessions\.json|api_keys\.json|app_keys\.json|mcp_servers\.json)(?:[.~_-].*)?", re.S)
 
 DOT_SEGMENTS = frozenset({os.curdir, os.pardir})
 ARCHIVE_SEPARATORS = re.compile(r"[\\/]")

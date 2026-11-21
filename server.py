@@ -43,6 +43,7 @@ load_dotenv()
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+import app_key_api
 import arty_cli_remote
 import arty_devices
 import arty_memory
@@ -109,6 +110,7 @@ async def lifespan(app: FastAPI):
 
     scheduler_task = asyncio.create_task(routes.scheduler.run_loop())
     email_rule_task = asyncio.create_task(routes.email_rule_checker.run_loop())
+    connection_check_task = asyncio.create_task(routes.connection_health.run_loop())
 
     yield
 
@@ -116,7 +118,9 @@ async def lifespan(app: FastAPI):
     scheduler_task.cancel()
     routes.email_rule_checker.stop()
     email_rule_task.cancel()
-    for task in (scheduler_task, email_rule_task):
+    routes.connection_health.stop()
+    connection_check_task.cancel()
+    for task in (scheduler_task, email_rule_task, connection_check_task):
         try:
             await task
         except asyncio.CancelledError:
@@ -160,6 +164,8 @@ app.include_router(routes.router)
 app.include_router(arty_devices.router)
 app.include_router(arty_cli_remote.router)
 app.include_router(arty_memory.router)
+app.include_router(app_key_api.admin_router)
+app.include_router(app_key_api.openai_router)
 app.mount("/", static_files.compressed_static("static"), name="static")
 
 if __name__ == "__main__":

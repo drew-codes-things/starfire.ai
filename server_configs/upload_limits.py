@@ -20,6 +20,7 @@ SMALL_BODY_PREFIXES = (
     ("/api/memory", 256 * KIB),
     ("/api/code-check", 1 * MIB),
     ("/api/notes", 8 * MIB),
+    ("/v1/", 16 * MIB),
 )
 
 
