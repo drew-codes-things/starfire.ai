@@ -2,7 +2,9 @@ import asyncio
 import json
 
 import builtin_tools
+import content_screen
 import file_edit_tool
+import screen_checks
 import screen_look
 import user_data
 from chat_stream import _sse_line, stream_chat_once
@@ -49,6 +51,12 @@ async def run_chat_with_tools(base_url: str, api_key: str | None, model: str, me
             return
 
         if not tool_calls:
+            yield _sse_line({"done": True})
+            return
+
+        if content_screen.calls_cross_the_line(text, tool_calls, screen_checks.reply_context(messages),
+                                            screen_checks.request_of(messages)):
+            yield _sse_line({"delta": content_screen.REFUSAL_DELTA})
             yield _sse_line({"done": True})
             return
 
