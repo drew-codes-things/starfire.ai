@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.0 - 2026-11-26
 
 ### Changed
 - Settings: the model tick list is always shown; unticking a model while All models is on switches it off.
