@@ -6,19 +6,22 @@ import logging
 import os
 import socket
 import sys
+import re
 import time
 import zipfile
+from types import SimpleNamespace
 
 import bcrypt
 import httpx
 import pytest
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "server_configs"))
 
+import addons
 import app_key_api
 import auth
 import auth_routes
@@ -41,6 +44,7 @@ from model_endpoints import ModelEndpointStore
 
 PASSWORD = "correct horse battery staple"
 HEADERS = {"X-Starfire-Client": "1"}
+ROUTER_ONLY_INSTALLERS = ("addons",)
 FRIEND_URL = "https://friend.drew-gnr.xyz/v1"
 FRIEND_KEY = "llama-server-key-for-tests"
 LISTED = ["friend-model", "other-model", "example-9b-abl"]
@@ -1351,12 +1355,37 @@ def test_a_reply_is_stopped_through_every_middleware_when_the_caller_hangs_up(ap
     assert app_key_api.running_replies.running == {}
 
 
-def test_the_server_receive_is_kept_by_the_outermost_layer():
+def server_source() -> str:
     with open(os.path.join(ROOT, "server.py"), encoding="utf-8") as source:
-        text = source.read()
-    last_install = text.rindex(".install(app")
-    assert text[:last_install].endswith("caller_watch")
-    assert text.rindex("@app.middleware(") < last_install and "add_middleware(" not in text
+        return source.read()
+
+
+def caller_watch_is_outermost(text: str) -> bool:
+    installers = re.findall(r"^[ \t]*(\w+)\.install\(app", text, re.M)
+    middleware_installers = [name for name in installers if name not in ROUTER_ONLY_INSTALLERS]
+    if not middleware_installers or middleware_installers[-1] != "caller_watch":
+        return False
+    caller_watch_install = text.index("caller_watch.install(app")
+    return text.rindex("@app.middleware(") < caller_watch_install and "add_middleware(" not in text
+
+
+def test_the_server_receive_is_kept_by_the_outermost_layer():
+    assert caller_watch_is_outermost(server_source())
+
+
+def test_an_indented_installer_after_caller_watch_is_caught():
+    text = server_source() + "\nif config.port:\n    upload_limits.install(app, config)\n"
+    assert not caller_watch_is_outermost(text)
+
+
+def test_add_ons_add_routers_but_no_middleware(monkeypatch):
+    server = FastAPI()
+    caller_watch.install(server)
+    before = list(server.user_middleware)
+    monkeypatch.setattr(addons, "load", lambda: SimpleNamespace(routers=(APIRouter(),), admin_only_prefixes=()))
+    assert addons.install(server)
+    assert server.user_middleware == before
+    assert server.user_middleware[0].cls is caller_watch.KeepServerReceive
 
 
 def test_failed_upstream_requests_still_count_toward_the_minute_limit(app, admin, friend, servers, monkeypatch):
