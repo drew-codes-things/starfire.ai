@@ -10,10 +10,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import content_screen
 import remote_rules
-import routes
 import screen_cases as cases
-from test_app_keys import (TOOLS, admin, app, bearer, clock, friend, make_key, model_id, outside,  # noqa: F401
-                           servers)
+import test_app_keys
+from test_app_keys import TOOLS, bearer, make_key, model_id, outside
+
+admin = test_app_keys.admin
+app = test_app_keys.app
+clock = test_app_keys.clock
+friend = test_app_keys.friend
+servers = test_app_keys.servers
 
 ABUSIVE_ARGUMENTS = json.dumps({"path": "story.md", "content": "Mia, 12, undressed and they had sex."})
 

@@ -37,6 +37,7 @@ class AppConfig(BaseSettings):
     generations_per_day: int = 400
     mail_requests_per_minute: int = 60
     app_key_requests_per_minute: int = 30
+    desktop_update_check: bool = True
 
     def own_tools_patterns(self) -> list[str]:
         return [p.strip() for p in self.own_tools_models.split(",") if p.strip()]

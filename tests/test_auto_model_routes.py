@@ -1,6 +1,9 @@
+import asyncio
+import base64
 import json
 import os
 import sys
+from types import SimpleNamespace
 
 import bcrypt
 import httpx
@@ -114,6 +117,148 @@ def ask_auto(client, content, attachments=None):
 def picked(response):
     assert response.status_code == 200, response.text
     return next(e["model_choice"] for e in events(response) if "model_choice" in e)
+
+
+@pytest.fixture
+def tool_turns(monkeypatch):
+    seen = []
+
+    async def with_tools(base_url, api_key, model, messages, system, options, servers, tools, ctx, max_tools=None):
+        seen.append((model, ctx))
+        yield chat_stream._sse_line({"done": True})
+
+    monkeypatch.setattr(routes, "run_chat_with_tools", with_tools)
+    return seen
+
+
+@pytest.fixture
+def viewer(monkeypatch):
+    asked = []
+
+    async def seeing_reply(base_url, api_key, model, messages, system, options, tools=None, **kwargs):
+        asked.append((base_url, model, messages))
+        yield ("delta", "Discord is open on #general.")
+
+    monkeypatch.setattr(routes.screen_look, "stream_chat_once", seeing_reply)
+    return asked
+
+
+def ask_from_desktop(client, content, model="auto", endpoint_id="auto", attachments=None):
+    message = {"role": "user", "content": content, **({"attachments": attachments} if attachments else {})}
+    return client.post("/api/chat_stream", json={"endpoint_id": endpoint_id, "model": model, "messages": [message],
+                                                 "desktop_screen": True})
+
+
+SCREEN_PICTURE = {"mime": "image/png", "image": base64.b64encode(TINY_PNG).decode(), "caption": "caption"}
+
+
+def viewing_for(endpoint, model):
+    return asyncio.run(routes._plan_screen_viewing(endpoint, None, model))
+
+
+LOCAL_ENGINE, OTHER_LOCAL_ENGINE, FRIEND_ENGINE = (
+    "http://engine.example:11434", "http://192.168.1.50:11434", "http://friend.example.com:11434")
+FRIEND_VISION, OTHER_VISION, REMOTE_VISION = "llava-friend:7b", "other-vl:3b", "remote/friend/qwen-vl"
+
+
+@pytest.fixture
+def engine(app, monkeypatch):
+    seeing = {VISION: ["completion", "vision"], GENERAL: ["completion", "tools"],
+              FRIEND_VISION: ["completion", "vision"], OTHER_VISION: ["completion", "vision"],
+              REMOTE_VISION: ["completion", "vision"]}
+    engine_endpoint = routes.endpoints.add(LOCAL_ENGINE, kind="ollama")
+    listed = [{"id": VISION, "endpoint_id": engine_endpoint.id}, {"id": GENERAL, "endpoint_id": engine_endpoint.id}]
+    asked_capabilities = []
+
+    async def usable():
+        return list(listed)
+
+    async def capabilities(base_url, api_key, model):
+        asked_capabilities.append((base_url, model))
+        return seeing.get(model)
+
+    monkeypatch.setattr(routes, "_usable_models", usable)
+    monkeypatch.setattr(routes.screen_look, "ollama_capabilities", capabilities)
+    return SimpleNamespace(endpoint=engine_endpoint, seeing=seeing, listed=listed, asked=asked_capabilities)
+
+
+def add_listed(engine, address, model, kind="ollama"):
+    connection = routes.endpoints.add(address, kind=kind)
+    engine.listed.insert(0, {"id": model, "endpoint_id": connection.id})
+    return connection
+
+
+def configure_vision(monkeypatch, model):
+    monkeypatch.setattr(routes, "_role_sources",
+                        lambda: routes.auto_model.RoleSources(configured={routes.auto_model.VISION: model}))
+
+
+def test_a_model_the_engine_says_is_blind_gets_the_screen_described_by_a_local_vision_model(engine, viewer):
+    viewing = viewing_for(engine.endpoint, GENERAL)
+    assert viewing.describe is not None and not viewing.unseen and viewing.described_by == VISION
+    assert asyncio.run(viewing.describe(SCREEN_PICTURE)) == "Discord is open on #general."
+    (base_url, seeing_model, messages), = viewer
+    assert (base_url, seeing_model) == (engine.endpoint.base_url, VISION)
+    assert messages[-1]["images"] == [SCREEN_PICTURE["image"]]
+
+
+def test_a_model_the_engine_says_sees_is_handed_the_screen_itself(engine, viewer):
+    assert viewing_for(engine.endpoint, VISION) == routes.screen_look.SEEN_DIRECTLY
+
+
+@pytest.mark.parametrize("address,model", [("https://openrouter.ai/api/v1", "openai/gpt-4o"),
+                                           ("http://lan-box:8080/v1", "gemma3:12b"),
+                                           ("https://api.mistral.ai/v1", "pixtral-12b"),
+                                           ("https://api.openai.com/v1", "gpt-3.5-turbo")])
+def test_a_model_nobody_says_is_blind_is_handed_the_screen_as_before(engine, viewer, address, model):
+    chosen = routes.endpoints.add(address, kind="api-key")
+    assert viewing_for(chosen, model) == routes.screen_look.SEEN_DIRECTLY
+    assert viewer == []
+
+
+def test_an_engine_that_cannot_say_leaves_the_model_to_see_the_screen_itself(engine, viewer):
+    engine.seeing.pop(GENERAL)
+    assert viewing_for(engine.endpoint, GENERAL) == routes.screen_look.SEEN_DIRECTLY
+
+
+def test_a_blind_model_with_no_confirmed_local_viewer_is_told_so_before_anything_is_captured(engine, viewer):
+    engine.seeing[VISION] = ["completion"]
+    assert viewing_for(engine.endpoint, GENERAL).unseen
+    engine.seeing.pop(VISION)
+    assert viewing_for(engine.endpoint, GENERAL).unseen
+
+
+def test_a_vision_model_on_a_friend_or_remote_connection_never_describes_the_screen(engine, viewer, monkeypatch):
+    engine.listed.remove({"id": VISION, "endpoint_id": engine.endpoint.id})
+    friend = add_listed(engine, FRIEND_ENGINE, FRIEND_VISION)
+    engine.listed.insert(0, {"id": REMOTE_VISION, "endpoint_id": engine.endpoint.id})
+    configure_vision(monkeypatch, FRIEND_VISION)
+    assert viewing_for(engine.endpoint, GENERAL).unseen
+    assert (friend.base_url, FRIEND_VISION) not in engine.asked and (LOCAL_ENGINE, REMOTE_VISION) not in engine.asked
+    assert viewer == []
+
+
+def test_a_rejected_auto_vision_pick_falls_through_to_the_next_local_vision_model(engine, viewer, monkeypatch):
+    add_listed(engine, FRIEND_ENGINE, FRIEND_VISION)
+    other = add_listed(engine, OTHER_LOCAL_ENGINE, OTHER_VISION)
+    engine.listed.remove({"id": VISION, "endpoint_id": engine.endpoint.id})
+    configure_vision(monkeypatch, FRIEND_VISION)
+    viewing = viewing_for(engine.endpoint, GENERAL)
+    assert viewing.described_by == OTHER_VISION
+    asyncio.run(viewing.describe(SCREEN_PICTURE))
+    assert viewer[0][:2] == (other.base_url, OTHER_VISION)
+
+
+def test_a_vision_model_on_a_connection_under_arty_s_rules_never_describes_the_screen(engine, viewer, monkeypatch):
+    monkeypatch.setattr(routes.remote_rules, "applies_to", lambda checked, listed: checked.id == engine.endpoint.id)
+    assert viewing_for(engine.endpoint, GENERAL).unseen
+
+
+def test_every_desktop_chat_with_tools_gets_a_viewing_plan(app, endpoint, model_server, tool_turns):
+    admin = login(app, "admin@example.com")
+    assert picked(ask_from_desktop(admin, "yes please, have a look"))["model"] == GENERAL
+    assert ask_from_desktop(admin, "have a look", model=GENERAL, endpoint_id=endpoint.id).status_code == 200
+    assert [ctx.plan_screen_viewing is not None for _model, ctx in tool_turns] == [True, True]
 
 
 def test_auto_sends_each_prompt_to_its_role_model_and_says_which(app, endpoint, model_server, replies):

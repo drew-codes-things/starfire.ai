@@ -1,5 +1,54 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **starfire Desktop update notice**: inside starfire Desktop the page shows "Version X is available" when a newer
+  `desktop-v*` release is on GitHub, with a link that opens the release page in your browser; Dismiss hides it for
+  that version only. The page checks shortly after it opens and then once a day through `GET /api/desktop/latest`
+  (signed-in pages only); the server asks the GitHub releases API for drew-codes-things/starfire.ai at most once
+  every 6 hours (pages of 20 releases, usually one, at most 5 when no desktop release is among the newest; 5 second
+  limit in all, 256 KB cap per page counted before any decoding, compressed answers refused, no cookies or account
+  details). When GitHub can't be reached it keeps the last answer and tries again after 15 minutes. Nothing is
+  downloaded or installed, and a normal browser never sees the notice. `DESKTOP_UPDATE_CHECK=false` turns it off for
+  the whole server.
+- `control_my_pc`: in starfire Desktop with the Arty Desktop link connected and **Use your mouse and keyboard** on in
+  Arty, an admin chatting with a local model can ask the chat to work their PC ("open my Discord and open the chat with
+  skype"). The tool's steps are Arty Desktop's own: list the open windows, open an app, click, type, press keys, scroll,
+  and a screenshot through the existing look path. Every step is one Allow card in Arty Desktop; once anything from
+  outside has entered the turn (web, documents, email, the screen, a step's own result) starfire asks first as well.
+  One reply may take at most 8 steps. Each failure (control off, not linked, Arty not running, you said no, nobody
+  answered, Arty busy) reaches the model as a plain message, so the reply says what did not happen. Never offered to
+  remote or ruled connections, `remote/` or cloud models, the smaller-model tool set, ordinary accounts, `/v1`,
+  scheduled tasks or any other run that cannot show a card.
+- When an admin chats in starfire Desktop and `control_my_pc` is not offered, the model gets a one-line note saying
+  why and what to change (starfire Desktop not linked, Arty Desktop not running, screen control off in Arty, starfire
+  Desktop too old, a remote or friend model, or a model too small for the tool), so it says "I can't control your PC
+  right now because ..." instead of claiming it can only take screenshots. Ruled connections, `/v1` and ordinary
+  accounts get no note and hear nothing about the PC.
+
+### Fixed
+- Looking at your screen: when ArtyEngine says the chat model cannot see pictures, a vision model the engine confirms can see
+  describes the screenshot, but only one on the chat's own connection or inside the home network (never a `remote/` model,
+  an outside connection or one under Arty's rules); the step line names it, and with none nothing is captured and the
+  chat says so. A model nobody says is blind is handed the picture as before. Markers inside a description can no longer
+  rebuild the end marker, and the describe call runs without thinking.
+- A model error after a tool ran ends the reply with a saved note instead of losing the turn; the error detail stays in the
+  log, and a collected answer raises even an error with no text.
+
+### starfire Desktop 1.1.0
+Changes since desktop-v1.0.0:
+- The update notice above: the starfire page in the main window learns the app's version number through the page
+  preload, and nothing else; the main process still makes no outside request. A new switch in Settings, **Tell me
+  when a new starfire Desktop is out** (on by default), turns it off on that PC.
+- Links to Arty Desktop by itself when both run as the same user, without flipping the link switch.
+- Arty Desktop capabilities, a Capabilities panel in Settings and **Open pages in your browsers**.
+- A site too long to show on the open in browser card is refused.
+- No longer says Arty makes a new offer after too many tries.
+- A **Set up starfire Desktop** guide in `desktop/README.md`.
+- Passes `control_my_pc` steps from the starfire page to Arty Desktop, and refuses before sending any step it would
+  not show truthfully on its card, such as text Arty Desktop would type differently from how it is written.
+
 ## 1.2.0 - 2026-11-26
 
 ### Changed

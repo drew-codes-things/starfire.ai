@@ -1,5 +1,6 @@
 import asyncio
 import fnmatch
+import functools
 import json
 import logging
 import os
@@ -23,6 +24,7 @@ import browser_open
 import builtin_tools
 import chat_session_store
 import code_check
+import desktop_control
 import content_screen
 import model_access
 import remote_rules
@@ -126,6 +128,25 @@ def _model_refusal(model: str) -> str:
 def _all_endpoints() -> list:
     return endpoints.list()
 
+def _runs_on_a_local_model(endpoint, model: str) -> bool:
+    return not (remote_rules.applies_to(endpoint, _all_endpoints) or remote_rules.is_remote_connection(endpoint)
+                or remote_rules.is_remote_model(model) or desktop_control.runs_in_the_cloud(model))
+
+def _control_unoffered_reason(body, endpoint, model: str, control_offered: bool, model_brings_own_tools: bool) -> str:
+    if control_offered or model_brings_own_tools or not _current_user_is_active_admin():
+        return ""
+    if not body.desktop_control:
+        return body.desktop_control_off
+    if not _runs_on_a_local_model(endpoint, model):
+        return desktop_control.REMOTE_MODEL
+    return desktop_control.MODEL_TOO_SMALL
+
+def _with_control_note(system: str | None, reason: str) -> str | None:
+    if not reason:
+        return system
+    note = desktop_control.unoffered_note(reason)
+    return f"{system}\n\n{note}" if system else note
+
 REMOTE_ON_ENGINE_REFUSAL = "remote models are reached through their own connection, not through ArtyEngine"
 
 def _require_model(model: str, endpoint=None) -> None:
@@ -196,6 +217,7 @@ def _tool_context(base_url: str = "", api_key: str | None = None, model: str = "
 _INLINE_MEMORY_RE = re.compile(r"^remember\s*:\s*(.+)$", re.IGNORECASE)
 
 PROVIDER_HOMES = {"openai": "api.openai.com", "anthropic": "anthropic.com", "ollama": "ollama.com"}
+VISION_CAPABILITY = "vision"
 
 def _is_providers_own_server(endpoint, provider: str) -> bool:
     home = PROVIDER_HOMES.get(provider)
@@ -1580,6 +1602,8 @@ class ChatBody(BaseModel):
     earlier_untrusted_content: bool = False
     desktop_screen: bool = False
     desktop_browser: bool = False
+    desktop_control: bool = False
+    desktop_control_off: str = ""
     memory_commands: bool = False
     session_id: str = ""
     reply_index: int = -1
@@ -1592,6 +1616,13 @@ class ChatBody(BaseModel):
             if content is not None and not isinstance(content, str):
                 raise ValueError(f"message {index}: content must be text")
         return messages
+
+    @field_validator("desktop_control_off")
+    @classmethod
+    def control_off_is_a_page_reason(cls, reason: str) -> str:
+        if reason and reason not in desktop_control.PAGE_UNOFFERED_REASONS:
+            raise ValueError("desktop_control_off must be one of the reasons the page can see")
+        return reason
 
 ATTACHED_FILE_MARKER = '<file name="'
 ATTACHMENTS_FIELD = "attachments"
@@ -1700,6 +1731,45 @@ async def _auto_pick(messages: list[dict]) -> auto_model.AutoPick:
     if not pick:
         raise HTTPException(503, NO_AUTO_MODEL)
     return pick
+
+async def _engine_capabilities(endpoint, api_key: str | None, model: str) -> list[str] | None:
+    if endpoint.provider != OLLAMA_PROVIDER:
+        return None
+    return await screen_look.ollama_capabilities(endpoint.base_url, api_key, model)
+
+async def _engine_says_blind(endpoint, api_key: str | None, model: str) -> bool:
+    capabilities = await _engine_capabilities(endpoint, api_key, model)
+    return capabilities is not None and VISION_CAPABILITY not in capabilities
+
+async def _engine_says_it_sees(endpoint, model: str) -> bool:
+    capabilities = await _engine_capabilities(endpoint, _api_key_for(endpoint.id, endpoint.provider), model)
+    return capabilities is not None and VISION_CAPABILITY in capabilities
+
+def _may_describe_the_screen(endpoint, model: str, chat_endpoint) -> bool:
+    if not remote_rules.reads_own_data_safely(endpoint, model, _all_endpoints):
+        return False
+    return endpoint.id == chat_endpoint.id or not remote_rules.is_remote_connection(endpoint)
+
+async def _screen_viewer(chat_endpoint, chat_model: str):
+    for candidate in auto_model.vision_candidates(await _usable_models(), _role_sources()):
+        endpoint = endpoints.get(candidate["endpoint_id"])
+        if endpoint is None or (endpoint.id, candidate["id"]) == (chat_endpoint.id, chat_model):
+            continue
+        if _may_describe_the_screen(endpoint, candidate["id"], chat_endpoint) \
+                and await _engine_says_it_sees(endpoint, candidate["id"]):
+            return endpoint, candidate["id"]
+    return None
+
+async def _plan_screen_viewing(endpoint, api_key: str | None, model: str) -> screen_look.Viewing:
+    if not await _engine_says_blind(endpoint, api_key, model):
+        return screen_look.SEEN_DIRECTLY
+    viewer = await _screen_viewer(endpoint, model)
+    if viewer is None:
+        return screen_look.Viewing(unseen=True)
+    seeing_endpoint, seeing_model = viewer
+    return screen_look.Viewing(described_by=seeing_model, describe=functools.partial(
+        screen_look.describe_picture, seeing_endpoint.base_url,
+        _api_key_for(seeing_endpoint.id, seeing_endpoint.provider), seeing_model))
 
 async def _with_first_events(first: list[dict], generator):
     for event in first:
@@ -1811,15 +1881,23 @@ async def chat_stream_endpoint(body: ChatBody):
     auto_chose_own_tools = bool(pick) and _brings_own_tools(model)
     screen_offered = body.desktop_screen and _current_user_is_active_admin()
     browser_offered = body.desktop_browser and _current_user_is_active_admin()
+    control_offered = body.desktop_control and _current_user_is_active_admin() and _runs_on_a_local_model(endpoint, model)
     requested_builtin_tools = (set(body.enabled_builtin_tools) - builtin_tools.DESKTOP_TOOLS) | (
         {builtin_tools.SCREEN_TOOL} if screen_offered else set()) | (
-        {builtin_tools.BROWSER_TOOL} if browser_offered else set())
+        {builtin_tools.BROWSER_TOOL} if browser_offered else set()) | (
+        {builtin_tools.CONTROL_TOOL} if control_offered else set())
     enabled_mcp_servers = [] if ruled else body.enabled_mcp_servers
     if ruled:
         requested_builtin_tools = remote_rules.allowed_tools(requested_builtin_tools)
-        screen_offered = browser_offered = False
+        screen_offered = browser_offered = control_offered = False
     tools_requested = bool(enabled_mcp_servers or requested_builtin_tools) and not auto_chose_own_tools
     tools_usable = tools_requested and model_capabilities.supports_tools(endpoint.provider, model)
+    tier = model_capabilities.tool_tier(endpoint.provider, model)
+    offered_builtin_tools = model_capabilities.tools_for_tier(tier, requested_builtin_tools)
+    if not (ruled or ruled_connection):
+        system = _with_control_note(system, _control_unoffered_reason(
+            body, endpoint, model, tools_usable and builtin_tools.CONTROL_TOOL in offered_builtin_tools,
+            auto_chose_own_tools))
     if tools_usable:
         for server_id in enabled_mcp_servers:
             if mcp_manager.is_connected(server_id):
@@ -1837,12 +1915,15 @@ async def chat_stream_endpoint(body: ChatBody):
                             interactive=True)
         ctx.untrusted_read = _turn_starts_with_untrusted_content(body)
         ctx.desktop_screen = screen_offered
+        ctx.plan_screen_viewing = functools.partial(_plan_screen_viewing, endpoint, api_key, model) \
+            if screen_offered else None
         ctx.desktop_browser = browser_offered
-        tier = model_capabilities.tool_tier(endpoint.provider, model)
+        ctx.desktop_control = builtin_tools.CONTROL_TOOL in offered_builtin_tools
+        rounds = {"max_rounds": desktop_control.CONTROL_TOOL_ROUNDS} if ctx.desktop_control else {}
         generator = run_chat_with_tools(endpoint.base_url, api_key, model, messages,
                                           system, options, set(enabled_mcp_servers),
-                                          model_capabilities.tools_for_tier(tier, requested_builtin_tools), ctx,
-                                          max_tools=model_capabilities.tool_cap_for_tier(tier))
+                                          offered_builtin_tools, ctx,
+                                          max_tools=model_capabilities.tool_cap_for_tier(tier), **rounds)
         if body.session_id:
             generator = _marking_the_chat_untrusted(generator, ctx, body.session_id)
     else:
@@ -2437,6 +2518,34 @@ class BrowserOpenResultBody(BaseModel):
     tab: int | None = Field(None, ge=0, le=browser_open.MAX_TAB)
     reason: str = Field("", max_length=40)
     detail: str = Field("", max_length=browser_open.MAX_DETAIL_CHARS)
+
+class ControlStepResultBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    ok: bool
+    result: str = Field("", max_length=desktop_control.MAX_RESULT_CHARS)
+    reason: str = Field("", max_length=40)
+    detail: str = Field("", max_length=desktop_control.MAX_DETAIL_CHARS)
+
+@router.post("/control-steps/{request_id}/claim")
+async def claim_control_step(request_id: str):
+    _require_host_tool_access("control the computer")
+    try:
+        return desktop_control.claim(request_id, user_data.current_user_id.get())
+    except desktop_control.NotWaiting:
+        raise HTTPException(404, "no step is waiting with that id (already answered, timed out, or the server restarted)")
+    except desktop_control.AlreadyClaimed:
+        raise HTTPException(409, "that step was already taken up")
+
+@router.post("/control-steps/{request_id}/result")
+async def answer_control_step(request_id: str, body: ControlStepResultBody):
+    _require_host_tool_access("control the computer")
+    try:
+        answered = desktop_control.resolve(request_id, user_data.current_user_id.get(), body.model_dump())
+    except desktop_control.BadAnswer as error:
+        raise HTTPException(400, str(error))
+    if not answered:
+        raise HTTPException(404, "no step is waiting with that id")
+    return {"ok": True}
 
 @router.post("/browser-opens/{request_id}/claim")
 async def claim_browser_open(request_id: str):

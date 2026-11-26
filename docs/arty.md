@@ -37,7 +37,7 @@ Arty works without the other two. Arty CLI needs Arty. starfire.ai works with ot
 
 ## Looking at your screen
 
-With the Arty Desktop link on, an admin can ask the chat to "look at my discord": Arty asks you to Allow a screenshot and the model sees it. See [Set up starfire Desktop](../desktop/README.md#set-up-starfire-desktop).
+With the Arty Desktop link on, an admin can ask the chat to "look at my discord": Arty asks you to Allow a screenshot and the model sees it. If ArtyEngine says the chat model cannot see pictures, a vision model on the same connection or on a connection inside the home network (never a `remote/` model, a friend's or other outside connection, or one under Arty's rules) describes the screenshot instead, and the step line names it; if there is none, nothing is captured and the chat says so. See [Set up starfire Desktop](../desktop/README.md#set-up-starfire-desktop).
 
 ## Linking starfire Desktop to Arty Desktop
 
@@ -57,3 +57,16 @@ can ask the chat to "open example.org in Firefox" and the model calls `open_in_b
 card with the exact address and browser, and nothing happens until you allow it. Nothing from the page comes back to
 starfire or the model. Only http and https addresses are accepted, and scheduled tasks never get the tool. See
 [Capabilities and "open this page"](../desktop/README.md#6a-capabilities-and-open-this-page).
+
+## Controlling your PC
+
+When **Use your mouse and keyboard** is available (Arty Desktop's computer control and screen control both on), an
+admin chatting with a **local** model can ask the chat to do things on the PC, such as "open my Discord and open the chat
+with skype". The model calls `control_my_pc` one step at a time, using Arty Desktop's own steps: list the open windows,
+open an app, click, type, press keys, scroll, and a screenshot to see what happened. Every step shows Arty's Allow card
+and runs only after you allow it; once anything from outside has entered the reply (a web page, a document, an email,
+the screen or a step's result), starfire shows its own approval card first as well. A reply may take at most 8 steps.
+Remote and ruled connections, `remote/` models, cloud models (`-cloud` or `:cloud` in the name), small models,
+ordinary accounts, `/v1` and scheduled tasks never get the tool. When an admin in starfire Desktop is not offered it,
+the model is told why (not linked, Arty Desktop not running, screen control off, a cloud, remote or friend model, a
+model too small) so it can say what to change. See [Control your PC](../desktop/README.md#6b-control-your-pc).

@@ -7,7 +7,7 @@
 [![Python](https://img.shields.io/badge/python-3.12+-blue?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/fastapi-web-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Ollama](https://img.shields.io/badge/ollama-local%20models-000000?style=flat-square)](https://ollama.com/)
-[![Server](https://img.shields.io/badge/server-1.1.0-lightgrey?style=flat-square)](CHANGELOG.md)
+[![Server](https://img.shields.io/badge/server-1.2.0-lightgrey?style=flat-square)](CHANGELOG.md)
 [![Desktop](https://img.shields.io/badge/desktop-1.0.0-lightgrey?style=flat-square)](https://github.com/drew-codes-things/starfire.ai/releases/tag/desktop-v1.0.0)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square)](LICENSE)
 
@@ -89,7 +89,7 @@ call is locked, so set it up straight away. More in [Logging in and accounts](do
 ## Releases
 
 The [releases page](https://github.com/drew-codes-things/starfire.ai/releases) holds two kinds of release. Server
-releases are tagged `v1.x` (the current one is [v1.1.0](https://github.com/drew-codes-things/starfire.ai/releases/tag/v1.1.0))
+releases are tagged `v1.x` (the current one is [v1.2.0](https://github.com/drew-codes-things/starfire.ai/releases/tag/v1.2.0))
 and are the starfire server. Desktop releases are tagged `desktop-v1.x` (the current one is
 [desktop-v1.0.0](https://github.com/drew-codes-things/starfire.ai/releases/tag/desktop-v1.0.0)) and carry the
 starfire Desktop installers. They have separate version numbers.

@@ -10,11 +10,15 @@ function lookTarget(app) {
   return app || LOOK_WHOLE_SCREEN;
 }
 
-function stepText(kind, app) {
+function describerNote(describedBy) {
+  return describedBy ? ` (${describedBy} describes it to the chat model)` : '';
+}
+
+function stepText(kind, app, describedBy) {
   const target = lookTarget(app);
   if (kind === 'looking') return `Looking at ${target} on your PC...`;
   if (kind === 'waiting') return 'Waiting for you to allow it in Arty';
-  return `Looked at ${target}`;
+  return `Looked at ${target}${describerNote(describedBy)}`;
 }
 
 function failureText(reason, app, detail) {
@@ -70,7 +74,7 @@ async function runLook({ request, link, api, show }) {
     const picture = { image: result.image, mime: result.mime };
     const handed = await api.answer(request.request_id, { ok: true, ...picture, target: result.target, window: result.window, note: result.note });
     if (handed) {
-      show({ kind: 'done', text: stepText('done', app), picture });
+      show({ kind: 'done', text: stepText('done', app, plainDetail(request.described_by)), picture });
       return;
     }
     show({ kind: 'failed', text: `The picture of ${lookTarget(app)} could not be given to starfire, so I did not look` });

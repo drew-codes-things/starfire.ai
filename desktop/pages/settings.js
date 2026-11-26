@@ -5,7 +5,7 @@
   const shortcutChange = document.getElementById('shortcut-change');
   const shortcutHelp = document.getElementById('shortcut-help');
   const addressValue = document.getElementById('address-value');
-  const TOGGLES = ['startWithSystem', 'notifications', 'closeToTray', 'artyLink', 'artyAutoLink'];
+  const TOGGLES = ['startWithSystem', 'notifications', 'closeToTray', 'updateNotice', 'artyLink', 'artyAutoLink'];
   const linkLight = document.getElementById('link-light');
   const linkLabel = document.getElementById('link-label');
   const linkPairing = document.getElementById('link-pairing');

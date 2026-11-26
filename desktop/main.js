@@ -7,7 +7,7 @@ const { loadSettings } = require('./src/settings');
 const { applyAutostart } = require('./src/autostart');
 const { acceleratorFromKeyEvent } = require('./src/shortcut');
 const { registerIpc } = require('./src/ipc');
-const { isBridgeOffered, registerWebBridge } = require('./src/webBridge');
+const { isPageBridgeChanged, registerWebBridge, registerVersionAnswer } = require('./src/webBridge');
 const { isLocalPageUrl, isPermissionAllowed } = require('./src/navigation');
 const { isReplyFinished, shouldNotify, replyNotification } = require('./src/notify');
 const { parseLaunchArgs } = require('./src/launch');
@@ -126,7 +126,7 @@ function startApp() {
     setAutostart,
     onChange: (current, previous) => {
       if (trayHandle) trayHandle.refresh();
-      if (windows && isBridgeOffered(current) !== isBridgeOffered(previous)) windows.reloadMain();
+      if (windows && isPageBridgeChanged(current, previous)) windows.reloadMain();
       if (artyLink && turnedOnLinkingByItself(current, previous)) tryLinkingByItself();
     },
   });
@@ -165,6 +165,7 @@ function startApp() {
   });
 
   registerWebBridge({ ipcMain, controller, artyLink, isMainWindow: (event) => windows.isMainContents(event.sender) });
+  registerVersionAnswer({ ipcMain, controller, isMainWindow: (event) => windows.isMainContents(event.sender), version: app.getVersion() });
 
   const registered = controller.start();
   if (!registered.ok) console.error(registered.error);

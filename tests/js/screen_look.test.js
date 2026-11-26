@@ -80,6 +80,21 @@ test('looking at an app says so, then says it is waiting for Arty, then says it 
   assert.equal(api.answers[0][1].image, 'QUJD');
 });
 
+test('a picture another model describes names that model when the look is done', async () => {
+  const shown = [];
+  const request = { request_id: 'abc123', app: 'Discord', described_by: 'seeing-vl:7b' };
+  await runLook({ request, link: linkFake(), api: apiFake(), show: (step) => shown.push(step) });
+  assert.equal(shown[0].text, 'Looking at Discord on your PC...');
+  assert.equal(shown[2].text, 'Looked at Discord (seeing-vl:7b describes it to the chat model)');
+});
+
+test('a describer name that is not text is left out', async () => {
+  const shown = [];
+  const request = { request_id: 'abc123', app: 'Discord', described_by: { name: 'x' } };
+  await runLook({ request, link: linkFake(), api: apiFake(), show: (step) => shown.push(step) });
+  assert.equal(shown[2].text, 'Looked at Discord');
+});
+
 test('with no app it is the screen', async () => {
   const shown = await run({ link: linkFake(), api: apiFake({ claim: { app: '' } }), app: '' });
   assert.equal(shown[0].text, 'Looking at your screen on your PC...');

@@ -26,6 +26,7 @@ test('defaults are no address, https only, Ctrl+Shift+Space, notifications on, n
     artyLinkedByItself: false,
     artyToken: '',
     artyPort: 8765,
+    updateNotice: true,
   });
 });
 

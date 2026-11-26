@@ -190,6 +190,56 @@ nobody answered, no browser is connected, several are and none was named, Arty i
 say it could not open it. Like looking at the screen, the tool is offered only to an admin in starfire Desktop when Arty
 says the capability is available, never in an ordinary browser, and never in scheduled tasks.
 
+### 6b. Control your PC
+
+With **Use your mouse and keyboard** available (in Arty Desktop, computer control and screen control are both on), an
+**admin** chatting with a **local** model in starfire Desktop can say "open my Discord and open the chat with skype". The
+model calls the `control_my_pc` tool, one step at a time, with Arty Desktop's own steps:
+
+| Step | Arty Desktop tool | What it takes |
+|---|---|---|
+| `apps` | `computer_apps` | nothing: lists the open windows and which is in front |
+| `open` | `computer_open` | `app`, the app's name only (at most 80 characters): no `/`, `\`, `~` or `:` and no leading `.`, so no file paths or web addresses |
+| `click` | `computer_click` | `target` (what to click, at most 80 characters, Arty's own limit) or `x` and `y`; `button` left or right; `double` |
+| `type` | `computer_type` | `text` on one line (at most 500 characters); sent only when Arty Desktop would type it exactly as written (starfire works this out the way Arty does), so a written-out `\n`, entities such as `&#10;`, `&amp;` or `&vert;`, and text whose literal form Arty would change, such as `?a=1&timestamp=2` (Arty reads `&times` as ×), can't be typed through the link, while `C:\Users\name\notes.txt` and `R&D; budget` go as written; `app`, the app it must go into |
+| `key` | `computer_key` | `keys`, such as `ctrl+k` or `return` (at most 40 characters) |
+| `scroll` | `computer_scroll` | `direction` up, down, left or right; `amount` 1 to 50 |
+| `screenshot` | the look described above | `app`, or empty for the whole screen |
+
+1. The chat shows **Asking Arty to open Discord on your PC...** and then **Waiting for you to allow it in Arty**.
+2. Arty Desktop shows its Allow card with the whole step. Nothing happens until you press **Allow**; no answer in about
+   two minutes counts as no. Each step has its own card: steps are never allowed together. Pressing **Stop** in the
+   chat drops a step that has not reached Arty yet; a card already showing in Arty stays until you answer it there.
+3. After Allow the chat shows **Arty answered (open Discord): ...** with Arty's own words, and the model gets what
+   Arty Desktop answered, which may say the step did not work, marked as text that may come from your screen. To see
+   the result it takes a screenshot, which is a look with its own card.
+
+Once anything from outside has entered the reply (a web page, a document, an email, a screenshot, or a step's own
+result, which can carry window titles), starfire shows its own approval card before each step, and Arty's card still
+follows. A reply may take at most 8 steps; then the model says what was done and you can say continue. If a step does
+not happen, the chat says why on its own line (you said no, nobody answered, controlling the PC is off in Arty, Arty was
+busy, Arty is not running, the link is off) and the model is told to say so. When starfire Desktop never answers, loses
+the connection to Arty after sending a step, or reports a problem it cannot name, the chat says it could not tell
+whether Arty did it, and the model is told the step may or may not have happened and to check with a screenshot. Only a
+refused connection counts as Arty Desktop not running.
+
+The steps and their values are checked three times: by starfire's server before anything is staged, by starfire Desktop
+before it proves Arty Desktop and sends the link token, and by Arty Desktop, which refuses anything its card cannot show
+in full. Sending a message for you (`computer_send_message`), commands and files are not among the steps, and `open`
+refuses anything that looks like a path or an address; an app's name such as `poweroff` is passed on, and Arty's card
+shows it before anything runs. The tool is offered only when the page says the capability is available, to an active admin, on a local model
+(a connection at a home address that is not under Arty's rules, never a `remote/` model, and never a cloud model whose
+name ends in `-cloud` or contains `:cloud`) with the full tool set;
+never in an ordinary browser, never to remote, friend or ruled connections, never on `/v1` app keys, and never in
+scheduled tasks, helpers or the email AI.
+
+When an admin chats in starfire Desktop and the tool is not offered, the model is told why in one line so it can say "I
+can't control your PC right now because ..." and what to change: starfire Desktop is not linked to Arty Desktop, Arty
+Desktop is not running, screen control is off in Arty Desktop, this starfire Desktop is too old, the model is on a
+remote or friend's connection, or the model is too small for the tool. With the link off or unpaired, the app tells the
+starfire page only that (`starfireDesktopUnlinked`), with nothing to call. Ruled connections, `/v1` and ordinary
+accounts get no note.
+
 ### 7. Update
 
 - The starfire web app updates with your server: when the server is updated, the app shows the new version the next time
@@ -197,6 +247,12 @@ says the capability is available, never in an ordinary browser, and never in sch
 - The desktop shell itself (the window, tray, shortcut and link) has no built-in updater. For a new release, download it and
   install it over the old one: `sudo apt install ./starfire_<new version>_amd64.deb`, replace the AppImage file, or run
   the new Windows installer. Your address, shortcut and pairing are kept.
+- When a newer starfire Desktop is out, the window shows "Version X is available" with a link that opens the release
+  page in your browser. Dismiss hides it until the next version. Your starfire server looks the release up on GitHub
+  (at most once every 6 hours, or again after 15 minutes when GitHub could not be reached) and the page checks shortly
+  after it opens, then once a day; nothing is downloaded or installed. Turn it off on this PC with **Tell me when a
+  new starfire Desktop is out** in Settings (on by default); a server admin can turn it off for everyone with
+  `DESKTOP_UPDATE_CHECK=false`.
 
 ### 8. Uninstall
 
@@ -226,6 +282,7 @@ Deleting the config folder also forgets the Arty link on this PC; unlink in Arty
 | `The code from Arty Desktop is 6 digits.` | Type only the six digits. |
 | Light says **Arty Desktop did not prove itself** | Nothing was sent. Unpair in starfire, then pair again. If you did not unlink in Arty Desktop, something other than Arty Desktop may be answering on its port, so do not pair until you know what. |
 | "Look at my ..." does nothing or the chat answers without looking | You need an admin account, starfire Desktop (not a browser), the link **Connected** and the request made in a chat window of the app. A look is also refused while Arty Desktop's computer control is off, while Arty Desktop is already waiting on another step, or for a minute after three refusals in a row. |
+| "Open my ..." gets no further than saying it cannot control the PC | The reply names the reason; fix that one. You need an admin account, starfire Desktop, the link **Connected**, **Use your mouse and keyboard** available in Settings (turn on computer control and screen control in Arty Desktop) and a local model with the full tool set. Remote connections and small models never get it. |
 | The shortcut does nothing | Another program may hold it (starfire says so in Settings); choose a different one. On a Wayland desktop that does not pass global shortcuts through, bind a shortcut in your desktop's own settings to the command `starfire --quick-ask` (or `~/Applications/starfire.AppImage --quick-ask`). |
 | No tray icon or the window does not come back after closing it | Some desktops (plain GNOME) have no tray. Switch off **Closing the window keeps starfire in the tray**. |
 | Need to start over | Quit starfire and delete the config folder (see Uninstall). The next start shows the first-run screen again. |
@@ -283,9 +340,14 @@ running app to show the quick-ask window. `STARFIRE_WAYLAND=1` starts the app as
 
 - `contextIsolation` on, `nodeIntegration` off, `sandbox` on and no remote module in every window. The starfire window
   has one narrow preload (`preload-web.js`): only the top frame of the configured starfire origin gets it, only while the
-  Arty link is on and paired, and it exposes just `linkStatus()`, `lookAtScreen(app)` and `openInBrowser(url, browser)`.
+  Arty link is on and paired, and it exposes just `linkStatus()`, `lookAtScreen(app)`, `openInBrowser(url, browser)`
+  and `controlStep(action, values)`, which takes one of six fixed steps with plain text, number and true or false values
+  only (see [Control your PC](#6b-control-your-pc)); the page never names one of Arty's tools. While the link is off
+  or unpaired, that same page gets only `starfireDesktopUnlinked`, set to true, and nothing it can call.
   The main process checks the sender and the exact shape of every request again on every call, and `linkStatus()` tells
-  the page only whether the link is connected and the checked capability list. Nothing else in the page can reach the app.
+  the page only whether the link is connected and the checked capability list. Separately, the same top frame learns the
+  app's version number (`starfireDesktopApp.version`, for the update notice, only while **Tell me when a new starfire
+  Desktop is out** is on), and nothing else. Nothing else in the page can reach the app.
 - Navigation, redirects and new windows are limited to the configured starfire origin. Any other link opens in the
   system browser (web and mail links only), and only for the main frame right after a click or key press in the window
   (one opening per click); other schemes (`file:`, `javascript:`, `data:` and the like) are refused.

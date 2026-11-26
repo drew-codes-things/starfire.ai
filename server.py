@@ -51,6 +51,7 @@ import arty_memory
 import auth
 import auth_routes
 import caller_watch
+import desktop_updates
 import remote_rules
 import routes
 import security_headers
@@ -169,6 +170,7 @@ app.include_router(routes.router)
 app.include_router(arty_devices.router)
 app.include_router(arty_cli_remote.router)
 app.include_router(arty_memory.router)
+app.include_router(desktop_updates.router)
 addons.install(app)
 app.include_router(app_key_api.admin_router)
 app.include_router(app_key_api.openai_router)

@@ -1629,6 +1629,10 @@ button.chip:hover { background: var(--hover); }
 .toast::first-letter { text-transform: uppercase; }
 .toast.error { background: var(--accent-fill); color: var(--on-accent); }
 .toast.leaving { opacity: 0; transform: translateY(calc(var(--rise) / -2)); transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease); }
+.toast.desktop-update { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-3); }
+.toast.desktop-update a { color: inherit; text-decoration: underline; }
+.desktop-update-dismiss { padding: 0; border: 0; background: none; color: inherit; font: inherit; opacity: 0.75; cursor: pointer; }
+.desktop-update-dismiss:hover { opacity: 1; }
 
 body.login-page {
   display: flex;

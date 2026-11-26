@@ -203,6 +203,7 @@ async function send(text, overrideModel, extra = {}) {
   const aiIdx = messages.length;
   const desktopScreen = await desktopScreenOffered();
   const desktopBrowser = await desktopBrowserOffered();
+  const desktopControl = await desktopControlForThisChat();
 
   await streamReply({
     model, aiIdx, startsNewChat,
@@ -221,6 +222,8 @@ async function send(text, overrideModel, extra = {}) {
         earlier_untrusted_content: sideChatContext(sideChat, messages).some(m => m.untrustedRead === true),
         ...(desktopScreen ? { desktop_screen: true } : {}),
         ...(desktopBrowser ? { desktop_browser: true } : {}),
+        ...(desktopControl.offered ? { desktop_control: true } : {}),
+        ...(desktopControl.off ? { desktop_control_off: desktopControl.off } : {}),
         memory_commands: !isTemporaryChat(),
         ...(sessionId ? { session_id: sessionId, reply_index: aiIdx } : {}),
       }),
@@ -361,6 +364,8 @@ async function streamReply({ model, aiIdx, startsNewChat, open, giveBack }) {
       startScreenLook(obj.screen_request);
     } else if (obj.browser_request) {
       startBrowserOpen(obj.browser_request);
+    } else if (obj.control_request) {
+      startControlStep(obj.control_request);
     } else if (obj.usage) {
       noteRoundUsage(replyMeter, obj.usage);
       liveChatStats.follow(replyMeter);

@@ -116,6 +116,14 @@ def _guessed_for(role: str, usable: list[dict], sources: RoleSources) -> dict | 
     return (_named(general, sources.task_model) if sources.task_model else None) or (general[0] if general else None)
 
 
+def vision_candidates(usable: list[dict], sources: RoleSources) -> list[dict]:
+    configured = sources.configured.get(VISION)
+    chosen = [_named(usable, configured)] if configured and _named(usable, configured) else []
+    seeing = [m for m in _unrestricted(usable, sources) if not matches_any(m["id"], sources.own_tools_patterns)]
+    guessed = [m for pattern in VISION_NAME_PATTERNS for m in seeing if matches_any(m["id"], [pattern])]
+    return list({(m["endpoint_id"], m["id"]): m for m in chosen + guessed}.values())
+
+
 def model_for_role(role: str, usable: list[dict], sources: RoleSources) -> dict | None:
     configured = sources.configured.get(role)
     chosen = _named(usable, configured) if configured else None

@@ -18,6 +18,37 @@ const BASE64_FORMAT = /^[A-Za-z0-9+/]+={0,2}$/;
 const HIDDEN_CHARACTER = /[\p{C}\p{Z}]/u;
 const LOOK_REASONS = new Set(['declined', 'timed_out', 'not_found', 'cannot_see', 'off_limits', 'unavailable', 'busy', 'bad_request', 'ambiguous', 'changed', 'failed']);
 const OPEN_REASONS = new Set(['declined', 'timed_out', 'abandoned', 'busy', 'bad_request', 'no_browser', 'which_browser', 'not_connected', 'unavailable', 'failed']);
+const CONTROL_REASONS = new Set(['declined', 'timed_out', 'abandoned', 'busy', 'bad_request', 'unavailable', 'failed']);
+const MAX_CONTROL_RESULT_CHARS = 4000;
+const MAX_SCREEN_PIXEL = 100000;
+const MAX_TARGET_CHARS = 80;
+const TEXT_FIELD = (limit, rule = '') => ({ kind: 'text', limit, rule });
+const TYPED_TEXT = 'typed text';
+const APP_NAME_ONLY = 'app name';
+const PATH_CHARACTER = /[/\\~:]/;
+const HIDDEN_FILE_START = '.';
+const HTML_UNESCAPE = require('./htmlUnescape.json');
+const HTML_CHARACTER_REFERENCE = /&(#[0-9]+;?|#[xX][0-9a-fA-F]+;?|[^\t\n\f <&#;]{1,32};?)/gu;
+const INVALID_CODEPOINTS = new Set(HTML_UNESCAPE.invalidCodepoints);
+const LAST_CODEPOINT = 0x10ffffn;
+const SURROGATES = [0xd800n, 0xdfffn];
+const REPLACEMENT_CHARACTER = '\ufffd';
+const ARTY_CODE_OR_MARKUP = /["`<>{}()]/u;
+const PYTHON_SPACE = '[\\t\\n\\v\\f\\r\\x1c-\\x1f \\x85\\xa0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]';
+const ARTY_TYPED_LITERALLY = new RegExp(`[A-Za-z]:\\\\|\\\\\\\\|^${PYTHON_SPACE}*(?:echo|printf)(?![\\p{L}\\p{N}_])`, 'u');
+const CHOICE_FIELD = (...choices) => ({ kind: 'choice', choices });
+const NUMBER_FIELD = { kind: 'number', limit: MAX_SCREEN_PIXEL };
+const WHOLE_NUMBER_FIELD = { kind: 'whole', limit: 50 };
+const YES_OR_NO_FIELD = { kind: 'boolean' };
+const CONTROL_STEPS = Object.freeze({
+  apps: { tool: 'computer_apps', fields: {}, required: [] },
+  open: { tool: 'computer_open', fields: { app: TEXT_FIELD(MAX_APP_CHARS, APP_NAME_ONLY) }, required: ['app'] },
+  click: { tool: 'computer_click', fields: { target: TEXT_FIELD(MAX_TARGET_CHARS), x: NUMBER_FIELD, y: NUMBER_FIELD, button: CHOICE_FIELD('left', 'right'), double: YES_OR_NO_FIELD }, required: [] },
+  type: { tool: 'computer_type', fields: { text: TEXT_FIELD(500, TYPED_TEXT), app: TEXT_FIELD(MAX_APP_CHARS, APP_NAME_ONLY) }, required: ['text'] },
+  key: { tool: 'computer_key', fields: { keys: TEXT_FIELD(40) }, required: ['keys'] },
+  scroll: { tool: 'computer_scroll', fields: { direction: CHOICE_FIELD('up', 'down', 'left', 'right'), amount: WHOLE_NUMBER_FIELD }, required: [] },
+});
+const RESULT_HIDDEN_CHARACTER = /[\p{C}\p{Zl}\p{Zp}]/u;
 const CAPABILITY_IDS = new Set(['screen.look', 'browser.open', 'browser.own', 'screen.control', 'quiz']);
 const BROWSER_CAPABILITY = 'browser.open';
 const MAX_CAPABILITIES = 10;
@@ -50,6 +81,10 @@ const NETWORK_FAILURES = ['ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EPIPE'];
 const OWN_FAILURES = ['EREDIRECT', 'ETOOLARGE', 'EBADBODY', 'ETIMEDOUT'];
 const NOT_RUNNING = 'Arty Desktop is not running on this computer, or it has not finished starting.';
 const UNEXPECTED_FAILURE = 'Something went wrong while talking to Arty Desktop, so nothing was done.';
+const REFUSED_CONNECTION = 'ECONNREFUSED';
+const STEP_LOST = 'The connection to Arty Desktop broke or timed out after the step was sent, so it may or may not have happened.';
+const STEP_UNEXPECTED_FAILURE = 'Something went wrong while talking to Arty Desktop after the step was sent, so it may or may not have happened.';
+const STEP_ANSWER_PROBLEMS = ['EREDIRECT', 'ETOOLARGE', 'EBADBODY'];
 
 function requestFailure(message, code) {
   return Object.assign(new Error(message), { code });
@@ -98,6 +133,13 @@ function describeFailure(error) {
   if (NETWORK_FAILURES.includes(error.code)) return NOT_RUNNING;
   if (OWN_FAILURES.includes(error.code)) return error.message;
   return UNEXPECTED_FAILURE;
+}
+
+function stepFailure(error) {
+  if (error.code === REFUSED_CONNECTION) return lookFailure('not_running', NOT_RUNNING);
+  if (NETWORK_FAILURES.includes(error.code)) return lookFailure('failed', STEP_LOST);
+  if (STEP_ANSWER_PROBLEMS.includes(error.code)) return lookFailure('failed', `${error.message} The step may or may not have happened.`);
+  return lookFailure('failed', STEP_UNEXPECTED_FAILURE);
 }
 
 function refuse(error, extra = {}) {
@@ -223,6 +265,96 @@ function describeOpenRefusal(answer) {
   const body = bodyOf(answer);
   const reason = OPEN_REASONS.has(body.reason) ? body.reason : 'failed';
   return lookFailure(reason, typeof body.error === 'string' ? shownText(body.error) : `Arty Desktop answered ${answer.status}.`);
+}
+
+function isFieldValue(field, value) {
+  if (field.kind === 'boolean') return typeof value === 'boolean';
+  if (field.kind === 'number') return Number.isFinite(value) && value >= 0 && value <= field.limit;
+  if (field.kind === 'whole') return Number.isSafeInteger(value) && value >= 1 && value <= field.limit;
+  if (field.kind === 'choice') return field.choices.includes(value);
+  return typeof value === 'string' && value.trim() !== '' && value.length <= field.limit && ![...value].some((character) => character !== ' ' && HIDDEN_CHARACTER.test(character))
+    && followsFieldRule(field.rule, value);
+}
+
+function followsFieldRule(rule, value) {
+  if (rule === TYPED_TEXT) return asArtyTypesIt(value) === value;
+  if (rule === APP_NAME_ONLY) return !PATH_CHARACTER.test(value) && !value.trimStart().startsWith(HIDDEN_FILE_START);
+  return true;
+}
+
+function numericReference(reference) {
+  const isHex = reference[1] === 'x' || reference[1] === 'X';
+  const digits = reference.slice(isHex ? 2 : 1).replace(/;$/, '');
+  const number = BigInt(isHex ? `0x${digits}` : digits);
+  const invalid = HTML_UNESCAPE.invalidCharrefs[number.toString()];
+  if (invalid !== undefined) return invalid;
+  if ((number >= SURROGATES[0] && number <= SURROGATES[1]) || number > LAST_CODEPOINT) return REPLACEMENT_CHARACTER;
+  if (INVALID_CODEPOINTS.has(Number(number))) return '';
+  return String.fromCodePoint(Number(number));
+}
+
+function namedReference(reference) {
+  const { entities } = HTML_UNESCAPE;
+  if (Object.hasOwn(entities, reference)) return entities[reference];
+  const characters = Array.from(reference);
+  for (let length = characters.length - 1; length > 1; length -= 1) {
+    const name = characters.slice(0, length).join('');
+    if (Object.hasOwn(entities, name)) return entities[name] + characters.slice(length).join('');
+  }
+  return `&${reference}`;
+}
+
+function htmlUnescape(text) {
+  if (!text.includes('&')) return text;
+  return text.replace(HTML_CHARACTER_REFERENCE, (_match, reference) => (reference[0] === '#' ? numericReference(reference) : namedReference(reference)));
+}
+
+function asArtyTypesIt(text) {
+  let typed = text;
+  if (!ARTY_CODE_OR_MARKUP.test(text)) {
+    typed = htmlUnescape(text);
+    if (!typed.includes('\n') && typed.includes('\\n') && !ARTY_TYPED_LITERALLY.test(typed)) {
+      typed = typed.replaceAll('\\r\\n', '\n').replaceAll('\\n', '\n').replaceAll('\\t', '\t');
+    }
+  }
+  return typed.replaceAll('\r\n', '\n');
+}
+
+function isClickSpot(args) {
+  const hasTarget = 'target' in args;
+  const hasX = 'x' in args;
+  const hasY = 'y' in args;
+  return hasTarget ? !hasX && !hasY : hasX && hasY;
+}
+
+function controlStepProblem(action, args) {
+  const step = Object.hasOwn(CONTROL_STEPS, action) ? CONTROL_STEPS[action] : null;
+  if (!step) return 'That is not a step starfire can ask Arty Desktop for.';
+  if (!isPlainObject(args) || Object.getPrototypeOf(args) !== Object.prototype) return 'A step takes a plain list of named values.';
+  const names = Object.keys(args);
+  if (names.some((name) => !Object.hasOwn(step.fields, name))) return 'That step was given something it does not take.';
+  if (step.required.some((name) => !names.includes(name))) return 'That step is missing something it needs.';
+  if (names.some((name) => !isFieldValue(step.fields[name], args[name]))) return 'That step has a value that cannot be shown plainly on the Allow card.';
+  if (action === 'click' && !isClickSpot(args)) return 'A click takes a target, or both x and y.';
+  return '';
+}
+
+function controlResultText(value) {
+  if (typeof value !== 'string') return '';
+  return [...value].filter((character) => character === '\n' || !RESULT_HIDDEN_CHARACTER.test(character)).join('').slice(0, MAX_CONTROL_RESULT_CHARS);
+}
+
+function isControlOffForTool(tool, result) {
+  return result === `There is no tool called ${tool}.`;
+}
+
+function describeControlRefusal(answer) {
+  const body = bodyOf(answer);
+  const said = typeof body.error === 'string' ? shownText(body.error) : `Arty Desktop answered ${answer.status}.`;
+  if (CONTROL_REASONS.has(body.reason)) return lookFailure(body.reason, said);
+  if (answer.status === 403) return lookFailure('unavailable', said);
+  if (answer.status === 400 || answer.status === 413) return lookFailure('bad_request', said);
+  return lookFailure('failed', said);
 }
 
 function openedTab(tab) {
@@ -374,7 +506,32 @@ function createArtyLink({ getSettings, setToken, request = requestArty, readOffe
     return { ok: true, browser: isBrowserName(body.browser) ? body.browser : '', tab: openedTab(body.tab) };
   }
 
-  return { status, pair, linkByItself, unpair, tryLink, lookAtScreen, openInBrowser };
+  async function controlStep(action, args) {
+    const settings = getSettings();
+    if (!settings.artyLink) return lookFailure('not_linked', 'The link to Arty Desktop is off.');
+    if (settings.artyToken === '') return lookFailure('not_linked', 'Pair with Arty Desktop first.');
+    const problem = controlStepProblem(action, args);
+    if (problem) return lookFailure('bad_request', problem);
+    const tool = CONTROL_STEPS[action].tool;
+    try {
+      if (!(await isProvenArty(settings))) return lookFailure('not_linked', NOT_PROVEN);
+    } catch (error) {
+      return NETWORK_FAILURES.includes(error.code) ? lookFailure('not_running', NOT_RUNNING) : lookFailure('not_linked', NOT_PROVEN);
+    }
+    let answer;
+    try {
+      answer = await request({ method: 'POST', path: '/link/computer', token: settings.artyToken, body: { tool, arguments: { ...args } }, port: settings.artyPort, timeoutMs: STEP_TIMEOUT_MS });
+    } catch (error) {
+      return stepFailure(error);
+    }
+    const body = bodyOf(answer);
+    if (answer.status !== 200 || body.ok !== true) return describeControlRefusal(answer);
+    const result = controlResultText(body.result);
+    if (isControlOffForTool(tool, result)) return lookFailure('unavailable', 'Controlling the screen is turned off in Arty Desktop.');
+    return { ok: true, result };
+  }
+
+  return { status, pair, linkByItself, unpair, tryLink, lookAtScreen, openInBrowser, controlStep };
 }
 
-module.exports = { createArtyLink, requestArty, LOOPBACK_HOST };
+module.exports = { createArtyLink, requestArty, asArtyTypesIt, LOOPBACK_HOST };

@@ -1,5 +1,7 @@
 import asyncio
+import contextlib
 import json
+import logging
 
 import builtin_tools
 import content_screen
@@ -15,11 +17,17 @@ MAX_TOOL_ROUNDS = 5
 EDIT_TOOL = "edit_file"
 UNTRUSTED_READ_EVENT = {"untrusted_read": True}
 TOOL_RESULT_DISPLAY_CHARS = 2000
+FAILED_AFTER_TOOLS = "failed_after_tools"
+TOOLS_STOPPED_WITH_THE_REPLY = frozenset({builtin_tools.CONTROL_TOOL})
+FAILED_AFTER_TOOLS_NOTE = "\n\n(The model stopped with an error after the tools ran, so this reply ends here.)"
+UNNAMED_MODEL_ERROR = "the model stopped with an error that gave no detail"
+
+logger = logging.getLogger(__name__)
 
 async def run_chat_with_tools(base_url: str, api_key: str | None, model: str, messages: list[dict],
                                system: str | None, options: dict | None, enabled_server_ids: set[str],
                                enabled_builtin_tools: set[str], ctx: "builtin_tools.ToolContext",
-                               max_tools: int | None = None):
+                               max_tools: int | None = None, max_rounds: int = MAX_TOOL_ROUNDS):
     usable_server_ids = frozenset(enabled_server_ids) if ctx.may_use_host_tools else frozenset()
     tools = builtin_tools.schemas_for(enabled_builtin_tools) + mcp_manager.get_all_openai_schemas(usable_server_ids)
     if max_tools is not None:
@@ -29,10 +37,10 @@ async def run_chat_with_tools(base_url: str, api_key: str | None, model: str, me
     if builtin_tools.has_read_untrusted_content(ctx):
         yield _sse_line(UNTRUSTED_READ_EVENT)
 
-    for round_number in range(MAX_TOOL_ROUNDS + 1):
+    for round_number in range(max_rounds + 1):
         text = ""
         tool_calls: list[dict] = []
-        had_error = False
+        failure = None
 
         async for kind, payload in stream_chat_once(base_url, api_key, model, working_messages,
                                                       system, options, tools):
@@ -44,10 +52,11 @@ async def run_chat_with_tools(base_url: str, api_key: str | None, model: str, me
             elif kind == "usage":
                 yield _sse_line({"usage": payload})
             elif kind == "error":
-                yield _sse_line({"error": payload})
-                had_error = True
+                failure = payload
 
-        if had_error:
+        if failure is not None:
+            for event in _failure_events(failure, tools_have_run=round_number > 0):
+                yield _sse_line(event)
             return
 
         if not tool_calls:
@@ -60,8 +69,8 @@ async def run_chat_with_tools(base_url: str, api_key: str | None, model: str, me
             yield _sse_line({"done": True})
             return
 
-        if round_number == MAX_TOOL_ROUNDS:
-            yield _sse_line({"delta": _round_limit_note(tool_calls)})
+        if round_number == max_rounds:
+            yield _sse_line({"delta": _round_limit_note(tool_calls, max_rounds)})
             yield _sse_line({"done": True})
             return
 
@@ -82,11 +91,12 @@ async def run_chat_with_tools(base_url: str, api_key: str | None, model: str, me
             if refusal:
                 result = refusal
             else:
-                async for kind, payload in _execute_tool(call, ctx, usable_server_ids):
-                    if kind == "event":
-                        yield _sse_line(payload)
-                    else:
-                        result = payload
+                async with contextlib.aclosing(_execute_tool(call, ctx, usable_server_ids)) as running:
+                    async for kind, payload in running:
+                        if kind == "event":
+                            yield _sse_line(payload)
+                        else:
+                            result = payload
             yield _sse_line({"tool_result": {"name": call["name"], "result": _result_for_page(call["name"], result)}})
             if (builtin_tools.reads_untrusted_content(call["name"], call["arguments"])
                     and builtin_tools.mark_untrusted_content_read(ctx)):
@@ -95,11 +105,22 @@ async def run_chat_with_tools(base_url: str, api_key: str | None, model: str, me
                 "role": "tool", "tool_call_id": call["id"], "content": result,
             })
         for image in builtin_tools.take_screen_images(ctx):
-            working_messages.append(screen_look.image_message(_detect_provider(base_url), image))
+            working_messages.append(await _screen_message(base_url, image, ctx))
 
-def _round_limit_note(unrun_calls: list[dict]) -> str:
+async def _screen_message(base_url: str, image: dict, ctx: "builtin_tools.ToolContext") -> dict:
+    describe = getattr(ctx, "describe_screen", None)
+    described = await screen_look.described_message(image, describe) if describe else None
+    return described or screen_look.image_message(_detect_provider(base_url), image)
+
+def _failure_events(failure: str, tools_have_run: bool) -> list[dict]:
+    if not tools_have_run:
+        return [{"error": failure}]
+    logger.warning("the model stopped with an error after the tools ran: %s", failure)
+    return [{"delta": FAILED_AFTER_TOOLS_NOTE}, {FAILED_AFTER_TOOLS: failure}, {"done": True}]
+
+def _round_limit_note(unrun_calls: list[dict], max_rounds: int) -> str:
     names = ", ".join(sorted({call.get("name") or "a tool" for call in unrun_calls}))
-    return (f"\n\n(Stopped after {MAX_TOOL_ROUNDS} rounds of tool calls without a final answer. "
+    return (f"\n\n(Stopped after {max_rounds} rounds of tool calls without a final answer. "
             f"It then asked for {names}, which did not run. Say \"continue\" to let it carry on.)")
 
 def _is_json_object(text: str) -> bool:
@@ -153,20 +174,26 @@ async def _call_tool(call: dict, ctx: "builtin_tools.ToolContext", usable_server
 async def _execute_tool(call: dict, ctx: "builtin_tools.ToolContext", usable_server_ids: frozenset[str] = frozenset()):
     events = getattr(ctx, "events", None)
     task = asyncio.ensure_future(_call_tool(call, ctx, usable_server_ids))
-    if events is None:
-        yield "result", await task
-        return
-    while True:
-        getter = asyncio.ensure_future(events.get())
-        done, _ = await asyncio.wait({task, getter}, return_when=asyncio.FIRST_COMPLETED)
-        if getter in done:
-            yield "event", getter.result()
-            continue
-        getter.cancel()
-        while not events.empty():
-            yield "event", events.get_nowait()
-        yield "result", task.result()
-        return
+    try:
+        if events is None:
+            yield "result", await task
+            return
+        while True:
+            getter = asyncio.ensure_future(events.get())
+            try:
+                done, _ = await asyncio.wait({task, getter}, return_when=asyncio.FIRST_COMPLETED)
+            finally:
+                getter.cancel()
+            if getter in done:
+                yield "event", getter.result()
+                continue
+            while not events.empty():
+                yield "event", events.get_nowait()
+            yield "result", task.result()
+            return
+    finally:
+        if not task.done() and call.get("name") in TOOLS_STOPPED_WITH_THE_REPLY:
+            task.cancel()
 
 async def run_chat_collected(base_url: str, api_key: str | None, model: str, messages: list[dict],
                               system: str | None = None, options: dict | None = None,
@@ -196,8 +223,8 @@ async def run_chat_collected(base_url: str, api_key: str | None, model: str, mes
             elif kind == "error":
                 error = payload
 
-    if error:
-        raise RuntimeError(error)
+    if error is not None:
+        raise RuntimeError(error or UNNAMED_MODEL_ERROR)
     return "".join(text_parts)
 
 def _parse_sse_bytes(chunk: bytes):
@@ -208,7 +235,9 @@ def _parse_sse_bytes(chunk: bytes):
         obj = json.loads(text[len("data:"):].strip())
     except json.JSONDecodeError:
         return
-    if "delta" in obj:
+    if FAILED_AFTER_TOOLS in obj:
+        yield "error", obj[FAILED_AFTER_TOOLS]
+    elif "delta" in obj:
         yield "delta", obj["delta"]
     elif "error" in obj:
         yield "error", obj["error"]

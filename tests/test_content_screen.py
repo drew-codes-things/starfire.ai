@@ -29,9 +29,11 @@ import screen_cases as cases
 import term_starts
 import test_chat_routing
 from test_chat_routing import login
-from test_remote_rules import ABLITERATED_MODEL, FRIEND_MODEL, FakeBrain, chat, chat_messages, connections, deltas  # noqa: F401
+import test_remote_rules
+from test_remote_rules import ABLITERATED_MODEL, FRIEND_MODEL, FakeBrain, chat, chat_messages, deltas
 
 app = test_chat_routing.app
+connections = test_remote_rules.connections
 
 LONG_REPLY_SECONDS = 10
 LONG_REPLY_PIECES = 16000

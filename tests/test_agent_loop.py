@@ -11,6 +11,8 @@ import pytest
 
 import agent_loop
 import builtin_tools
+import chat_stream
+import reply_runs
 
 USER_TURN = [{"role": "user", "content": "go"}]
 
@@ -105,8 +107,48 @@ def test_a_model_error_after_a_tool_round_stops_without_running_more_tools(model
     events = run_agent({"search_web"})
 
     assert len(calls) == 1
-    assert events[-1] == {"error": "connection dropped"}
-    assert {"done": True} not in events
+    assert events[-1] == {"done": True}
+    assert not any("error" in event for event in events)
+
+
+def test_a_model_error_after_a_tool_result_ends_the_turn_with_a_saved_visible_note(model, tools):
+    async def ok(name, arguments, ctx):
+        return "found it"
+
+    tools(ok)
+    model([tool_call("search_web")], [("delta", "The page s"), ("error", "Ollama 400: m does not support images")])
+    events = run_agent({"search_web"})
+
+    assert events[-3] == {"delta": agent_loop.FAILED_AFTER_TOOLS_NOTE}
+    assert events[-2] == {"failed_after_tools": "Ollama 400: m does not support images"}
+    assert events[-1] == {"done": True}
+    saved = reply_runs.finished_reply([chat_stream._sse_line(event) for event in events], "m")
+    assert saved["content"] == "The page s" + agent_loop.FAILED_AFTER_TOOLS_NOTE
+    assert "does not support images" not in saved["content"] and "400" not in saved["content"]
+
+
+def test_a_collected_answer_still_raises_a_model_error_that_came_after_a_tool(model, tools):
+    async def ok(name, arguments, ctx):
+        return "found it"
+
+    tools(ok)
+    model([tool_call("search_web")], [("error", "the model went away")])
+    with pytest.raises(RuntimeError, match="the model went away"):
+        asyncio.run(agent_loop.run_chat_collected(
+            "http://model", None, "m", USER_TURN, enabled_builtin_tools={"search_web"}, ctx=admin_context()))
+
+
+@pytest.mark.parametrize("tools_first", [True, False])
+def test_a_collected_answer_raises_a_model_error_that_has_no_text(model, tools, tools_first):
+    async def ok(name, arguments, ctx):
+        return "found it"
+
+    tools(ok)
+    script = [[tool_call("search_web")], [("delta", "Half an ans"), ("error", "")]]
+    model(*(script if tools_first else script[1:]))
+    with pytest.raises(RuntimeError):
+        asyncio.run(agent_loop.run_chat_collected(
+            "http://model", None, "m", USER_TURN, enabled_builtin_tools={"search_web"}, ctx=admin_context()))
 
 
 def test_a_reply_that_is_stopped_before_its_tool_runs_neither_runs_it_nor_asks_the_model_again(model, tools):

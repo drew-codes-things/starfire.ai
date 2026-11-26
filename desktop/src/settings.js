@@ -16,8 +16,9 @@ const DEFAULT_SETTINGS = Object.freeze({
   artyLinkedByItself: false,
   artyToken: '',
   artyPort: 8765,
+  updateNotice: true,
 });
-const BOOLEAN_KEYS = ['allowInsecure', 'startWithSystem', 'notifications', 'closeToTray', 'artyLink', 'artyAutoLink', 'artyLinkTurnedOff', 'artyLinkedByItself'];
+const BOOLEAN_KEYS = ['allowInsecure', 'startWithSystem', 'notifications', 'closeToTray', 'artyLink', 'artyAutoLink', 'artyLinkTurnedOff', 'artyLinkedByItself', 'updateNotice'];
 const LOCKED_KEYS = ['artyToken', 'artyPort', 'artyLinkTurnedOff', 'artyLinkedByItself'];
 const ARTY_TOKEN_FORMAT = /^[A-Za-z0-9_-]{20,200}$/;
 const MIN_ARTY_PORT = 1024;
