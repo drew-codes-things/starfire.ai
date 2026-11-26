@@ -115,10 +115,11 @@ ADMIN_ONLY_PATHS = frozenset({"/api/backup"})
 ADMIN_ONLY_FOR_EVERY_METHOD = ("/api/app-keys", "/api/arty-devices", "/api/arty-cli", "/api/arty-memory", "/api/browse-dir", "/api/discover",
                                "/api/hardware", "/api/model-endpoints", "/api/comfyui/config", "/api/piper/config")
 READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+admin_only_addon_prefixes: list[str] = []
 
 
 def is_admin_only(method: str, path: str) -> bool:
-    if path in ADMIN_ONLY_PATHS or path.startswith(("/api/auth/users", *ADMIN_ONLY_FOR_EVERY_METHOD)):
+    if path in ADMIN_ONLY_PATHS or path.startswith(("/api/auth/users", *ADMIN_ONLY_FOR_EVERY_METHOD, *admin_only_addon_prefixes)):
         return True
     return method not in READ_METHODS and path.startswith(ADMIN_ONLY_PREFIXES)
 
@@ -251,6 +252,11 @@ class UserStore:
                 raise AccountError("there must always be at least one active admin")
             self._write(remaining)
         return True
+
+    def discard(self, user_id: str) -> None:
+        with self._lock:
+            users = self.list()
+            self._write([u for u in users if u.id != user_id])
 
     def create_first(self, email: str, name: str, password: str, confirm: str) -> User:
         email = normalise_email(email)

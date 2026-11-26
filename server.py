@@ -43,12 +43,15 @@ load_dotenv()
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+import addons
 import app_key_api
 import arty_cli_remote
 import arty_devices
 import arty_memory
 import auth
 import auth_routes
+import caller_watch
+import remote_rules
 import routes
 import security_headers
 import static_files
@@ -74,6 +77,7 @@ async def start_installed_ollama(backend_address: str | None = None) -> bool:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    remote_rules.warn_about_missing_connections(routes.endpoints.list())
     endpoint = await settle_local_backend(routes.endpoints, config.ollama_base_url, start_installed_ollama)
     if endpoint:
         print(f"  starfire.ai  ->  added {endpoint.label} at {endpoint.base_url}")
@@ -154,6 +158,7 @@ async def revalidate_app_files(request: Request, call_next):
 upload_limits.install(app, config)
 auth.install(app, auth_routes.users, auth_routes.sessions)
 security_headers.install(app, os.path.join(os.path.dirname(os.path.abspath(__file__)), "static"))
+caller_watch.install(app)
 
 @app.get("/api/health")
 async def health():
@@ -164,6 +169,7 @@ app.include_router(routes.router)
 app.include_router(arty_devices.router)
 app.include_router(arty_cli_remote.router)
 app.include_router(arty_memory.router)
+addons.install(app)
 app.include_router(app_key_api.admin_router)
 app.include_router(app_key_api.openai_router)
 app.mount("/", static_files.compressed_static("static"), name="static")
