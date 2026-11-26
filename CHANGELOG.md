@@ -2,7 +2,106 @@
 
 ## Unreleased
 
+### Changed
+- Settings: the model tick list is always shown; unticking a model while All models is on switches it off.
+- Models on a connection that is down are listed as offline in the access list and the chat picker, also after a restart (last known lists are kept in the data folder), and models of connections outside the home network sit under a Remote heading.
+
+### Fixed
+- Remote model rules, second round: Arty checks every message the caller wrote since the last reply (newest first,
+  tool results included), not only the last user message; on a ruled connection `/v1` refuses roles other than
+  system, developer, user, assistant and tool and content parts other than text, and the web chat refuses other
+  roles and files Arty can't check. Deep research on a ruled connection asks the model under Arty's rules, and the
+  email tool refuses ruled connections and `remote/` models. The long dash filter keeps only the unsettled end of a
+  line, so long replies stream in time in line with their length.
+- Quick complete, scheduled tasks (when saved and when run), email AI actions and email rules only send a model
+  the connection lists, as the web chat does.
+- `/v1` app-key API, second review: a whole reply, and a stream still waiting for the model server's headers, stop
+  within a second when the caller hangs up, even behind the page middlewares (the server's own receive is kept by an
+  outermost layer); a translated stream that only sends thinking or tool-argument pieces still meets its deadline and
+  stops on a revoked key, and its raw size is capped at 8 MiB; a number too big to hold (`1e999`) is a 400; a reply
+  stopped for being too long or too slow is no longer given back to the key's daily limit.
+- Web chat: only a model the connection lists is sent (a stale list is checked again first; Auto and Arty work as
+  before); models behind a list that is only unreadable are shown as usable, not offline; an attachment refusal
+  names the connection by its label, never its address.
+- Model access: restricted names are also caught with quantisation, imatrix and split-file suffixes after a dot
+  (`x-abl.i1-Q4_K_M.gguf`, `x-abl.bf16-00001-of-00003.gguf`), a copy number (`x-abl (1).gguf`) or a trailing slash.
+- The /side command checks for an offline model before it rewrites the composer, a voice call ended during that
+  check sends nothing, and an older model list answer can no longer overwrite a newer one in the picker.
+- `docs/development.md` gives a Node test command that works on Node 24.
+- Third review: the web chat checks a connection it has never checked before it takes a model name; the `/v1`
+  reply size cap counts unpacked text and asks the model server for identity encoding; a reply is given back to the
+  daily limit only when the model server could not be reached or refused it (a read timeout after sending counts);
+  a dot inside a version number (`qwen2.5`, `gpt-4.1`) is no longer a place where a restricted pattern can cut a name.
+- Fourth review: a first chat to a connection that has never been checked runs the check first, so a connection
+  that turns out to be down answers 503 instead of letting any model name through; a `/v1` reply that fails after
+  the model server sent thinking or tool argument pieces still uses up a daily reply, and a refusal from the model
+  server is given back only when it came within 5 seconds of sending (a server that was never reached still gives
+  it back however long the attempt took).
+- Fifth review: a model server chunk whose fields have the wrong shape (a choice, delta, message, tool call or
+  event that is not an object, text that is not a string) is skipped like an unreadable line instead of breaking
+  the reply; a failure inside starfire while answering a `/v1` request gives the reply back only within 5 seconds
+  and before any text, and a streamed reply now ends with an error event instead of breaking off.
+- Sixth review: tool call indexes sent as digit strings or whole floats keep their calls apart again, tool call
+  arguments sent as an object are kept, a numeric tool call id is kept as text, reply text sent as a list of text
+  parts comes through, and the first skipped field in a reply is logged so an empty reply can be traced; a
+  scheduled task refused for an unlisted model no longer leaves its model call unawaited.
+- Seventh review: empty object tool call arguments followed by string pieces keep the real arguments, and a tool
+  call index sent as a digit string longer than 9 digits is skipped instead of breaking the reply.
+- Eighth review: a number too long to convert (over 4300 digits) anywhere in a model server chunk or inside tool
+  call arguments is treated like unreadable JSON, so the line is skipped or the arguments are empty, instead of
+  breaking the reply.
+- Ninth review: tool call arguments holding Infinity, NaN or JSON nested too deep to read become no arguments, so
+  the next round can still be sent; a tool call with no name is dropped and logged, and a tool name that is not
+  text is refused as not enabled; a line nested too deep to read is skipped; token counts and durations that are
+  infinite, NaN or too large to divide are left out of the usage figures.
+- Tenth review: tool call arguments that are not an object (a list, text, a number or null) become no arguments
+  in every reader and in earlier tool calls sent back to a model server; token counts above 10^12 are left out,
+  so adding two of them can no longer break the usage line.
+- Remote model rules: quick complete, scheduled tasks and every other model call on a `REMOTE_RULES_CONNECTIONS`
+  connection (matched by id or by host) go through Arty's rules; email AI and email rules refuse those connections
+  and `remote/` models; `remote/` names are refused on the ArtyEngine connection; ruled replies pass the always-on safety
+  guard; the long dash filter knows double backtick spans, `~~~` fences and
+  indented code, keeps a comma after inline code and writes number ranges with a hyphen; Arty's LAN address is no
+  longer shown when it is down, and an Arty without `/v1/rules` is reported as out of date.
+- `/v1` app-key API: request bodies are capped at 4 MiB and checked off the event loop (at most 200,000 JSON values,
+  64 levels); NaN, Infinity, lone surrogates and tools without a name are a 400. Whole replies are read with an 8 MiB
+  cap, error bodies are never read, identity encoding is asked for, every reply has a 20 minute deadline, a key may
+  run 3 replies at once, and a whole reply stops at once when its caller leaves or its key is revoked. A stream that
+  breaks off ends with an `upstream_error` event. Requests to a `REMOTE_RULES_CONNECTIONS` connection get Arty's rules
+  as in the web chat (502 when Arty can't be reached).
+- App keys: grant names with spaces around them are refused; the key file keeps entries with unknown fields, logs
+  skipped ones and is set aside, not overwritten, when unreadable.
+- The model picker and the connection check share one capped fetch; one bad entry no longer drops a connection's
+  list; a connection whose list shrank no longer shows old models as offline; a list that is only unreadable does not
+  block chats; an offline connection is re-checked at most every 10 s and only after the reply quota allows it.
+- Ordinary accounts see a connection's label or "Connection N", never its address; admins see host and port, never
+  the sign-in part. A provider-wide key is only sent to that provider's own servers.
+- Model access: names holding `*`, `?` or `[` can be ticked as exact names, restricted patterns also catch
+  file-style names (paths, extensions, underscores), an account's list may hold 1000 entries, a save without
+  `models` is a 400, and the Open WebUI import gives new accounts the default models (an account that cannot get them
+  is not made).
+- The picker refresh leaves a running reply alone, offline models are refused before a chat is forked or attachments
+  are taken, the @mention popup skips offline models, and the access dialog can add a pattern again.
+
 ### Added
+- `REMOTE_RULES_CONNECTIONS` (connection ids): models on those connections answer under Arty's rules. starfire asks
+  Arty (`ARTY_BASE_URL`) for its system prompt and safety check for the model, uses it in place of its own, keeps the
+  chat's own instructions after it, sends a request Arty would decline straight back without asking the model, and
+  takes long dashes out of the reply (not out of code). Only the tools in `REMOTE_TOOLS` (default `search_web`,
+  `deep_research`, `find_image`) are offered, with no connectors and no desktop; scheduled tasks on those models get
+  the same. When Arty can't be reached the chat is refused rather than answered without its rules.
+- `*heretic*` joins the default `RESTRICTED_MODELS`.
+- Models on a connection that is down stay in the model picker, greyed out, unclickable and marked "offline", with the
+  connection, the reason and when it was last checked in a tooltip. Auto never picks them, a chat that has one selected
+  says so, and a chat request to one is refused at once with a 503 instead of hanging. The picker refreshes every
+  minute and when it is opened, so a connection that returns becomes clickable again without a reload.
+- Choosing an account's models is a checklist: Settings → Accounts → each account's "models" button opens an "All
+  models" switch or a list of every model starfire lists, grouped by connection, with search, "Select all shown" and
+  "Select none". Saving takes effect at once. Names that no connection lists any more, and wildcard patterns, are kept
+  and shown so a saved list never breaks. "Default models for new accounts" is copied to each account made afterwards.
+  The endpoints (`GET`/`PUT /api/auth/users/{id}/models` and `/api/auth/new-account-models`) are admin only.
+- An ArtyEngine connection's `remote/` names are left out of the model list, `GET /v1/models` and chat requests,
+  to stop relay loops; names that only start with "remote" (such as `remote:latest`) stay listed.
 - App keys and an OpenAI-compatible API. An admin makes keys under Settings → Accounts → App keys: each acts as one
   account and is bound to connections (every model of a connection, or single models on it), has a daily reply limit
   (500 suggested) and an expiry (90 days suggested), is shown once (`sf_` and 32 random bytes) and is stored only as a

@@ -28,6 +28,7 @@ REFUSED = {401, 403}
 PASSED_ON = {404, 429}
 NO_ADDRESS = "Set ARTY_BASE_URL in starfire's .env to Arty's address (for example http://<arty-host>:8081/v1), then restart starfire."
 NO_KEY = "Add Arty under Settings > Connections with the same address as ARTY_BASE_URL and Arty's API key."
+ARTY_NOT_ANSWERING = "Arty isn't answering. Check it's running."
 CODE_RAN_OUT = "That code has run out or was never made. Start again on the computer."
 
 
@@ -97,8 +98,8 @@ async def ask_brain(method: str, path: str, json_body: dict | None = None, param
             response = await client.request(method, f"{address.removesuffix(API_SUFFIX)}{path}", json=json_body,
                                             params=params, headers={"Authorization": f"Bearer {key}"})
     except httpx.HTTPError as error:
-        logger.warning("Arty didn't answer %s %s: %s", method, path, error)
-        raise HTTPException(502, f"Arty isn't answering at {address}. Check it's running.") from error
+        logger.warning("Arty didn't answer %s %s at %s: %s", method, path, address, error)
+        raise HTTPException(502, ARTY_NOT_ANSWERING) from error
     if response.status_code in REFUSED:
         raise HTTPException(502, f"Arty refused starfire's key. {NO_KEY}")
     if response.status_code in passed_on:

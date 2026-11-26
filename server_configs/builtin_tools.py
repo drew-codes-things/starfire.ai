@@ -19,6 +19,7 @@ import host_sandbox
 import image_search
 import media_generation
 import piper_tts
+import remote_rules
 import screen_look
 import shell_tool
 import user_data
@@ -416,8 +417,8 @@ class ToolContext:
 def can_ask_the_user(ctx: ToolContext) -> bool:
     return getattr(ctx, "events", None) is not None
 
-def is_mcp_tool(name: str) -> bool:
-    return name.startswith(MCP_TOOL_PREFIX)
+def is_mcp_tool(name: object) -> bool:
+    return isinstance(name, str) and name.startswith(MCP_TOOL_PREFIX)
 
 def _action(arguments) -> str:
     action = arguments.get("action") if isinstance(arguments, dict) else None
@@ -707,11 +708,33 @@ async def _deep_research(args: dict, ctx: ToolContext) -> str:
         return "error: query is required"
 
     async def chat_fn(prompt: str) -> str:
-        from agent_loop import run_chat_collected
-        return await run_chat_collected(ctx.base_url, ctx.api_key, ctx.model,
-                                          [{"role": "user", "content": prompt}])
+        return await _model_reply(prompt, ctx, checked=query)
 
     return await deep_research.research(query, chat_fn)
+
+
+def _ctx_endpoint(ctx: ToolContext):
+    return ctx.endpoints.get(ctx.endpoint_id) if ctx.endpoints and ctx.endpoint_id else None
+
+
+async def _model_reply(prompt: str, ctx: ToolContext, checked: str | None = None) -> str:
+    from agent_loop import run_chat_collected
+
+    messages = [{"role": "user", "content": prompt}]
+    endpoint = _ctx_endpoint(ctx)
+    if endpoint is not None and remote_rules.applies_to(endpoint, ctx.endpoints.list):
+        import routes
+        return await routes._ruled_collected(endpoint, ctx.api_key, ctx.model, messages, checked=checked)
+    import screen_checks
+    return await screen_checks.checked_collected(ctx.model, messages,
+                                                run_chat_collected(ctx.base_url, ctx.api_key, ctx.model, messages))
+
+
+def _may_read_own_data(ctx: ToolContext) -> bool:
+    endpoint = _ctx_endpoint(ctx)
+    if endpoint is None:
+        return not remote_rules.is_remote_model(ctx.model)
+    return remote_rules.reads_own_data_safely(endpoint, ctx.model, ctx.endpoints.list)
 
 async def _run_shell(args: dict, ctx: ToolContext) -> str:
     command = (args.get("command") or "").strip()
@@ -969,12 +992,14 @@ async def _manage_tasks(args: dict, ctx: ToolContext) -> str:
 def _make_task_chat_fn(ctx: ToolContext):
     async def chat_fn(endpoint_id, model, prompt, enabled_mcp_servers, enabled_builtin_tools):
         from agent_loop import run_chat_collected
+        import screen_checks
         base_url = ctx.base_url
-        return await run_chat_collected(
-            base_url, ctx.api_key, model or ctx.model, [{"role": "user", "content": prompt}],
+        messages = [{"role": "user", "content": prompt}]
+        return await screen_checks.checked_collected(model or ctx.model, messages, run_chat_collected(
+            base_url, ctx.api_key, model or ctx.model, messages,
             enabled_server_ids=set(enabled_mcp_servers), enabled_builtin_tools=set(enabled_builtin_tools),
             ctx=ctx,
-        )
+        ))
     return chat_fn
 
 async def _manage_email(args: dict, ctx: ToolContext) -> str:
@@ -1057,6 +1082,8 @@ async def _manage_email(args: dict, ctx: ToolContext) -> str:
 async def email_ai_action(action: str, message: dict, instruction: str, ctx: ToolContext) -> str:
     from agent_loop import run_chat_collected
 
+    if not _may_read_own_data(ctx):
+        raise RuntimeError(remote_rules.OWN_DATA_REFUSAL)
     if action == "summarize":
         prompt = f"Summarize this email in 2-3 sentences.\n\nFrom: {message['from']}\nSubject: {message['subject']}\n\n{message['body']}"
     elif action == "check_urgency":
@@ -1066,7 +1093,10 @@ async def email_ai_action(action: str, message: dict, instruction: str, ctx: Too
         prompt = (f"Draft a reply to this email. {instruction or 'Keep it brief and polite.'}\n\n"
                   f"From: {message['from']}\nSubject: {message['subject']}\n\n{message['body']}")
 
-    return await run_chat_collected(ctx.base_url, ctx.api_key, ctx.model, [{"role": "user", "content": prompt}])
+    import screen_checks
+    messages = [{"role": "user", "content": prompt}]
+    return await screen_checks.checked_collected(ctx.model, messages,
+                                                run_chat_collected(ctx.base_url, ctx.api_key, ctx.model, messages))
 
 def _note_summary(n) -> dict:
     return {"id": n.id, "title": n.title, "note_type": n.note_type, "due_date": n.due_date,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import uuid
@@ -11,6 +12,14 @@ from atomic_io import atomic_write_json, holds_file_lock, report_unreadable_stor
 
 TAG_QUERY_PREFIX = "tag:"
 MAX_TAG_LENGTH = 32
+MAX_KEPT_REPLY_DIGESTS = 1000
+SERVER_ONLY_FIELDS = frozenset({"id", "starfire_replies"})
+
+def reply_digest(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
+
+def digests_in(value) -> list[str]:
+    return [digest for digest in value if isinstance(digest, str)] if isinstance(value, list) else []
 
 def normalize_tag(tag: str) -> str:
     return " ".join(str(tag).strip().lower().split())[:MAX_TAG_LENGTH]
@@ -31,6 +40,7 @@ class ChatSession:
     system_prompt: str | None = None
     params: dict | None = None
     untrusted_content: bool = False
+    starfire_replies: list[str] = field(default_factory=list)
     created: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -63,6 +73,7 @@ class ChatSessionStore:
                 tags=item.get("tags") or [],
                 system_prompt=item.get("system_prompt"), params=item.get("params"),
                 untrusted_content=item.get("untrusted_content") is True,
+                starfire_replies=digests_in(item.get("starfire_replies")),
                 created=item.get("created", ""), updated=item.get("updated", ""),
             ))
         return sessions
@@ -116,7 +127,7 @@ class ChatSessionStore:
         for item in items:
             session = ChatSession(id=uuid.uuid4().hex[:12])
             for key, value in item.items():
-                if key != "id" and hasattr(session, key) and value is not None:
+                if key not in SERVER_ONLY_FIELDS and hasattr(session, key) and value is not None:
                     setattr(session, key, value)
             session.title = session.title or "New chat"
             session.tags = sorted({normalize_tag(t) for t in session.tags if normalize_tag(t)})
@@ -152,7 +163,7 @@ class ChatSessionStore:
         return found
 
     @holds_file_lock()
-    def place_reply(self, session_id: str, reply_index: int, reply: dict) -> bool:
+    def place_reply(self, session_id: str, reply_index: int, reply: dict, trusted: bool = False) -> bool:
         sessions = self._load()
         session = next((s for s in sessions if s.id == session_id), None)
         if not session or reply_index < 1 or len(session.messages) != reply_index:
@@ -161,6 +172,9 @@ class ChatSessionStore:
         if not isinstance(asked, dict) or asked.get("role") != "user":
             return False
         session.messages.append(reply)
+        if trusted:
+            session.starfire_replies = [*session.starfire_replies, reply_digest(str(reply.get("content") or ""))][
+                -MAX_KEPT_REPLY_DIGESTS:]
         session.updated = datetime.now(timezone.utc).isoformat()
         self._save(sessions)
         return True
