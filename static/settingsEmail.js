@@ -214,7 +214,7 @@ async function refreshEmailRules() {
     settingsEls.createRuleBtn.disabled = !choices.usable;
 
     settingsEls.ruleModelSelect.innerHTML = '';
-    for (const m of models) {
+    for (const m of onlineModels()) {
       const opt = document.createElement('option');
       opt.value = m.id;
       opt.dataset.endpointId = m.endpoint_id;

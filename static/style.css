@@ -691,6 +691,8 @@ html.sidebar-closed #sidebarOpenBtn, html.sidebar-closed .header-new-chat { disp
   cursor: pointer;
 }
 .model-option:hover, .model-option.highlight { background: var(--hover); }
+.model-option.offline, .model-option.offline:hover { opacity: .5; background: none; cursor: not-allowed; }
+.model-option.offline .model-option-meta { color: var(--danger); }
 .model-option.selected .model-option-name { font-weight: 600; }
 .model-option.selected::after {
   content: '';
@@ -1303,6 +1305,7 @@ button.chip:hover { background: var(--hover); }
 .modal.settings-modal { max-width: 960px; height: min(85vh, 760px); }
 .modal.compare-modal { max-width: 92vw; width: 1100px; }
 .modal.shortcuts-modal { max-width: 480px; }
+.modal.model-access-modal { max-width: 640px; }
 
 .modal-header {
   display: flex;
@@ -2068,3 +2071,9 @@ body:not(.is-admin) .admin-only { display: none !important; }
 
 
 }
+
+.model-access-list { max-height: 45vh; overflow-y: auto; margin-bottom: var(--s-3); }
+.model-access-section { margin: var(--s-4) 0 var(--s-1); padding-bottom: var(--s-1); border-bottom: 1px solid var(--line); font-weight: 600; }
+.model-access-group { margin: var(--s-3) 0 var(--s-1); color: var(--muted); font-size: var(--fs-sm); }
+.model-access-kept { margin-bottom: var(--s-3); }
+.model-access-tag { margin-left: var(--s-2); color: var(--muted); font-size: var(--fs-sm); }

@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from account_creation import import_account
 from auth import ROLES, UserStore
 from config import config
 
@@ -41,7 +42,7 @@ def main() -> int:
         if role not in ROLES:
             skipped.append(f"{name or email} (role {role})")
             continue
-        user = users.upsert(email=email, name=name or "", role=role, password_hash=password_hash)
+        user = import_account(users, config.data_dir, email, name or "", role, password_hash)
         imported.append(f"{user.name} ({user.role})")
 
     print(f"imported {len(imported)} account(s): {', '.join(imported) or 'none'}")

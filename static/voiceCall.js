@@ -51,9 +51,14 @@ if (CallRecognition && window.speechSynthesis) {
   callRecognition.continuous = false;
   callRecognition.interimResults = false;
   callRecognition.lang = navigator.language || 'en-US';
-  callRecognition.onresult = e => {
+  callRecognition.onresult = async e => {
     const transcript = e.results[0][0].transcript.trim();
     if (!transcript || !callActive) return;
+    if (await refuseOfflineModel(currentModel())) {
+      stopCall();
+      return;
+    }
+    if (!callActive) return;
     setCallState('thinking', `“${transcript}”`);
     send(transcript);
   };

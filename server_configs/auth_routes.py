@@ -8,6 +8,7 @@ from auth import (ACCOUNT_LOCKOUT_SECONDS, ACCOUNT_MAX_FAILED_LOGINS, LOGIN_ATTE
                   AccountError, KnownAddresses, LoginLimiter, SessionStore, SetupCode, UserStore, client_address,
                   current_user, forget_legacy_cookie, normalise_email, parse_networks, request_host,
                   require_admin, all_session_tokens, set_session_cookie)
+import account_creation
 from app_keys import AppKeyStore
 from config import config
 
@@ -176,9 +177,13 @@ def create_user(body: NewUserRequest, request: Request):
     if len(body.email) > MAX_FIELD_LENGTH or len(body.password) > MAX_FIELD_LENGTH:
         raise HTTPException(status_code=400, detail="email or password is too long")
     try:
-        user = users.create(body.email, body.name, body.password, body.role)
+        user = account_creation.create_account(users, config.data_dir, body.email, body.name, body.password, body.role)
     except AccountError as error:
         raise HTTPException(status_code=400, detail=str(error))
+    except OSError as error:
+        logger.error("a new account could not be given its default models, so it was not made: %s", error)
+        raise HTTPException(status_code=500, detail="the account could not be given its default models, so it was "
+                                                    "not made; check the server log")
     return user.public()
 
 

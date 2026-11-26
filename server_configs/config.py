@@ -30,7 +30,9 @@ class AppConfig(BaseSettings):
     max_restore_mb: int = 1024
     min_free_disk_mb: int = 512
     edit_allowed_roots: str = ""
-    restricted_models: str = "*-abl,*-abl-*,*abliterated*,*uncensored*"
+    restricted_models: str = "*-abl,*-abl-*,*abliterated*,*uncensored*,*heretic*"
+    remote_rules_connections: str = ""
+    remote_tools: str = "search_web,deep_research,find_image"
     generations_per_minute: int = 20
     generations_per_day: int = 400
     mail_requests_per_minute: int = 60
@@ -51,6 +53,12 @@ class AppConfig(BaseSettings):
 
     def restricted_model_patterns(self) -> list[str]:
         return [p.strip() for p in self.restricted_models.split(",") if p.strip()]
+
+    def remote_rules_connection_ids(self) -> list[str]:
+        return [connection.strip() for connection in self.remote_rules_connections.split(",") if connection.strip()]
+
+    def remote_tool_names(self) -> list[str]:
+        return [name.strip() for name in self.remote_tools.split(",") if name.strip()]
 
     def voices_folder(self) -> str:
         return self.model_voices_dir or os.path.join(self.data_dir, "voices")

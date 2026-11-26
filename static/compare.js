@@ -6,7 +6,7 @@ const compareEls = {
 };
 
 function compareModelOptionsHtml() {
-  return models.map(m =>
+  return onlineModels().map(m =>
     `<option value="${escapeHtml(m.id)}" data-endpoint-id="${escapeHtml(m.endpoint_id)}">${escapeHtml(m.id)} (${escapeHtml(window.providerLabel ? window.providerLabel(m.provider) : m.provider)})</option>`
   ).join('');
 }
@@ -22,7 +22,7 @@ function comparedModelKeys() {
 }
 
 function addCompareColumn() {
-  const unusedModel = firstUnusedModel(models, comparedModelKeys(), modelKey);
+  const unusedModel = firstUnusedModel(onlineModels(), comparedModelKeys(), modelKey);
   const col = document.createElement('div');
   col.className = 'compare-column';
   col.innerHTML =

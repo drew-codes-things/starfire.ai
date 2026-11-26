@@ -25,6 +25,8 @@ from generation_quota import GenerationQuota
 from model_access import ModelAccessStore
 from model_endpoints import ModelEndpointStore
 
+pytestmark = pytest.mark.usefixtures("unreadable_model_lists")
+
 PASSWORD = "correct horse battery staple"
 HEADERS = {"X-Starfire-Client": "1"}
 MODEL = "general:14b"

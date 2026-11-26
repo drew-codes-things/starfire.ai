@@ -355,20 +355,179 @@ function toolOutcomeLine(name, result) {
   return { text: `» ${tool} ${state}: ${shown}`, cls: 'err' };
 }
 
-function modelPatternsFrom(text) {
-  const patterns = String(text || '').split(/[,\n]/).map(p => p.trim()).filter(Boolean);
-  return patterns.length ? patterns : null;
-}
-
-function modelAccessHint(restricted) {
-  const hidden = (restricted || []).join(', ') || 'none';
-  return 'Model names or patterns (* matches anything), separated by commas. Only these can be listed or used. ' +
-    'A restricted model is only opened by its full name here, never by a pattern or a name without its tag. ' +
-    `Leave it blank for every model except the restricted ones (${hidden}). Admins can always use every model.`;
-}
-
 function modelAccessSummary(models) {
   return models === null ? 'every model except the restricted ones' : (models.join(', ') || 'no models');
+}
+
+const NO_CONNECTION_NAME = 'Other';
+
+function groupModelsByConnection(available) {
+  const groups = [];
+  for (const model of available || []) {
+    const name = model.connection || NO_CONNECTION_NAME;
+    let group = groups.find(g => g.connection === name && g.endpointId === model.endpoint_id);
+    if (!group) {
+      group = { connection: name, endpointId: model.endpoint_id, models: [] };
+      groups.push(group);
+    }
+    group.models.push(model);
+  }
+  return groups;
+}
+
+const REMOTE_SECTION = 'Remote';
+
+function splitByRemote(models) {
+  const list = models || [];
+  return { local: list.filter(m => m.remote !== true), remote: list.filter(m => m.remote === true) };
+}
+
+function accessSections(available) {
+  const { local, remote } = splitByRemote(available);
+  return [{ title: '', groups: groupModelsByConnection(local) }, { title: REMOTE_SECTION, groups: groupModelsByConnection(remote) }]
+    .filter(section => section.groups.length);
+}
+
+function accessMatchesSearch(model, query) {
+  const needle = String(query || '').trim().toLowerCase();
+  return !needle || model.id.toLowerCase().includes(needle) || (model.connection || '').toLowerCase().includes(needle);
+}
+
+function ticksFromAccess(view) {
+  return new Set((view.available || []).filter(m => m.allowed && !m.by_pattern).map(m => m.id));
+}
+
+const ACCESS_WILDCARDS = '*?[';
+const ESCAPED_ACCESS_WILDCARD = /\[([*?[])\]/g;
+
+function escapeModelName(name) {
+  return [...String(name)].map(c => (ACCESS_WILDCARDS.includes(c) ? `[${c}]` : c)).join('');
+}
+
+function isAccessPattern(entry) {
+  return [...String(entry).replace(ESCAPED_ACCESS_WILDCARD, '')].some(c => ACCESS_WILDCARDS.includes(c));
+}
+
+function nameWithoutTag(name) {
+  const bare = name.split('@')[0];
+  const colon = bare.lastIndexOf(':');
+  if (colon <= 0) return bare;
+  const tag = bare.slice(colon + 1);
+  return /[\\/]/.test(tag) ? bare : bare.slice(0, colon);
+}
+
+function escapeRegExpChar(c) {
+  return /[\\^$.*+?()[\]{}|/-]/.test(c) ? '\\' + c : c;
+}
+
+function characterClassSource(pattern, start) {
+  let at = start + 1;
+  if (pattern[at] === '!') at++;
+  if (pattern[at] === ']') at++;
+  while (at < pattern.length && pattern[at] !== ']') at++;
+  if (at >= pattern.length) return null;
+  let inside = pattern.slice(start + 1, at).replace(/\\/g, '\\\\').replace(/]/g, '\\]');
+  if (inside.startsWith('!')) inside = '^' + inside.slice(1);
+  else if (inside.startsWith('^')) inside = '\\' + inside;
+  return { source: `[${inside}]`, end: at + 1 };
+}
+
+function accessPatternRegExp(pattern) {
+  let source = '';
+  for (let at = 0; at < pattern.length;) {
+    const c = pattern[at];
+    if (c === '*') { source += '[\\s\\S]*'; at++; continue; }
+    if (c === '?') { source += '[\\s\\S]'; at++; continue; }
+    const cls = c === '[' ? characterClassSource(pattern, at) : null;
+    if (cls) { source += cls.source; at = cls.end; continue; }
+    source += escapeRegExpChar(c);
+    at++;
+  }
+  return new RegExp(`^${source}$`);
+}
+
+function accessPatternMatches(pattern, modelId) {
+  const name = String(modelId).trim().toLowerCase();
+  const matcher = accessPatternRegExp(String(pattern).trim().toLowerCase());
+  return [name, nameWithoutTag(name)].some(form => matcher.test(form));
+}
+
+function coveredByKeptPattern(model, kept) {
+  return !model.restricted && (kept || []).some(entry => isAccessPattern(entry) && accessPatternMatches(entry, model.id));
+}
+
+function modelListToSave({ everything, ticked, available, kept }) {
+  if (everything) return null;
+  const chosen = (available || []).filter(m => ticked.has(m.id)).map(m => escapeModelName(m.id));
+  return [...new Set([...chosen, ...(kept || [])])];
+}
+
+function unrestrictedIds(available) {
+  return new Set((available || []).filter(m => !m.restricted).map(m => m.id));
+}
+
+function accessBoxState({ everything, ticked }, model, byPattern) {
+  if (everything) return { checked: !model.restricted, disabled: false };
+  return { checked: ticked.has(model.id) || byPattern, disabled: byPattern };
+}
+
+function accessModelTags(model, byPattern) {
+  return [model.restricted && 'restricted', isOfflineModel(model) && OFFLINE_WORD,
+    byPattern && 'allowed by a kept pattern'].filter(Boolean);
+}
+
+function toggleModelTick(state, available, modelId, on) {
+  if (!state.everything) {
+    const ticked = new Set(state.ticked);
+    if (on) ticked.add(modelId); else ticked.delete(modelId);
+    return { everything: false, ticked };
+  }
+  const covered = unrestrictedIds(available);
+  if (on && covered.has(modelId)) return state;
+  const ticked = covered;
+  if (on) ticked.add(modelId); else ticked.delete(modelId);
+  return { everything: false, ticked };
+}
+
+function switchEverything(state, available, on, kept) {
+  const restricted = (available || []).filter(m => m.restricted).map(m => m.id);
+  const dropped = on && !state.everything ? [...restricted.filter(id => state.ticked.has(id)), ...(kept || [])] : [];
+  return { everything: on, ticked: unrestrictedIds(available), dropped };
+}
+
+function droppedRestrictedNote(dropped) {
+  if (!dropped.length) return '';
+  return `All models leaves these out, so they are no longer allowed once you save: ${dropped.join(', ')}. Saved patterns come back if you switch All models off; restricted models need ticking again.`;
+}
+
+function keptControlsShown(state) {
+  return !state.everything;
+}
+
+function selectShown(state, available, shown, on) {
+  const wanted = shown.filter(m => !on || !m.restricted).map(m => m.id);
+  if (state.everything && on) return state;
+  const ticked = state.everything ? unrestrictedIds(available) : new Set(state.ticked);
+  for (const id of wanted) if (on) ticked.add(id); else ticked.delete(id);
+  return { everything: false, ticked };
+}
+
+function tooManyModelsNote(list, maxModels) {
+  if (!list || !maxModels || list.length <= maxModels) return '';
+  return `That is ${list.length} models; an account can have at most ${maxModels}. Use "All models", or a pattern such as llama*.`;
+}
+
+function highlightIndexAfterRender(keys, previousKey) {
+  const kept = previousKey ? keys.indexOf(previousKey) : -1;
+  return kept >= 0 ? kept : 0;
+}
+
+function shouldRefreshModelHealth({ hidden, busy, haveModels }) {
+  return !hidden && !busy && haveModels;
+}
+
+function modelAccessCount(everything, ticked, patternCovered) {
+  return everything ? 'Every model except the restricted ones' : `${ticked.size + patternCovered} chosen`;
 }
 
 const LOCAL_MEDIA_PROTOCOLS = ['data:', 'blob:'];
@@ -471,7 +630,9 @@ function distinctModels(listed) {
 function modelMenuEntries(listed, query) {
   const search = (query || '').trim().toLowerCase();
   const autoShown = autoMatchesSearch(search) ? [autoModelEntry()] : [];
-  return [...autoShown, ...distinctModels(listed).filter(m => modelMatchesSearch(m, search))];
+  const { local, remote } = splitByRemote(distinctModels(listed).filter(m => modelMatchesSearch(m, search)));
+  const remoteShown = remote.length ? [{ heading: REMOTE_SECTION }, ...remote] : [];
+  return [...autoShown, ...local, ...remoteShown];
 }
 
 function artyMemoryRows(entities, query) {
@@ -508,10 +669,42 @@ function connectionHealthBadge(health, nowSeconds) {
   return { text: `Unavailable (${why}) · ${ago}`, cls: 'mcp-state-failed' };
 }
 
+const OFFLINE_WORD = 'offline';
+
+function isOfflineModel(model) {
+  return !!model && model.offline === true;
+}
+
+function withoutOffline(list) {
+  return (list || []).filter(m => !isOfflineModel(m));
+}
+
+function offlineTooltip(model, nowSeconds) {
+  const health = model.health || {};
+  const why = CONNECTION_FAILURE_WORDS[health.error_kind] || 'not answering';
+  const ago = health.last_checked ? checkedAgo(health.last_checked, nowSeconds) : 'not checked yet';
+  return `Offline: ${model.connection || 'this connection'} is ${why}, ${ago}`;
+}
+
+function offlineNotice(model) {
+  return `${model.id} is offline right now (${model.connection || 'its connection'}). Pick another model, or try again when it is back.`;
+}
+
+function sameModelSet(before, after) {
+  const keys = list => new Set((list || []).map(m => `${m.endpoint_id}\u0000${m.id}`));
+  const left = keys(before);
+  const right = keys(after);
+  return left.size === right.size && [...left].every(key => right.has(key));
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     isLocalMediaUrl, isCodeLanguageClass, toolOutcome, toolOutcomeLine,
-    modelPatternsFrom, modelAccessHint, modelAccessSummary,
+    modelAccessSummary, OFFLINE_WORD, isOfflineModel, withoutOffline, offlineTooltip, offlineNotice, sameModelSet,
+    groupModelsByConnection, REMOTE_SECTION, splitByRemote, accessSections, accessMatchesSearch, ticksFromAccess, modelListToSave, modelAccessCount,
+    accessBoxState, accessModelTags, toggleModelTick, switchEverything, droppedRestrictedNote, keptControlsShown, selectShown,
+    escapeModelName, isAccessPattern, accessPatternMatches, coveredByKeptPattern, tooManyModelsNote,
+    highlightIndexAfterRender, shouldRefreshModelHealth,
     DAY_MS, TOAST_MS, TOAST_ERROR_MS, TOAST_FADE_MS,
     sentenceCase, dateGroupLabel, messageStamp, themeChoiceFrom, themeIsLight, showToast, removalQuestion, confirmRemove,
     pendingApprovalCards, UNTRUSTED_APPROVAL_NOTE, UNSANDBOXED_SHELL_NOTE, shellApprovalNotes, approvalHeading, resolveChatControls, isLastAssistantMessage,

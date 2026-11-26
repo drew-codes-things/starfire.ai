@@ -10,7 +10,7 @@ STATIC = os.path.join(ROOT, "static")
 PAGES = ["index.html", "login.html", "setup.html"]
 APP_JS_PARTS = ["appState.js", "chatMessages.js", "codeBlocks.js", "chatCards.js", "chatSend.js", "helperTasks.js",
                 "settings.js", "settingsMemoryTasks.js", "settingsArtyMemory.js", "settingsAppKeys.js",
-                "settingsEmail.js", "settingsNotes.js",
+                "settingsEmail.js", "settingsNotes.js", "settingsModelAccess.js",
                 "settingsSystem.js", "compare.js", "palette.js", "app.js"]
 WORKSPACE_JS_PARTS = ["workspaceCore.js", "sidebar.js", "sidebarMenus.js", "chatManagement.js", "prompts.js",
                       "modelPicker.js", "chatControls.js", "composerTools.js", "attachments.js", "composerPopup.js",
@@ -306,3 +306,54 @@ def test_the_setup_page_asks_for_the_one_time_code_and_sends_it():
     script = read("setup.js")
     assert "code: form.code.value.trim()" in script
     assert "setup code" in script
+
+
+def comes_before(text: str, first: str, then: str) -> bool:
+    return first in text and then in text and text.index(first) < text.index(then)
+
+
+def block_from(text: str, start: str) -> str:
+    at = text.index(start)
+    return text[at:text.index("\n}", at)]
+
+
+def test_an_offline_model_is_refused_before_the_chat_is_forked():
+    messages = read("chatMessages.js")
+    assert comes_before(block_from(messages, "const regenerate = async"), "refuseOfflineModel(", "forkSession(")
+    assert comes_before(block_from(messages, "saveBtn.onclick = async"), "refuseOfflineModel(", "forkSession(")
+
+
+def test_an_offline_model_is_refused_before_the_attachments_and_mention_are_taken():
+    send = read("chatSend.js")
+    assert comes_before(block_from(send, "els.form.addEventListener('submit'"), "refuseOfflineModel(", "takeComposerExtras(")
+    assert comes_before(block_from(send, "async function submitSideChatCommand"), "refuseOfflineModel(",
+                        "takeComposerExtras(")
+
+
+def test_a_voice_call_to_an_offline_model_ends_instead_of_thinking_forever():
+    voice = block_from(read("voiceCall.js"), "callRecognition.onresult")
+    assert comes_before(voice, "refuseOfflineModel(", "setCallState('thinking'")
+    assert comes_before(voice, "refuseOfflineModel(", "stopCall()")
+
+
+def test_a_side_chat_command_to_an_offline_model_leaves_the_composer_as_typed():
+    side = block_from(read("chatSend.js"), "async function submitSideChatCommand")
+    assert comes_before(side, "refuseOfflineModel(", "els.input.value = question")
+
+
+def test_a_call_ended_while_the_model_was_checked_does_not_send_its_last_words():
+    voice = block_from(read("voiceCall.js"), "callRecognition.onresult")
+    after_check = voice[voice.index("refuseOfflineModel("):]
+    assert comes_before(after_check, "if (!callActive) return;", "send(transcript)")
+
+
+def test_the_mention_popup_offers_only_models_that_are_online():
+    popup = read("composerPopup.js")
+    assert "items = onlineModels()" in popup and "items = models\n" not in popup
+
+
+def test_the_model_access_dialog_can_add_a_pattern_and_says_access_is_by_name():
+    page = read("index.html")
+    assert 'id="modelAccessPattern"' in page and 'id="modelAccessAddPattern"' in page
+    access = read("settingsModelAccess.js")
+    assert "Access is by model name" in access and "tooManyModelsNote(" in access

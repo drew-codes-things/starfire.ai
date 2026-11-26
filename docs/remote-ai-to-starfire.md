@@ -66,7 +66,8 @@ other header is never accepted there.
 
 ### `GET /v1/models`
 
-Lists the models the key may use, in OpenAI form:
+Lists the models the key may use, in OpenAI form. An ArtyEngine connection's `remote/` names are left out of
+this list (and cannot be asked for), to stop relay loops:
 
 ```json
 {"object": "list", "data": [

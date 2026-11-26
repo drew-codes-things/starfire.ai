@@ -290,6 +290,7 @@
           <button class="settings-tab admin-only" type="button" data-tab="data">Data</button>
           <button class="settings-tab admin-only" type="button" data-tab="accounts">Accounts</button>
           <button class="settings-tab admin-only" type="button" data-tab="artymemory">Arty memory</button>
+          <template data-addon-slot="settings-tabs"></template>
         </nav>
         <div class="settings-panels">
 
@@ -687,6 +688,8 @@
               <ul class="endpoint-list" id="artyMemoryList"></ul>
             </div>
           </div>
+
+          <template data-addon-slot="settings-panels"></template>
 
           <div class="settings-panel" data-panel="documents" hidden>
             <div class="settings-card">
@@ -1093,6 +1096,8 @@
             </div>
             <div class="settings-card">
               <h3>Accounts</h3>
+              <p class="settings-hint">Choose which models each account may use with its "models" button. New accounts start with the default below; admins can always use every model.</p>
+              <div class="settings-row"><button class="btn ghost" id="newAccountModelsBtn" type="button">Default models for new accounts</button></div>
               <ul class="endpoint-list" id="accountList"></ul>
             </div>
             <div class="settings-card">
@@ -1153,6 +1158,35 @@
         <div class="dialog-actions">
           <button class="btn ghost" id="dialogCancelBtn" type="button">Cancel</button>
           <button class="btn send" id="dialogOkBtn" type="button">OK</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="modelAccessModal" hidden>
+    <div class="modal model-access-modal" role="dialog" aria-modal="true" aria-labelledby="modelAccessTitle">
+      <div class="modal-header"><span id="modelAccessTitle"></span></div>
+      <div class="modal-body">
+        <p class="settings-hint" id="modelAccessHelp"></p>
+        <div class="settings-row"><label class="theme-toggle"><input type="checkbox" id="modelAccessAll" /><span>All models</span></label></div>
+        <div id="modelAccessChooser">
+          <div class="settings-row">
+            <input id="modelAccessSearch" type="search" aria-label="Search models" placeholder="Search models" autocomplete="off" spellcheck="false" />
+            <button class="btn ghost" id="modelAccessSelectAll" type="button">Select all shown</button>
+            <button class="btn ghost" id="modelAccessSelectNone" type="button">Select none</button>
+          </div>
+          <div id="modelAccessList" class="model-access-list"></div>
+          <div id="modelAccessKept" class="model-access-kept"></div>
+          <div class="settings-row" id="modelAccessPatternRow">
+            <input id="modelAccessPattern" type="text" aria-label="Add a model pattern" placeholder="Add a pattern, such as llama*" autocomplete="off" spellcheck="false" />
+            <button class="btn ghost" id="modelAccessAddPattern" type="button">Add pattern</button>
+          </div>
+        </div>
+        <p class="settings-hint" id="modelAccessCount" role="status"></p>
+        <p class="settings-hint" id="modelAccessResult" role="status"></p>
+        <div class="dialog-actions">
+          <button class="btn ghost" id="modelAccessCancel" type="button">Close</button>
+          <button class="btn send" id="modelAccessSave" type="button">Save</button>
         </div>
       </div>
     </div>
@@ -1234,9 +1268,11 @@
   <script src="settings.js"></script>
   <script src="settingsMemoryTasks.js"></script>
   <script src="settingsArtyMemory.js"></script>
+  <template data-addon-slot="scripts"></template>
   <script src="settingsAppKeys.js"></script>
   <script src="settingsEmail.js"></script>
   <script src="settingsNotes.js"></script>
+  <script src="settingsModelAccess.js"></script>
   <script src="settingsSystem.js"></script>
   <script src="compare.js"></script>
   <script src="palette.js"></script>

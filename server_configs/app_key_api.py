@@ -1,27 +1,36 @@
 from __future__ import annotations
 
+import asyncio
 import functools
 import json
 import logging
+import math
 import time
 import uuid
+from dataclasses import dataclass, field
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request, Response
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, StrictBool, StrictInt
 
 import auth_routes
+import caller_watch
+import screen_checks
+import content_screen
+import remote_rules
 import routes
 import user_data
 from app_keys import (EVERY_MODEL, MAX_ENDPOINT_ID_CHARS, MAX_KEY_NAME_CHARS, MAX_MODEL_NAME_CHARS, AppKey,
                       AppKeyError, key_grants)
 from auth import LOCKOUT_SECONDS, LoginLimiter, client_address
-from chat_stream import stream_chat_once
+from chat_stream import (CONNECT_PHASE_ERRORS, REPLY_TOO_LONG, BrokenOffAfterSending, NeverReachedServer,
+                         stream_chat_once)
 from config import config
 from connection_health import CHECK_EVERY_SECONDS
 from generation_quota import GenerationQuota
 from providers import build_chat_url, build_headers
+from reply_runs import MAX_REPLY_BYTES, MAX_RUNNING_PER_ACCOUNT
 
 logger = logging.getLogger(__name__)
 
@@ -36,10 +45,14 @@ UPSTREAM_TIMEOUT = httpx.Timeout(600.0, connect=10.0)
 BEARER = "bearer"
 MAX_MESSAGES = 4096
 MAX_JSON_DEPTH = 64
+MAX_JSON_VALUES = 200_000
+MAX_RUNNING_PER_KEY = MAX_RUNNING_PER_ACCOUNT
 KEY_RECHECK_SECONDS = 1.0
+REPLY_DEADLINE_SECONDS = 1200.0
+GIVE_BACK_WITHIN_SECONDS = 5.0
+IDENTITY_ENCODING = "identity"
 UPSTREAM_KEY_REFUSED = {401, 403}
 PASSED_ON_STATUSES = {400, 404, 409, 413, 422, 429}
-SERVER_FAILURE_FROM = 500
 OPENAI_PROVIDER = "openai"
 ANTHROPIC_PROVIDER = "anthropic"
 ADMIN_ROLE = "admin"
@@ -55,28 +68,68 @@ NO_KEY = "send an app key as 'Authorization: Bearer sf_...'"
 STOPPED = "the app key was revoked or its account was closed, so the reply was stopped"
 UPSTREAM_FAILED = "the model server could not answer this request"
 STARFIRE_FAILED = "starfire could not answer this request"
+TOO_LONG = "the model server's reply was too long, so starfire stopped it"
+TOO_SLOW = "the model server took too long, so starfire stopped the reply"
+CALLER_GONE = "the caller went away before the reply was ready"
+CALLER_GONE_STATUS = 499
+NOT_UNICODE = "the request holds text that is not valid Unicode"
+RULES_MISSING = "Arty's rules for this model couldn't be loaded, so it can't answer right now; try again in a minute"
+SYSTEM_ROLES = frozenset({"system", "developer"})
+TEXT_PART = "text"
 
 
 class ApiRefusal(Exception):
 
-    def __init__(self, status: int, message: str, code: str, headers: dict | None = None):
+    def __init__(self, status: int, message: str, code: str, headers: dict | None = None,
+                 gives_back_reply: bool = False):
         super().__init__(message)
         self.status = status
         self.message = message
         self.code = code
         self.headers = headers or {}
+        self.gives_back_reply = gives_back_reply
 
-    @property
-    def is_upstream_failure(self) -> bool:
-        return self.code == "upstream_error" and self.status >= SERVER_FAILURE_FROM
+
+@dataclass
+class ReplySlot:
+    running: dict[str, int]
+    key_id: str
+    released: bool = False
+
+    def release(self) -> None:
+        if self.released:
+            return
+        self.released = True
+        left = self.running.get(self.key_id, 0) - 1
+        if left > 0:
+            self.running[self.key_id] = left
+        else:
+            self.running.pop(self.key_id, None)
+
+
+@dataclass
+class RunningReplies:
+    limit: int
+    running: dict[str, int] = field(default_factory=dict)
+
+    def take(self, key_id: str) -> ReplySlot:
+        if self.running.get(key_id, 0) >= self.limit:
+            raise ApiRefusal(429, f"this app key already has {self.limit} replies running; wait for one to finish",
+                             "rate_limit_exceeded", {"Retry-After": "1"})
+        self.running[key_id] = self.running.get(key_id, 0) + 1
+        return ReplySlot(self.running, key_id)
+
+
+running_replies = RunningReplies(MAX_RUNNING_PER_KEY)
 
 
 def error_body(message: str, code: str) -> dict:
     return {"error": {"message": message, "type": code, "code": code}}
 
 
-def refusal_response(refusal: ApiRefusal) -> JSONResponse:
-    return JSONResponse(error_body(refusal.message, refusal.code), status_code=refusal.status, headers=refusal.headers)
+def refusal_response(refusal: ApiRefusal) -> Response:
+    return Response(json.dumps(error_body(refusal.message, refusal.code)), status_code=refusal.status,
+                    headers=refusal.headers, media_type="application/json")
 
 
 def bad_request(message: str) -> ApiRefusal:
@@ -212,21 +265,43 @@ async def list_models(request: Request):
     return {"object": "list", "data": offered}
 
 
-def nesting_is_within(value, limit: int) -> bool:
-    waiting = [(value, 1)]
+def is_unicode(text: str) -> bool:
+    if text.isascii():
+        return True
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def json_shape_problem(value, depth_limit: int, value_budget: int) -> str:
+    waiting, seen = [(value, 1)], 0
     while waiting:
         item, depth = waiting.pop()
-        if depth > limit:
-            return False
-        children = item.values() if isinstance(item, dict) else item if isinstance(item, list) else ()
+        seen += 1
+        if depth > depth_limit:
+            return f"the request is nested more than {depth_limit} levels deep"
+        if isinstance(item, str) and not is_unicode(item):
+            return NOT_UNICODE
+        children = list(item.values()) if isinstance(item, dict) else item if isinstance(item, list) else []
+        if seen + len(waiting) + len(children) > value_budget:
+            return f"the request holds more than {value_budget} JSON values"
+        if isinstance(item, dict) and not all(is_unicode(name) for name in item):
+            return NOT_UNICODE
         waiting.extend((child, depth + 1) for child in children)
-    return True
+    return ""
 
 
 def is_tool_call(call) -> bool:
     function = call.get("function") if isinstance(call, dict) else None
     return (isinstance(function, dict) and isinstance(function.get("name"), str)
             and isinstance(function.get("arguments", ""), (str, dict)))
+
+
+def is_tool(tool) -> bool:
+    function = tool.get("function") if isinstance(tool, dict) else None
+    return isinstance(function, dict) and isinstance(function.get("name"), str) and bool(function["name"])
 
 
 def check_message(index: int, message) -> None:
@@ -239,15 +314,27 @@ def check_message(index: int, message) -> None:
         raise bad_request(f"message {index}: tool_calls must be a list of {{function: {{name, arguments}}}} objects")
 
 
-async def read_request(request: Request) -> dict:
+def refuse_json_constant(name: str):
+    raise ValueError(f"{name} is not a JSON number")
+
+
+def finite_number(text: str) -> float:
+    number = float(text)
+    if not math.isfinite(number):
+        raise ValueError(f"{text} is too large to be a number starfire can pass on")
+    return number
+
+
+def parsed_json(raw: bytes):
     try:
-        body = json.loads(await request.body())
-    except (ValueError, UnicodeDecodeError, RecursionError) as error:
-        raise bad_request("the request body must be JSON") from error
+        return json.loads(raw, parse_constant=refuse_json_constant, parse_float=finite_number)
+    except (ValueError, RecursionError) as error:
+        raise bad_request("the request body must be JSON, without NaN, Infinity or numbers too big to hold") from error
+
+
+def check_request_shape(body) -> None:
     if not isinstance(body, dict):
         raise bad_request("the request body must be a JSON object")
-    if not nesting_is_within(body, MAX_JSON_DEPTH):
-        raise bad_request(f"the request is nested more than {MAX_JSON_DEPTH} levels deep")
     model, messages, tools = body.get("model"), body.get("messages"), body.get("tools")
     if not isinstance(model, str) or not 0 < len(model) <= MAX_ENDPOINT_ID_CHARS + MAX_MODEL_NAME_CHARS + 1:
         raise bad_request("model must be a model id from GET /v1/models")
@@ -255,13 +342,25 @@ async def read_request(request: Request) -> dict:
         raise bad_request(f"messages must be a list of 1 to {MAX_MESSAGES} messages")
     for index, message in enumerate(messages):
         check_message(index, message)
-    if tools is not None and not (isinstance(tools, list) and all(isinstance(tool, dict) for tool in tools)):
-        raise bad_request("tools must be a list of objects")
+    if tools is not None and not (isinstance(tools, list) and all(is_tool(tool) for tool in tools)):
+        raise bad_request("tools must be a list of {type: \"function\", function: {name, ...}} objects")
     if not isinstance(body.get("stream", False), bool):
         raise bad_request("stream must be true or false")
     if body.get("n", 1) != 1:
         raise bad_request("starfire gives one reply per request: leave n out or set it to 1")
+
+
+def checked_request(raw: bytes) -> dict:
+    body = parsed_json(raw)
+    check_request_shape(body)
+    problem = json_shape_problem(body, MAX_JSON_DEPTH, MAX_JSON_VALUES)
+    if problem:
+        raise bad_request(problem)
     return body
+
+
+async def read_request(request: Request) -> dict:
+    return await asyncio.to_thread(checked_request, await request.body())
 
 
 def take_replies(key: AppKey) -> None:
@@ -304,44 +403,166 @@ def key_still_works(key: AppKey) -> bool:
     return auth_routes.app_keys.is_live(key.id) and open_account(key.user_id) is not None
 
 
-async def while_the_key_works(chunks, key: AppKey):
-    checked_at = time.monotonic()
+class ReplyWatch:
+
+    def __init__(self, key: AppKey):
+        self.key = key
+        self.started = self.checked_at = time.monotonic()
+
+    def stop_notice(self) -> bytes | None:
+        now = time.monotonic()
+        if now - self.started >= REPLY_DEADLINE_SECONDS:
+            return sse(error_body(TOO_SLOW, "upstream_error"))
+        if now - self.checked_at < KEY_RECHECK_SECONDS:
+            return None
+        self.checked_at = now
+        return None if key_still_works(self.key) else sse(error_body(STOPPED, "invalid_api_key"))
+
+    def seconds_to_next_check(self) -> float:
+        next_check = min(self.checked_at + KEY_RECHECK_SECONDS, self.started + REPLY_DEADLINE_SECONDS)
+        return max(0.0, next_check - time.monotonic())
+
+
+@dataclass
+class FeedEnd:
+    error: BaseException | None = None
+
+
+async def feed(chunks, queue: asyncio.Queue) -> None:
     try:
         async for chunk in chunks:
-            now = time.monotonic()
-            if now - checked_at >= KEY_RECHECK_SECONDS:
-                checked_at = now
-                if not key_still_works(key):
-                    yield sse(error_body(STOPPED, "invalid_api_key"))
-                    return
-            yield chunk
+            await queue.put(chunk)
+        await queue.put(FeedEnd())
+    except Exception as error:
+        await queue.put(FeedEnd(error))
     finally:
         await chunks.aclose()
+
+
+async def next_or_stop(queue: asyncio.Queue, watch: ReplyWatch) -> tuple[object, bool]:
+    getting = asyncio.ensure_future(queue.get())
+    try:
+        while True:
+            notice = watch.stop_notice()
+            if notice:
+                return notice, True
+            await asyncio.wait({getting}, timeout=watch.seconds_to_next_check())
+            if getting.done():
+                return getting.result(), False
+    finally:
+        await stop_task(getting)
+
+
+async def while_the_key_works(chunks, key: AppKey):
+    watch, queue = ReplyWatch(key), asyncio.Queue(maxsize=1)
+    feeder = asyncio.ensure_future(feed(chunks, queue))
+    try:
+        while True:
+            item, stopped = await next_or_stop(queue, watch)
+            if isinstance(item, FeedEnd):
+                if item.error is not None:
+                    raise item.error
+                return
+            yield item
+            if stopped:
+                return
+    finally:
+        await stop_task(feeder)
+
+
+async def stop_task(task: asyncio.Future) -> None:
+    if not task.done():
+        task.cancel()
+    await asyncio.wait({task})
+
+
+async def unless_stopped(work, request: Request, key: AppKey):
+    task = asyncio.ensure_future(work)
+    hung_up = asyncio.ensure_future(caller_watch.caller_hangs_up(request))
+    deadline = time.monotonic() + REPLY_DEADLINE_SECONDS
+    try:
+        while True:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                raise ApiRefusal(504, TOO_SLOW, "upstream_error")
+            await asyncio.wait({task, hung_up}, timeout=min(KEY_RECHECK_SECONDS, left),
+                               return_when=asyncio.FIRST_COMPLETED)
+            if task.done():
+                return task.result()
+            if hung_up.done():
+                hung_up.result()
+                raise ApiRefusal(CALLER_GONE_STATUS, CALLER_GONE, "client_closed")
+            if not key_still_works(key):
+                raise ApiRefusal(401, STOPPED, "invalid_api_key")
+    finally:
+        await stop_task(hung_up)
+        await stop_task(task)
 
 
 def sse(payload: dict) -> bytes:
     return f"data: {json.dumps(payload)}\n\n".encode()
 
 
-def upstream_refusal(status: int) -> ApiRefusal:
+def json_response(payload: dict) -> Response:
+    return Response(json.dumps(payload), media_type="application/json")
+
+
+def answered_quickly(sent_at: float) -> bool:
+    return time.monotonic() - sent_at <= GIVE_BACK_WITHIN_SECONDS
+
+
+def may_give_back_after(failure: str, sent_at: float) -> bool:
+    if isinstance(failure, BrokenOffAfterSending):
+        return False
+    return isinstance(failure, NeverReachedServer) or answered_quickly(sent_at)
+
+
+def upstream_refusal(status: int, quickly: bool) -> ApiRefusal:
     if status in UPSTREAM_KEY_REFUSED:
-        return ApiRefusal(502, "the model server refused starfire's key for it", "upstream_error")
+        return ApiRefusal(502, "the model server refused starfire's key for it", "upstream_error",
+                          gives_back_reply=quickly)
     if status in PASSED_ON_STATUSES:
         return ApiRefusal(status, f"the model server refused this request ({status})", "upstream_refused")
-    return ApiRefusal(502, UPSTREAM_FAILED, "upstream_error")
+    return ApiRefusal(502, UPSTREAM_FAILED, "upstream_error", gives_back_reply=quickly)
+
+
+def refused_upstream(upstream: httpx.Response, key: AppKey, model: str, sent_at: float) -> ApiRefusal:
+    logger.warning("app key %r: the model server for %r answered %d", key.name, model, upstream.status_code)
+    return upstream_refusal(upstream.status_code, answered_quickly(sent_at))
+
+
+def unreachable_upstream(error: httpx.HTTPError, key: AppKey, model: str) -> ApiRefusal:
+    logger.warning("app key %r: the model server for %r did not answer (%s)", key.name, model, type(error).__name__)
+    never_reached = isinstance(error, CONNECT_PHASE_ERRORS)
+    return ApiRefusal(502, UPSTREAM_FAILED, "upstream_error", gives_back_reply=never_reached)
 
 
 def upstream_client() -> httpx.AsyncClient:
     return httpx.AsyncClient(timeout=UPSTREAM_TIMEOUT, transport=upstream_transport)
 
 
-async def relayed_bytes(client: httpx.AsyncClient, upstream: httpx.Response):
+def upstream_headers(api_key: str | None, base_url: str) -> dict:
+    return {**build_headers(api_key, base_url), "Accept-Encoding": IDENTITY_ENCODING}
+
+
+async def capped_reply(upstream: httpx.Response) -> bytes:
+    content = bytearray()
+    async for chunk in upstream.aiter_bytes():
+        content += chunk
+        if len(content) > MAX_REPLY_BYTES or upstream.num_bytes_downloaded > MAX_REPLY_BYTES:
+            raise ApiRefusal(502, TOO_LONG, "upstream_error")
+    return bytes(content)
+
+
+async def relayed_bytes(upstream: httpx.Response, close, key: AppKey, model: str):
     try:
         async for chunk in upstream.aiter_bytes():
             yield chunk
+    except httpx.HTTPError as error:
+        logger.warning("app key %r: the model server for %r broke off (%s)", key.name, model, type(error).__name__)
+        yield sse(error_body(UPSTREAM_FAILED, "upstream_error"))
     finally:
-        await upstream.aclose()
-        await client.aclose()
+        await close()
 
 
 def standard_fields_only(body: dict) -> dict:
@@ -351,29 +572,62 @@ def standard_fields_only(body: dict) -> dict:
     return kept
 
 
-async def forward_as_is(endpoint, api_key: str | None, body: dict, key: AppKey) -> Response:
-    url, headers = build_chat_url(endpoint.base_url), build_headers(api_key, endpoint.base_url)
-    client = upstream_client()
+async def forward_whole(endpoint, api_key: str | None, body: dict, key: AppKey) -> Response:
+    url, headers = build_chat_url(endpoint.base_url), upstream_headers(api_key, endpoint.base_url)
+    async with upstream_client() as client:
+        sent_at = time.monotonic()
+        try:
+            async with client.stream("POST", url, headers=headers, json=body) as upstream:
+                if not upstream.is_success:
+                    raise refused_upstream(upstream, key, body["model"], sent_at)
+                content = await capped_reply(upstream)
+                media_type = upstream.headers.get("content-type", "application/json")
+        except httpx.HTTPError as error:
+            raise unreachable_upstream(error, key, body["model"]) from error
+    return Response(screen_checks.guarded_openai_whole(content, screen_checks.reply_context(body["messages"]),
+                                                      screen_checks.request_of(body["messages"])), media_type=media_type)
+
+
+async def opened_upstream(client: httpx.AsyncClient, sent: httpx.Request, key: AppKey, model: str) -> httpx.Response:
     try:
-        upstream = await client.send(client.build_request("POST", url, headers=headers, json=body),
-                                     stream=bool(body.get("stream")))
+        return await client.send(sent, stream=True)
     except httpx.HTTPError as error:
+        raise unreachable_upstream(error, key, model) from error
+
+
+async def forward_stream(endpoint, api_key: str | None, body: dict, key: AppKey, request: Request,
+                         cleanups: list) -> Response:
+    client = upstream_client()
+    sent = client.build_request("POST", build_chat_url(endpoint.base_url),
+                                headers=upstream_headers(api_key, endpoint.base_url), json=body)
+    sent_at = time.monotonic()
+    try:
+        upstream = await unless_stopped(opened_upstream(client, sent, key, body["model"]), request, key)
+    except BaseException:
         await client.aclose()
-        logger.warning("app key %r: the model server for %r did not answer (%s)", key.name, body["model"],
-                       type(error).__name__)
-        raise ApiRefusal(502, UPSTREAM_FAILED, "upstream_error") from error
-    if not upstream.is_success or not body.get("stream"):
-        content = await upstream.aread()
+        raise
+
+    async def close() -> None:
         await upstream.aclose()
         await client.aclose()
-        if not upstream.is_success:
-            logger.warning("app key %r: the model server for %r answered %d", key.name, body["model"],
-                           upstream.status_code)
-            raise upstream_refusal(upstream.status_code)
-        return Response(content, media_type=upstream.headers.get("content-type", "application/json"))
-    return StreamingResponse(while_the_key_works(relayed_bytes(client, upstream), key),
+
+    if not upstream.is_success:
+        await close()
+        raise refused_upstream(upstream, key, body["model"], sent_at)
+    cleanups.append(close)
+    guarded = screen_checks.guarded_openai_stream(relayed_bytes(upstream, close, key, body["model"]),
+                                                 screen_checks.reply_context(body["messages"]),
+                                                 screen_checks.request_of(body["messages"]), body["model"])
+    return StreamingResponse(while_the_key_works(guarded, key),
                              media_type=upstream.headers.get("content-type", "text/event-stream"),
                              headers={"Cache-Control": "no-cache"})
+
+
+async def forward_as_is(endpoint, api_key: str | None, body: dict, key: AppKey, request: Request,
+                        cleanups: list) -> Response:
+    if body.get("stream"):
+        return await forward_stream(endpoint, api_key, body, key, request, cleanups)
+    return await unless_stopped(forward_whole(endpoint, api_key, body, key), request, key)
 
 
 def translated_options(body: dict) -> dict | None:
@@ -429,78 +683,218 @@ class Reply:
 def translated_events(endpoint, api_key: str | None, body: dict, model: str):
     messages, system = split_system(body["messages"], endpoint.provider)
     tools = body.get("tools") if isinstance(body.get("tools"), list) else None
-    return stream_chat_once(endpoint.base_url, api_key, model, messages, system, translated_options(body), tools)
+    return stream_chat_once(endpoint.base_url, api_key, model, messages, system, translated_options(body), tools,
+                            max_bytes=MAX_REPLY_BYTES)
 
 
 def log_translated_failure(key: AppKey, model: str) -> None:
     logger.warning("app key %r: the model server for %r failed", key.name, model)
 
 
+def log_starfire_failure(key: AppKey, model: str) -> None:
+    logger.exception("app key %r: starfire failed while answering for %r", key.name, model)
+
+
 async def translated_stream(events, reply: Reply, key: AppKey, give_back):
     yield sse(reply.chunk({"role": "assistant", "content": ""}))
-    calls, usage, said_anything = [], None, False
-    async for kind, item in events:
-        if kind == "delta":
-            said_anything = True
-            yield sse(reply.chunk({"content": item}))
-        elif kind == "tool_calls":
-            said_anything = True
-            made = openai_tool_calls(item, len(calls))
-            calls += made
-            yield sse(reply.chunk({"tool_calls": made}))
-        elif kind == "usage":
-            usage = openai_usage(item)
-        elif kind == "error":
-            log_translated_failure(key, reply.model)
-            if not said_anything:
-                give_back()
-            yield sse(error_body(UPSTREAM_FAILED, "upstream_error"))
-            return
+    calls, usage, said_anything, sent_at = [], None, False, time.monotonic()
+    try:
+        async for kind, item in events:
+            if kind == "delta":
+                said_anything = True
+                yield sse(reply.chunk({"content": item}))
+            elif kind == "tool_calls":
+                said_anything = True
+                made = openai_tool_calls(item, len(calls))
+                calls += made
+                yield sse(reply.chunk({"tool_calls": made}))
+            elif kind == "usage":
+                usage = openai_usage(item)
+            elif kind == REPLY_TOO_LONG:
+                yield sse(error_body(TOO_LONG, "upstream_error"))
+                return
+            elif kind == "error":
+                log_translated_failure(key, reply.model)
+                if not said_anything and may_give_back_after(item, sent_at):
+                    give_back()
+                yield sse(error_body(UPSTREAM_FAILED, "upstream_error"))
+                return
+    except Exception:
+        log_starfire_failure(key, reply.model)
+        if not said_anything and answered_quickly(sent_at):
+            give_back()
+        yield sse(error_body(STARFIRE_FAILED, "server_error"))
+        return
     yield sse(reply.chunk({}, "tool_calls" if calls else "stop", usage))
     yield b"data: [DONE]\n\n"
 
 
+def text_size(text: str) -> int:
+    return len(text.encode("utf-8", "surrogatepass"))
+
+
 async def translated_whole(events, reply: Reply, key: AppKey) -> dict:
-    text, calls, usage = [], [], None
-    async for kind, item in events:
-        if kind == "delta":
-            text.append(item)
-        elif kind == "tool_calls":
-            calls += openai_tool_calls(item, len(calls))
-        elif kind == "usage":
-            usage = openai_usage(item)
-        elif kind == "error":
-            log_translated_failure(key, reply.model)
-            raise ApiRefusal(502, UPSTREAM_FAILED, "upstream_error")
+    text, calls, usage, size, sent_at = [], [], None, 0, time.monotonic()
+    try:
+        async for kind, item in events:
+            if kind == "delta":
+                text.append(item)
+                size += text_size(item)
+            elif kind == "tool_calls":
+                made = openai_tool_calls(item, len(calls))
+                calls += made
+                size += text_size(json.dumps(made))
+            elif kind == "usage":
+                usage = openai_usage(item)
+            elif kind == "error":
+                log_translated_failure(key, reply.model)
+                gives_back = not (text or calls) and may_give_back_after(item, sent_at)
+                raise ApiRefusal(502, UPSTREAM_FAILED, "upstream_error", gives_back_reply=gives_back)
+            if kind == REPLY_TOO_LONG or size > MAX_REPLY_BYTES:
+                raise ApiRefusal(502, TOO_LONG, "upstream_error")
+    except ApiRefusal:
+        raise
+    except Exception as error:
+        log_starfire_failure(key, reply.model)
+        gives_back = not (text or calls) and answered_quickly(sent_at)
+        raise ApiRefusal(500, STARFIRE_FAILED, "server_error", gives_back_reply=gives_back) from error
+    finally:
+        await events.aclose()
     return reply.whole("".join(text), calls, usage)
 
 
-async def answer(endpoint, model: str, own_tools: bool, body: dict, key: AppKey) -> Response:
+def text_of(content) -> str:
+    if isinstance(content, str):
+        return content
+    parts = content if isinstance(content, list) else []
+    return "\n".join(part["text"] for part in parts
+                     if isinstance(part, dict) and part.get("type") == TEXT_PART and isinstance(part.get("text"), str))
+
+
+def plain_text_messages(messages: list[dict]) -> list[dict]:
+    return [{"role": message["role"], "content": text_of(message.get("content"))} for message in messages]
+
+
+async def arty_rules(endpoint, model: str, body: dict, key: AppKey) -> remote_rules.ArtyRules | None:
+    if not remote_rules.applies_to(endpoint, routes._all_endpoints):
+        return None
+    if problem := remote_rules.message_problem(body["messages"]):
+        raise bad_request(problem)
+    try:
+        return await remote_rules.rules_for(model, plain_text_messages(body["messages"]), caller=caller_of(body),
+                                            may_be_unrestricted=routes._lists_model(endpoint, model))
+    except (HTTPException, ValueError) as error:
+        logger.warning("app key %r: no Arty rules for %r (%s)", key.name, model, type(error).__name__)
+        raise ApiRefusal(502, RULES_MISSING, "upstream_error", gives_back_reply=True) from error
+
+
+def remote_tools_only(tools) -> list[dict]:
+    allowed = set(config.remote_tool_names())
+    return [remote_rules.ruled_tool(tool) for tool in tools or [] if tool["function"]["name"] in allowed]
+
+
+def caller_of(body: dict) -> remote_rules.CallerText:
+    tools = remote_rules.tool_texts(remote_tools_only(body.get("tools")))
+    return remote_rules.caller_text(body["messages"], tools=tools)
+
+
+def under_arty_rules(body: dict, rules: remote_rules.ArtyRules) -> dict:
+    messages = remote_rules.ruled_messages(remote_rules.kept_messages(body["messages"], rules))
+    caller_system = "\n\n".join(m["content"] for m in messages if m["role"] in SYSTEM_ROLES)
+    system = remote_rules.system_with_rules(rules, caller_system, routes.PRIVATE_INSTRUCTIONS_NOTE)
+    ruled = {name: value for name, value in body.items() if name not in ("tools", "tool_choice")}
+    ruled["messages"] = [{"role": "system", "content": system},
+                         *(m for m in messages if m["role"] not in SYSTEM_ROLES)]
+    tools = remote_tools_only(body.get("tools"))
+    return {**ruled, "tools": tools} if tools else ruled
+
+
+async def declined_events(text: str):
+    yield "delta", text
+
+
+async def answer(endpoint, model: str, own_tools: bool, body: dict, key: AppKey, request: Request,
+                 cleanups: list) -> Response:
     api_key = routes._api_key_for(endpoint.id, endpoint.provider)
     sent = {**(standard_fields_only(body) if own_tools else body), "model": model}
-    if endpoint.provider == OPENAI_PROVIDER:
-        return await forward_as_is(endpoint, api_key, sent, key)
+    said = plain_text_messages(sent["messages"])
+    declined = await screen_checks.declined_request(model, said,
+                                                   arty_checks_it=remote_rules.applies_to(endpoint, routes._all_endpoints))
+    rules = None if declined else await arty_rules(endpoint, model, sent, key)
+    if not declined and rules is None and endpoint.provider == OPENAI_PROVIDER:
+        return await forward_as_is(endpoint, api_key, sent, key, request, cleanups)
     reply = Reply(body["model"])
-    events = translated_events(endpoint, api_key, sent, model)
+    if declined:
+        events = declined_events(declined)
+    elif rules is None:
+        events = content_screen.guarded_events(translated_events(endpoint, api_key, sent, model),
+                                            screen_checks.reply_context(said), screen_checks.request_of(said))
+    elif rules.declined:
+        events = declined_events(rules.declined)
+    else:
+        events = content_screen.guarded_events(remote_rules.without_em_dashes_in_events(
+            remote_rules.without_rules_text_in_events(translated_events(endpoint, api_key, under_arty_rules(sent, rules), model),
+                                                      remote_rules.rules_text(rules, caller_of(sent).everything()))),
+            screen_checks.reply_context(said), screen_checks.request_of(said))
     if body.get("stream"):
         give_back = functools.partial(auth_routes.app_keys.give_back_reply, key.id)
         return StreamingResponse(while_the_key_works(translated_stream(events, reply, key, give_back), key),
                                  media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
-    return JSONResponse(await translated_whole(events, reply, key))
+    return json_response(await unless_stopped(translated_whole(events, reply, key), request, key))
 
 
-async def answer_counted(endpoint, model: str, own_tools: bool, body: dict, key: AppKey) -> Response:
+async def answer_counted(endpoint, model: str, own_tools: bool, body: dict, key: AppKey, request: Request,
+                         cleanups: list) -> Response:
     take_replies(key)
+    started_at = time.monotonic()
     try:
-        return await answer(endpoint, model, own_tools, body, key)
+        return await answer(endpoint, model, own_tools, body, key, request, cleanups)
     except ApiRefusal as refusal:
-        if refusal.is_upstream_failure:
+        if refusal.gives_back_reply:
             auth_routes.app_keys.give_back_reply(key.id)
         raise
     except Exception as error:
-        auth_routes.app_keys.give_back_reply(key.id)
-        logger.exception("app key %r: starfire failed while answering for %r", key.name, model)
+        if answered_quickly(started_at):
+            auth_routes.app_keys.give_back_reply(key.id)
+        log_starfire_failure(key, model)
         raise ApiRefusal(500, STARFIRE_FAILED, "server_error") from error
+
+
+class SentThenReleased(Response):
+
+    def __init__(self, inner: Response, slot: ReplySlot, cleanups: list):
+        self.inner = inner
+        self.slot = slot
+        self.cleanups = cleanups
+        self.status_code = inner.status_code
+        self.background = None
+
+    async def __call__(self, scope, receive, send) -> None:
+        try:
+            await self.inner(scope, receive, send)
+            if self.background is not None:
+                await self.background()
+        finally:
+            await finish_reply(self.slot, self.cleanups)
+
+
+async def finish_reply(slot: ReplySlot, cleanups: list) -> None:
+    try:
+        for cleanup in cleanups:
+            await cleanup()
+    finally:
+        slot.release()
+
+
+async def answer_in_slot(endpoint, model: str, own_tools: bool, body: dict, key: AppKey, request: Request) -> Response:
+    slot = running_replies.take(key.id)
+    cleanups = []
+    try:
+        response = await answer_counted(endpoint, model, own_tools, body, key, request, cleanups)
+    except BaseException:
+        await finish_reply(slot, cleanups)
+        raise
+    return SentThenReleased(response, slot, cleanups)
 
 
 @openai_router.post("/chat/completions")
@@ -514,7 +908,7 @@ async def chat_completions(request: Request):
         body = await read_request(request)
         model_id = body["model"]
         endpoint, model, own_tools = await owning_connection(key, model_id)
-        response = await answer_counted(endpoint, model, own_tools, body, key)
+        response = await answer_in_slot(endpoint, model, own_tools, body, key, request)
     except ApiRefusal as refusal:
         log_outcome(key, request.url.path, model_id, refusal.status)
         return refusal_response(refusal)
@@ -543,8 +937,7 @@ def require_admin(request: Request) -> None:
 
 
 def connection_label(endpoint_id: str) -> str:
-    endpoint = routes.endpoints.get(endpoint_id)
-    return (endpoint.label or endpoint.base_url) if endpoint else ""
+    return routes._connection_labels(for_admin=True).get(endpoint_id, "")
 
 
 def key_view(key: AppKey) -> dict:
@@ -570,7 +963,7 @@ def connection_choices(user_id: str, endpoint, state) -> dict:
     own_tools_connection = is_own_tools_connection(endpoint, state)
     models = [{"name": name, "own_tools": own_tools_connection or brings_own_tools(name)}
               for name in model_names(state) if name != EVERY_MODEL]
-    return {"endpoint_id": endpoint.id, "label": endpoint.label or endpoint.base_url,
+    return {"endpoint_id": endpoint.id, "label": connection_label(endpoint.id),
             "available": state.available, "own_tools": own_tools_connection,
             "models": [model for model in models if offered_to_account(user_id, model["name"], model["own_tools"])]}
 

@@ -129,7 +129,7 @@ function autoModelRoleRow(role, view) {
   select.dataset.role = role;
   select.setAttribute('aria-label', `Model Arty Auto uses for ${AUTO_MODEL_ROLE_NAMES[role].toLowerCase()}`);
   select.append(new Option(automaticRoleText(view.picks[role]), ''));
-  const names = [...new Set(models.map(m => m.id))];
+  const names = [...new Set(onlineModels().map(m => m.id))];
   const configured = view.roles[role] || '';
   if (configured && !names.includes(configured)) select.append(new Option(`${configured} (not found, so Auto falls back)`, configured));
   for (const id of names) select.append(new Option(id, id));

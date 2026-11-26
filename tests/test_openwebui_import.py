@@ -5,12 +5,15 @@ import subprocess
 import sys
 
 import bcrypt
+import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "server_configs"))
 
+import account_creation
 from auth import UserStore
 from chat_session_store import ChatSessionStore
+from model_access import ModelAccessStore
 from note_store import NoteStore
 
 PASSWORD = "correct horse battery staple"
@@ -128,3 +131,50 @@ def test_import_follows_open_webui_history_thread(tmp_path):
     [session] = ChatSessionStore(user_dir).list()
     assert [(m["role"], m["content"]) for m in session.messages] == [
         ("user", "first"), ("assistant", "reply one"), ("user", "second")]
+
+
+def openwebui_database(path, accounts):
+    connection = sqlite3.connect(path)
+    connection.executescript("""
+        create table user (id text, name text, email text, role text);
+        create table auth (id text, email text, password text, active integer);
+    """)
+    for number, (name, email, role) in enumerate(accounts, 1):
+        connection.execute("insert into user values (?, ?, ?, ?)", (str(number), name, email, role))
+        connection.execute("insert into auth values (?, ?, ?, ?)", (str(number), email, fast_hash(PASSWORD), 1))
+    connection.commit()
+    connection.close()
+    return path
+
+
+def test_imported_new_accounts_get_the_default_models_and_existing_ones_keep_theirs(tmp_path):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    store = UserStore(str(data_dir))
+    kept = store.upsert("kim@example.com", "Kim", "user", fast_hash(PASSWORD))
+    access = ModelAccessStore(str(data_dir))
+    access.set_allowed(kept.id, ["llama3.1:8b"])
+    access.set_default_for_new_accounts(["gpt-4o"])
+    database = openwebui_database(tmp_path / "webui.db", [("Sam", "sam@example.com", "user"),
+                                                          ("Kim", "kim@example.com", "user")])
+    result = run_script("import_openwebui_users.py", database, data_dir, tmp_path)
+    assert result.returncode == 0, result.stderr
+    sam = store.find_by_email("sam@example.com")
+    assert access.allowed_for(sam.id) == ["gpt-4o"]
+    assert access.allowed_for(kept.id) == ["llama3.1:8b"]
+
+
+def test_an_account_is_rolled_back_when_its_default_models_cannot_be_saved(tmp_path, monkeypatch):
+    store = UserStore(str(tmp_path))
+    store.upsert("admin@example.com", "Admin", "admin", fast_hash(PASSWORD))
+    ModelAccessStore(str(tmp_path)).set_default_for_new_accounts(["gpt-4o"])
+
+    def broken_disk(self, user_id, patterns):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(ModelAccessStore, "set_allowed", broken_disk)
+    with pytest.raises(OSError):
+        account_creation.create_account(store, str(tmp_path), "sam@example.com", "Sam", PASSWORD, "user")
+    with pytest.raises(OSError):
+        account_creation.import_account(store, str(tmp_path), "kim@example.com", "Kim", "user", fast_hash(PASSWORD))
+    assert [u.email for u in store.list()] == ["admin@example.com"]

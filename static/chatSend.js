@@ -114,8 +114,8 @@ async function loadAccountModelChoice() {
   }
 }
 
-async function loadModels() {
-  setStatus('loading', 'connecting...');
+async function loadModels({ quiet = false } = {}) {
+  if (!quiet) setStatus('loading', 'connecting...');
   try {
     const r                       = await fetch('/api/models');
     const { models: list = [], auto_everyday: everyday = null } = await r.json();
@@ -133,6 +133,7 @@ async function loadModels() {
     renderModelPicker();
     if (!messages.length) renderWelcome();
 
+    if (busy) return;
     if (!models.length) {
       setStatus('error', 'no models configured');
       els.input.disabled   = true;
@@ -140,13 +141,14 @@ async function loadModels() {
       return;
     }
 
-    setStatus('ready', modelPickerText(currentModel()));
+    showModelStatus();
     setOffline(false);
     warmModel(currentModel());
     els.input.disabled   = false;
     els.sendBtn.disabled = false;
-    els.input.focus();
+    if (!quiet) els.input.focus();
   } catch (e) {
+    if (quiet) return;
     setStatus('error', 'cannot reach starfire backend');
     setOffline(true);
     printLine('error: ' + e.message, 'err');
@@ -171,6 +173,7 @@ async function send(text, overrideModel, extra = {}) {
   if (busy) return;
   const model = overrideModel || currentModel();
   if (!model) return;
+  if (isOfflineModel(model) && await refuseOfflineModel(model)) return;
 
   busy = true;
   clearFollowUps();
@@ -601,7 +604,8 @@ function toggleSideChat() {
   else startSideChat('');
 }
 
-function submitSideChatCommand(question) {
+async function submitSideChatCommand(question) {
+  if (question && await refuseOfflineModel(mentionModel || currentModel())) return;
   els.input.value = question;
   els.input.style.height = 'auto';
   if (!question) {
@@ -628,7 +632,7 @@ els.modelList.addEventListener('change', () => {
   warmModel(currentModel());
   renderModelPicker();
   if (!messages.length) renderWelcome();
-  setStatus('ready', modelPickerText(currentModel()));
+  showModelStatus();
   checkModelToolCapability();
 });
 
@@ -669,7 +673,7 @@ async function checkModelToolCapability() {
 
 els.clearBtn.onclick  = clearChat;
 
-els.form.addEventListener('submit', e => {
+els.form.addEventListener('submit', async e => {
   e.preventDefault();
   const t = els.input.value.trim();
   if (!t || busy) return;
@@ -678,6 +682,7 @@ els.form.addEventListener('submit', e => {
     submitSideChatCommand(sideCommand.question);
     return;
   }
+  if (await refuseOfflineModel(mentionModel || currentModel())) return;
   const { overrideModel, extra } = takeComposerExtras(t);
   send(t, overrideModel, extra);
 });

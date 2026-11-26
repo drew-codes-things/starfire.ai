@@ -206,3 +206,30 @@ def test_the_email_ai_action_counts_toward_the_reply_quota(app, endpoint, sams_m
     assert ai_action(sam, account_id, endpoint.id, "gpt-4o").status_code == 200
     limited = ai_action(sam, account_id, endpoint.id, "gpt-4o")
     assert limited.status_code == 429 and len(opened) == 1
+
+
+RESTRICTED_FILE_NAMES = ["qwen3-8b-abl.i1-Q4_K_M.gguf", "x-abl.Q4-K-M.gguf", "x-abl.bf16-00001-of-00003.gguf",
+                         "x-abl.Q4_K_M-imat.gguf", "x-abl (1).gguf", "x-abl/", "x-abl\\", " x-abl (2) ",
+                         "E:\\models\\x-abl (2).gguf", "/srv/models/x-abl.i1-IQ3_XS.gguf/"]
+ORDINARY_FILE_NAMES = ["llama3.1:8b", "qwen2.5-coder:14b", "mixtral-8x7b.Q4_K_M.gguf", "phi-3.5-mini (1).gguf",
+                       "example-able.Q4-K-M.gguf"]
+
+
+@pytest.mark.parametrize("model", RESTRICTED_FILE_NAMES)
+def test_quantised_split_copied_and_slashed_names_of_a_restricted_model_match(model):
+    assert model_access.matches_any(model, type(config)().restricted_model_patterns())
+
+
+@pytest.mark.parametrize("model", ORDINARY_FILE_NAMES)
+def test_dotted_file_names_of_ordinary_models_stay_ordinary(model):
+    assert not model_access.matches_any(model, type(config)().restricted_model_patterns())
+
+
+PLAIN_PATTERNS_AND_DOTTED_VERSIONS = [("qwen2", "qwen2.5-coder:14b"), ("gpt-4", "gpt-4.1-mini"),
+                                      ("llama3", "llama3.2-vision:11b"), ("phi3", "phi3.5:latest"),
+                                      ("*-v1", "model-v1.5:latest"), ("dolphin3", "dolphin3.0-llama3.1:8b")]
+
+
+@pytest.mark.parametrize("pattern, model", PLAIN_PATTERNS_AND_DOTTED_VERSIONS)
+def test_a_version_number_with_a_dot_is_never_cut_into_an_older_name(pattern, model):
+    assert not model_access.matches_any(model, [pattern])

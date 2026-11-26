@@ -517,14 +517,185 @@ test('the chat line names the tool and says blocked or failed with the reason in
   assert.equal(long.text.length, '» run_shell failed: '.length + 201);
 });
 
-test('the models an admin types for an account become a list, and blank means the default', () => {
-  assert.deepEqual(logic.modelPatternsFrom('qwen3:14b, llama*\n own/example-uncensored ,'), ['qwen3:14b', 'llama*', 'own/example-uncensored']);
-  assert.equal(logic.modelPatternsFrom('  ,  '), null);
-  assert.equal(logic.modelPatternsFrom(''), null);
+const ACCESS_VIEW = {
+  models: ['gpt-4o', 'retired:7b', 'llama*'],
+  kept: ['retired:7b', 'llama*'],
+  available: [
+    { id: 'gpt-4o', endpoint_id: 'a', connection: 'Remote', allowed: true, by_pattern: false, restricted: false },
+    { id: 'llama3.1:8b', endpoint_id: 'a', connection: 'Remote', allowed: true, by_pattern: true, restricted: false },
+    { id: 'qwen3:14b', endpoint_id: 'b', connection: 'Arty', allowed: false, by_pattern: false, restricted: false },
+    { id: 'x-abl', endpoint_id: 'b', connection: 'Arty', allowed: false, by_pattern: false, restricted: true },
+  ],
+};
+
+test('models are grouped by connection in the order they were listed', () => {
+  const groups = logic.groupModelsByConnection(ACCESS_VIEW.available);
+  assert.deepEqual(groups.map(g => [g.connection, g.models.map(m => m.id)]),
+    [['Remote', ['gpt-4o', 'llama3.1:8b']], ['Arty', ['qwen3:14b', 'x-abl']]]);
+  assert.deepEqual(logic.groupModelsByConnection([{ id: 'm', endpoint_id: '' }]).map(g => g.connection), ['Other']);
+  assert.deepEqual(logic.groupModelsByConnection(undefined), []);
+});
+
+test('the model search matches the name or the connection, ignoring case', () => {
+  const [first] = ACCESS_VIEW.available;
+  assert.equal(logic.accessMatchesSearch(first, ''), true);
+  assert.equal(logic.accessMatchesSearch(first, ' GPT '), true);
+  assert.equal(logic.accessMatchesSearch(first, 'remote'), true);
+  assert.equal(logic.accessMatchesSearch(first, 'qwen'), false);
+});
+
+test('only models named exactly start ticked, and saving keeps what the list cannot show', () => {
+  const ticked = logic.ticksFromAccess(ACCESS_VIEW);
+  assert.deepEqual([...ticked], ['gpt-4o']);
+  ticked.add('qwen3:14b');
+  assert.deepEqual(logic.modelListToSave({ everything: false, ticked, available: ACCESS_VIEW.available, kept: ACCESS_VIEW.kept }),
+    ['gpt-4o', 'qwen3:14b', 'retired:7b', 'llama*']);
+  assert.equal(logic.modelListToSave({ everything: true, ticked, available: ACCESS_VIEW.available, kept: [] }), null);
+  assert.deepEqual(logic.modelListToSave({ everything: false, ticked: new Set(), available: [], kept: [] }), []);
   assert.equal(logic.modelAccessSummary(null), 'every model except the restricted ones');
   assert.equal(logic.modelAccessSummary([]), 'no models');
-  assert.match(logic.modelAccessHint(['*-abl', '*uncensored*']), /restricted ones \(\*-abl, \*uncensored\*\)/);
-  assert.match(logic.modelAccessHint([]), /only opened by its full name/);
+  assert.equal(logic.modelAccessCount(true, ticked, 0), 'Every model except the restricted ones');
+  assert.equal(logic.modelAccessCount(false, ticked, 1), '3 chosen');
+});
+
+const ALL_VIEW = {
+  models: null,
+  kept: [],
+  available: [
+    { id: 'gpt-4o', endpoint_id: 'a', connection: 'Remote', allowed: true, by_pattern: false, restricted: false },
+    { id: 'qwen3:14b', endpoint_id: 'b', connection: 'Arty', allowed: true, by_pattern: false, restricted: false },
+    { id: 'x-abl', endpoint_id: 'b', connection: 'Arty', allowed: false, by_pattern: false, restricted: true },
+  ],
+};
+const ALL_ON = { everything: true, ticked: logic.ticksFromAccess(ALL_VIEW) };
+const ALL_MODELS = ALL_VIEW.available;
+const [GPT, QWEN, ABL] = ALL_MODELS;
+
+test('with All on every unrestricted model shows ticked and a restricted one shows unticked', () => {
+  assert.deepEqual(ALL_MODELS.map(m => logic.accessBoxState(ALL_ON, m, false).checked), [true, true, false]);
+  assert.equal(logic.accessBoxState(ALL_ON, GPT, true).disabled, false);
+  const off = { everything: false, ticked: new Set(['gpt-4o']) };
+  assert.deepEqual(ALL_MODELS.map(m => logic.accessBoxState(off, m, false).checked), [true, false, false]);
+  assert.deepEqual(logic.accessBoxState(off, QWEN, true), { checked: true, disabled: true });
+});
+
+test('unticking a model while All is on turns All off and ticks every other unrestricted model', () => {
+  const next = logic.toggleModelTick(ALL_ON, ALL_MODELS, 'gpt-4o', false);
+  assert.equal(next.everything, false);
+  assert.deepEqual([...next.ticked], ['qwen3:14b']);
+  assert.deepEqual(logic.modelListToSave({ ...next, available: ALL_MODELS, kept: [] }), ['qwen3:14b']);
+});
+
+test('ticking a restricted model while All is on turns All off and adds it to the unrestricted ones', () => {
+  const next = logic.toggleModelTick(ALL_ON, ALL_MODELS, 'x-abl', true);
+  assert.equal(next.everything, false);
+  assert.deepEqual([...next.ticked].sort(), ['gpt-4o', 'qwen3:14b', 'x-abl']);
+});
+
+test('ticking an unrestricted model while All is on changes nothing', () => {
+  assert.deepEqual(logic.toggleModelTick(ALL_ON, ALL_MODELS, 'gpt-4o', true), ALL_ON);
+});
+
+test('ticking and unticking with All off only changes that model', () => {
+  const off = { everything: false, ticked: new Set(['gpt-4o']) };
+  assert.deepEqual([...logic.toggleModelTick(off, ALL_MODELS, 'qwen3:14b', true).ticked], ['gpt-4o', 'qwen3:14b']);
+  assert.deepEqual([...logic.toggleModelTick(off, ALL_MODELS, 'gpt-4o', false).ticked], []);
+  assert.equal(off.ticked.size, 1);
+});
+
+test('turning All off keeps what was shown ticked, turning it on goes back to every model', () => {
+  const off = logic.switchEverything(ALL_ON, ALL_MODELS, false);
+  assert.equal(off.everything, false);
+  assert.deepEqual([...off.ticked].sort(), ['gpt-4o', 'qwen3:14b']);
+  assert.deepEqual(off.dropped, []);
+  const back = logic.switchEverything({ everything: false, ticked: new Set(['gpt-4o', 'x-abl']) }, ALL_MODELS, true);
+  assert.equal(back.everything, true);
+  assert.deepEqual(back.dropped, ['x-abl']);
+  assert.equal(logic.modelListToSave({ ...back, available: ALL_MODELS, kept: [] }), null);
+});
+
+test('the dropped restricted models are named in a note, and no note when none were dropped', () => {
+  assert.equal(logic.droppedRestrictedNote([]), '');
+  assert.match(logic.droppedRestrictedNote(['x-abl', 'y-abl']), /x-abl, y-abl/);
+  assert.match(logic.droppedRestrictedNote(['x-abl']), /no longer allowed/);
+});
+
+test('Select none with All on turns All off with nothing ticked, Select all shown keeps All on', () => {
+  const none = logic.selectShown(ALL_ON, ALL_MODELS, ALL_MODELS, false);
+  assert.equal(none.everything, false);
+  assert.deepEqual([...none.ticked], []);
+  assert.deepEqual(logic.selectShown(ALL_ON, ALL_MODELS, ALL_MODELS, true), ALL_ON);
+});
+
+test('Select none with a search on and All on leaves the hidden unrestricted models ticked', () => {
+  const none = logic.selectShown(ALL_ON, ALL_MODELS, [QWEN], false);
+  assert.deepEqual([...none.ticked], ['gpt-4o']);
+});
+
+test('Select all shown with All off skips restricted models and Select none clears the shown ones', () => {
+  const off = { everything: false, ticked: new Set() };
+  assert.deepEqual([...logic.selectShown(off, ALL_MODELS, ALL_MODELS, true).ticked].sort(), ['gpt-4o', 'qwen3:14b']);
+  const some = { everything: false, ticked: new Set(['gpt-4o', 'x-abl']) };
+  assert.deepEqual([...logic.selectShown(some, ALL_MODELS, [GPT], false).ticked], ['x-abl']);
+});
+
+test('a model on a down connection is tagged offline in the access list and can still be ticked', () => {
+  const down = { id: 'friend-7b', endpoint_id: 'f', connection: 'Friend', offline: true, allowed: true, by_pattern: false, restricted: false };
+  assert.deepEqual(logic.accessModelTags(down, false), ['offline']);
+  assert.deepEqual(logic.accessModelTags({ ...down, restricted: true }, true), ['restricted', 'offline', 'allowed by a kept pattern']);
+  assert.deepEqual(logic.accessModelTags(ALL_MODELS[0], false), []);
+  const available = [...ALL_MODELS, down];
+  const state = { everything: false, ticked: new Set() };
+  const ticked = logic.toggleModelTick(state, available, 'friend-7b', true);
+  assert.equal(logic.accessBoxState(ticked, down, false).checked, true);
+  assert.deepEqual(logic.modelListToSave({ ...ticked, available, kept: [] }), ['friend-7b']);
+  const all = { everything: true, ticked: logic.ticksFromAccess({ available }) };
+  assert.equal(logic.accessBoxState(all, down, false).checked, true);
+});
+
+test('remote models get their own section after the local ones, each keeping its connections in order', () => {
+  const mixed = [
+    { id: 'a', endpoint_id: 'far', connection: 'Friend', remote: true },
+    { id: 'b', endpoint_id: 'home', connection: 'Home', remote: false },
+    { id: 'c', endpoint_id: 'far', connection: 'Friend', remote: true, offline: true },
+    { id: 'd', endpoint_id: 'lan', connection: 'Lan' },
+  ];
+  const sections = logic.accessSections(mixed);
+  assert.deepEqual(sections.map(s => s.title), ['', 'Remote']);
+  assert.deepEqual(sections.map(s => s.groups.map(g => [g.connection, g.models.map(m => m.id)])),
+    [[['Home', ['b']], ['Lan', ['d']]], [['Friend', ['a', 'c']]]]);
+  assert.deepEqual(logic.accessSections(mixed.filter(m => m.remote)).map(s => s.title), ['Remote']);
+  assert.deepEqual(logic.accessSections(mixed.filter(m => !m.remote)).map(s => s.title), ['']);
+  assert.deepEqual(logic.accessSections([]), []);
+});
+
+test('the chat picker lists the Auto choice, then local models, then a Remote heading and the remote ones', () => {
+  const listed = [
+    { id: 'far-7b', endpoint_id: 'far', remote: true, offline: true },
+    { id: 'home-8b', endpoint_id: 'home', remote: false },
+  ];
+  const entries = logic.modelMenuEntries(listed, '');
+  assert.deepEqual(entries.map(e => e.heading || e.id), [logic.AUTO_MODEL_ID, 'home-8b', 'Remote', 'far-7b']);
+  assert.deepEqual(logic.modelMenuEntries([listed[1]], '').map(e => e.heading || e.id), [logic.AUTO_MODEL_ID, 'home-8b']);
+  assert.deepEqual(logic.modelMenuEntries(listed, 'far').map(e => e.heading || e.id), ['Remote', 'far-7b']);
+});
+
+test('turning All on names the saved patterns it will drop as well as restricted models', () => {
+  const off = { everything: false, ticked: new Set(['gpt-4o', 'x-abl']) };
+  const back = logic.switchEverything(off, ALL_MODELS, true, ['llama*', 'retired:7b']);
+  assert.deepEqual(back.dropped, ['x-abl', 'llama*', 'retired:7b']);
+  assert.deepEqual(logic.switchEverything(off, ALL_MODELS, true, []).dropped, ['x-abl']);
+  assert.deepEqual(logic.switchEverything(ALL_ON, ALL_MODELS, true, ['llama*']).dropped, []);
+  assert.deepEqual(logic.switchEverything(ALL_ON, ALL_MODELS, false, ['llama*']).dropped, []);
+  const note = logic.droppedRestrictedNote(back.dropped);
+  assert.match(note, /x-abl, llama\*, retired:7b/);
+  assert.match(note, /patterns come back if you switch All models off/i);
+  assert.match(note, /restricted models need ticking again/i);
+});
+
+test('the kept list and the pattern row show only while All is off', () => {
+  assert.equal(logic.keptControlsShown(ALL_ON), false);
+  assert.equal(logic.keptControlsShown({ everything: false, ticked: new Set() }), true);
 });
 
 test('a shell approval card warns when the command would run without a sandbox', () => {
@@ -556,4 +727,90 @@ test('the Arty memory list is searched by name, type or fact and keeps the match
   assert.deepEqual(logic.artyMemoryRows(ARTY_MEMORY, 'nothing like this'), []);
   assert.deepEqual(logic.artyMemoryRows(null, ''), []);
   assert.deepEqual(logic.artyMemoryRows([{ name: 'Odd', facts: [3, 'kept'] }], ''), [{ name: 'Odd', type: '', facts: ['kept'] }]);
+});
+
+const DOWN = { id: 'friend-model', endpoint_id: 'f', connection: 'friend', offline: true,
+  health: { available: false, error_kind: 'server_error', last_checked: 1000 } };
+
+test('an offline model is recognised and described with its connection, reason and last check', () => {
+  assert.equal(logic.isOfflineModel(DOWN), true);
+  assert.equal(logic.isOfflineModel({ id: 'm', offline: false }), false);
+  assert.equal(logic.isOfflineModel(null), false);
+  assert.equal(logic.offlineTooltip(DOWN, 1130), 'Offline: friend is server error, checked 2 min ago');
+  assert.equal(logic.offlineTooltip({ id: 'm', offline: true }, 5), 'Offline: this connection is not answering, not checked yet');
+  assert.match(logic.offlineNotice(DOWN), /^friend-model is offline right now \(friend\)\. Pick another model/);
+});
+
+test('models on a down connection are left out of the lists that must only offer working models', () => {
+  const up = { id: 'ok', endpoint_id: 'a' };
+  assert.deepEqual(logic.withoutOffline([up, DOWN]), [up]);
+  assert.deepEqual(logic.withoutOffline(undefined), []);
+});
+
+test('the picker can tell a changed list of models from a changed health', () => {
+  const up = { id: 'friend-model', endpoint_id: 'f' };
+  assert.equal(logic.sameModelSet([up], [DOWN]), true);
+  assert.equal(logic.sameModelSet([up], []), false);
+  assert.equal(logic.sameModelSet([up], [{ id: 'other', endpoint_id: 'f' }]), false);
+});
+
+test('a ticked name with wildcard characters is saved escaped, so it stays that one name', () => {
+  assert.equal(logic.escapeModelName('mixtral[q4]*.gguf'), 'mixtral[[]q4][*].gguf');
+  assert.equal(logic.isAccessPattern(logic.escapeModelName('what?-7b')), false);
+  assert.equal(logic.isAccessPattern('llama*'), true);
+  assert.equal(logic.isAccessPattern('plain-name:8b'), false);
+});
+
+test('access patterns match like the server does', () => {
+  const cases = [
+    ['llama*', 'llama3.1:8b', true], ['llama3', 'llama3:latest', true], ['LLAMA*', 'Llama3', true],
+    ['mixtral[[]q4].gguf', 'mixtral[q4].gguf', true], ['mixtral[[]q4].gguf', 'mixtralq.gguf', false],
+    ['[!a]bc', 'xbc', true], ['[!a]bc', 'abc', false], ['[]a]x', ']x', true], ['a.b', 'axb', false],
+    ['*', 'someone/llama3', true], ['own/*', 'other/x', false],
+  ];
+  for (const [pattern, name, expected] of cases) assert.equal(logic.accessPatternMatches(pattern, name), expected, `${pattern} ${name}`);
+});
+
+const ODD_VIEW = {
+  models: ['mixtral[[]q4].gguf', 'gpt-4o', 'llama*', 'retired:7b'],
+  available: [
+    { id: 'mixtral[q4].gguf', allowed: true, by_pattern: false, restricted: false },
+    { id: 'gpt-4o', allowed: true, by_pattern: false, restricted: false },
+    { id: 'llama3.1:8b', allowed: true, by_pattern: true, restricted: false },
+    { id: 'mixtralq.gguf', allowed: false, by_pattern: false, restricted: false },
+  ],
+  kept: ['llama*', 'retired:7b'],
+};
+
+test('saving an unchanged checklist sends back the same entries, so access never narrows', () => {
+  const saved = logic.modelListToSave({ everything: false, ticked: logic.ticksFromAccess(ODD_VIEW),
+                                        available: ODD_VIEW.available, kept: ODD_VIEW.kept });
+  assert.deepEqual(new Set(saved), new Set(ODD_VIEW.models));
+});
+
+test('a row is covered by a kept pattern only while that pattern is kept', () => {
+  const llama = ODD_VIEW.available[2];
+  assert.equal(logic.coveredByKeptPattern(llama, ODD_VIEW.kept), true);
+  assert.equal(logic.coveredByKeptPattern(llama, ['retired:7b']), false);
+  assert.equal(logic.coveredByKeptPattern({ id: 'llama-abl', restricted: true }, ['llama*']), false);
+  assert.equal(logic.coveredByKeptPattern({ id: 'llama3', restricted: false }, ['llama3']), false);
+});
+
+test('a list over the cap is stopped before it is sent', () => {
+  assert.equal(logic.tooManyModelsNote(['a', 'b'], 2), '');
+  assert.match(logic.tooManyModelsNote(['a', 'b', 'c'], 2), /at most 2/);
+  assert.equal(logic.tooManyModelsNote(null, 2), '');
+});
+
+test('the model menu keeps its highlight across a refresh', () => {
+  assert.equal(logic.highlightIndexAfterRender(['a', 'b', 'c'], 'c'), 2);
+  assert.equal(logic.highlightIndexAfterRender(['a', 'b'], 'gone'), 0);
+  assert.equal(logic.highlightIndexAfterRender(['a', 'b'], ''), 0);
+});
+
+test('the picker refresh waits while a reply runs or the page is hidden', () => {
+  assert.equal(logic.shouldRefreshModelHealth({ hidden: false, busy: false, haveModels: true }), true);
+  assert.equal(logic.shouldRefreshModelHealth({ hidden: false, busy: true, haveModels: true }), false);
+  assert.equal(logic.shouldRefreshModelHealth({ hidden: true, busy: false, haveModels: true }), false);
+  assert.equal(logic.shouldRefreshModelHealth({ hidden: false, busy: false, haveModels: false }), false);
 });

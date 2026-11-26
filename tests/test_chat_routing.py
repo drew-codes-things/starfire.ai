@@ -1,4 +1,5 @@
 import asyncio
+import gzip
 import json
 import os
 import sys
@@ -21,6 +22,8 @@ from api_key_manager import APIKeyManager
 from auth import SessionStore, UserStore
 from config import config
 from model_endpoints import ModelEndpointStore
+
+pytestmark = pytest.mark.usefixtures("unreadable_model_lists")
 
 PASSWORD = "correct horse battery staple"
 HEADERS = {"X-Starfire-Client": "1"}
@@ -317,3 +320,41 @@ def test_the_chat_route_passes_the_servers_usage_on_and_a_chat_keeps_it_with_the
                 {"role": "assistant", "content": "Hi", "usage": {**usage, "tokens_per_second": 27.4}, "steps": 3}]
     assert admin.put(f"/api/chat/sessions/{session['id']}", json={"messages": messages}).status_code == 200
     assert admin.get(f"/api/chat/sessions/{session['id']}").json()["messages"] == messages
+
+
+def test_an_attachment_refusal_never_shows_the_sign_in_part_of_an_address(app, chat_model):
+    _, calls = chat_model
+    endpoint = routes.endpoints.add("http://someone:hunter2@models.example.com:11434", kind="api-key")
+    for email in ("admin@example.com", "sam@example.com"):
+        client = login(app, email)
+        clip = client.post("/api/attachments", files={"file": ("note.mp3", b"ID3 fake audio", "audio/mpeg")}).json()
+        refused = chat(client, endpoint.id, {"role": "user", "content": "listen", "attachments": [clip["id"]]})
+        assert refused.status_code == 400 and "can't take audio" in refused.json()["detail"]
+        assert "hunter2" not in refused.text and "someone" not in refused.text
+    assert calls == []
+
+
+class PackedBody(httpx.AsyncByteStream):
+
+    def __init__(self, packed: bytes):
+        self.packed = packed
+
+    async def __aiter__(self):
+        for start in range(0, len(self.packed), 16384):
+            yield self.packed[start:start + 16384]
+
+
+def test_the_reply_size_cap_counts_what_the_model_server_sent_after_unpacking():
+    cap = 1024 * 1024
+    packed = gzip.compress(b'data: {"choices": [{"index": 0, "delta": {"content": "' + b"a" * (16 * cap))
+    assert len(packed) < cap
+
+    async def lines():
+        answer = httpx.Response(200, stream=PackedBody(packed), headers={"content-type": "text/event-stream",
+                                                                          "content-encoding": "gzip"})
+        transport = httpx.MockTransport(lambda request: answer)
+        async with httpx.AsyncClient(transport=transport) as client:
+            async with client.stream("POST", "http://upstream.example/v1/chat/completions") as streamed:
+                return [line async for line in chat_stream._capped_lines(streamed, cap)]
+
+    assert asyncio.run(lines()) == [None]

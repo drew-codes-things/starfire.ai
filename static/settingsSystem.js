@@ -492,20 +492,18 @@ async function accountRequest(method, url, body) {
   return data;
 }
 
-async function chooseAccountModels(user) {
-  try {
-    const current = await accountRequest('GET', `/api/auth/users/${user.id}/models`);
-    const typed = await showDialog({
-      title: `models ${user.email} may use`, text: modelAccessHint(current.restricted),
-      input: (current.models || []).join(', '), allowEmpty: true, okLabel: 'save',
-      placeholder: 'blank: every model except the restricted ones',
-    });
-    if (typed === null) return;
-    const saved = await accountRequest('PUT', `/api/auth/users/${user.id}/models`, { models: modelPatternsFrom(typed) });
-    setAccountResult(`${user.email} may use: ${modelAccessSummary(saved.models)}`, 'ok');
-  } catch (e) {
-    setAccountResult(e.message, 'error');
-  }
+function chooseAccountModels(user) {
+  openModelAccess({
+    title: `Models ${user.email} may use`, url: `/api/auth/users/${user.id}/models`,
+    request: accountRequest, report: setAccountResult, who: user.email,
+  });
+}
+
+if ($('newAccountModelsBtn')) {
+  $('newAccountModelsBtn').onclick = () => openModelAccess({
+    title: 'Models new accounts start with', url: '/api/auth/new-account-models',
+    request: accountRequest, report: setAccountResult, who: 'new accounts',
+  });
 }
 
 async function refreshAccounts() {

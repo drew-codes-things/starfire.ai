@@ -51,3 +51,8 @@ class GenerationQuota:
             recent.append(now)
         self._daily[account_id] = (day, used_today + (1 if counts_per_day else 0))
         return None
+
+    def give_back_day(self, account_id: str) -> None:
+        day, used_today = self._daily.get(account_id, ("", 0))
+        if used_today > 0:
+            self._daily[account_id] = (day, used_today - 1)

@@ -35,6 +35,8 @@ from model_endpoints import ModelEndpointStore
 from note_store import NoteStore
 from task_store import TaskRunStore, TaskStore
 
+pytestmark = pytest.mark.usefixtures("unreadable_model_lists")
+
 PASSWORD = "correct horse battery staple"
 HEADERS = {"X-Starfire-Client": "1"}
 

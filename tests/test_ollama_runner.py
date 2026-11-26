@@ -19,7 +19,7 @@ OPENAI_URL = "http://brain:8081/v1"
 def sent(monkeypatch):
     captured = {}
 
-    async def fake_iter(client, url, headers, payload):
+    async def fake_iter(client, url, headers, payload, max_bytes=None):
         captured.update(payload)
         yield ("delta", "ok")
 

@@ -1,9 +1,12 @@
 'use strict';
 
+const MODEL_HEALTH_REFRESH_MS = 60000;
+
 function modelKey(m) { return m.endpoint_id + '\u0000' + m.id; }
 
 function modelOptionMeta(m) {
   if (isAutoModel(m)) return AUTO_MODEL_HINT;
+  if (isOfflineModel(m)) return OFFLINE_WORD;
   const provider = window.providerLabel ? window.providerLabel(m.provider) : m.provider;
   const size = m.size ? (m.size / 1073741824).toFixed(1) + ' GB · ' : '';
   const server = m.server_note ? ' · ' + m.server_note : '';
@@ -56,8 +59,69 @@ function pickModel(model) {
 
 function modelPickerText(model) {
   if (!model) return models.length ? 'select a model' : 'no models';
-  return isAutoModel(model) ? AUTO_MODEL_NAME : model.id;
+  if (isAutoModel(model)) return AUTO_MODEL_NAME;
+  return isOfflineModel(model) ? `${model.id} (${OFFLINE_WORD})` : model.id;
 }
+
+function onlineModels() {
+  return withoutOffline(models);
+}
+
+let noticeShownFor = '';
+
+function showModelStatus() {
+  if (busy) return;
+  const model = currentModel();
+  const down = isOfflineModel(model);
+  setStatus(down ? 'error' : 'ready', modelPickerText(model));
+  if (!down) { noticeShownFor = ''; return; }
+  if (noticeShownFor === modelKey(model)) return;
+  noticeShownFor = modelKey(model);
+  showToast(offlineNotice(model), 'error');
+}
+
+function mayRefreshModelHealth() {
+  return shouldRefreshModelHealth({ hidden: document.hidden, busy, haveModels: models.length > 0 });
+}
+
+let modelListsAsked = 0;
+
+function askForModelList() {
+  modelListsAsked += 1;
+  return modelListsAsked;
+}
+
+function isNewestModelList(asked) {
+  return asked === modelListsAsked;
+}
+
+async function refreshModelHealth() {
+  if (!mayRefreshModelHealth()) return;
+  const asked = askForModelList();
+  let answer;
+  try {
+    answer = await apiJson('/api/models');
+  } catch (_) {
+    return;
+  }
+  if (!isNewestModelList(asked) || !mayRefreshModelHealth()) return;
+  if (!sameModelSet(models, answer.models)) { await loadModels({ quiet: true }); return; }
+  models = answer.models;
+  autoEverydayModel = answer.auto_everyday;
+  renderModelPicker();
+  showModelStatus();
+}
+
+async function refuseOfflineModel(model) {
+  if (!isOfflineModel(model)) return false;
+  await refreshModelHealth();
+  const fresh = isAutoModel(model) ? model : models.find(m => modelKey(m) === modelKey(model));
+  if (!isOfflineModel(fresh)) return false;
+  showToast(offlineNotice(fresh), 'error');
+  return true;
+}
+
+setInterval(refreshModelHealth, MODEL_HEALTH_REFRESH_MS);
 
 function renderModelPicker() {
   const model = currentModel();
@@ -75,13 +139,29 @@ function renderModelPicker() {
 
 function modelMenuOption(m, current) {
   const li = document.createElement('li');
-  li.className = 'model-option' + (isAutoModel(m) ? ' auto-option' : '') + (current && modelKey(current) === modelKey(m) ? ' selected' : '');
+  const down = isOfflineModel(m);
+  li.className = 'model-option' + (isAutoModel(m) ? ' auto-option' : '') + (down ? ' offline' : '') + (current && modelKey(current) === modelKey(m) ? ' selected' : '');
   li.setAttribute('role', 'option');
-  li.innerHTML = `<span class="model-option-name">${escapeHtml(modelPickerText(m))}</span><span class="model-option-meta">${escapeHtml(modelOptionMeta(m))}</span>`;
+  li.dataset.key = modelKey(m);
+  const shownName = down ? m.id : modelPickerText(m);
+  li.innerHTML = `<span class="model-option-name">${escapeHtml(shownName)}</span><span class="model-option-meta">${escapeHtml(modelOptionMeta(m))}</span>`;
+  if (down) {
+    li.setAttribute('aria-disabled', 'true');
+    li.title = offlineTooltip(m, Date.now() / 1000);
+    return li;
+  }
   li.onclick = () => {
     pickModel(m);
     closeAllMenus();
   };
+  return li;
+}
+
+function modelMenuHeading(text) {
+  const li = document.createElement('li');
+  li.className = 'model-menu-heading';
+  li.setAttribute('role', 'presentation');
+  li.textContent = text;
   return li;
 }
 
@@ -105,12 +185,15 @@ function renderModelMenu() {
   const q = $('modelSearch').value.trim().toLowerCase();
   const list = $('modelMenuList');
   const current = currentModel();
+  const highlighted = list.querySelector('.model-option.highlight');
+  const highlightedKey = highlighted ? highlighted.dataset.key : '';
   renderPickerMode(current);
   list.innerHTML = '';
-  for (const m of modelMenuEntries(models, q)) list.appendChild(modelMenuOption(m, current));
+  for (const m of modelMenuEntries(models, q)) list.appendChild(m.heading ? modelMenuHeading(m.heading) : modelMenuOption(m, current));
   if (!list.children.length) list.innerHTML = '<li class="model-menu-heading">no matches</li>';
-  const first = list.querySelector('.model-option');
-  if (first) first.classList.add('highlight');
+  const options = [...list.querySelectorAll('.model-option')];
+  const keep = options[highlightIndexAfterRender(options.map(o => o.dataset.key), highlightedKey)];
+  if (keep) keep.classList.add('highlight');
 }
 
 function openModelMenu() {
@@ -120,6 +203,7 @@ function openModelMenu() {
   $('modelPickerBtn').setAttribute('aria-expanded', 'true');
   $('modelSearch').value = '';
   renderModelMenu();
+  refreshModelHealth();
   $('modelSearch').focus();
 }
 

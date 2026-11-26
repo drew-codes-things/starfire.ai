@@ -121,7 +121,7 @@ settingsEls.uploadDocumentBtn.onclick = async () => {
 
 function refreshTaskEndpointOptions() {
   settingsEls.taskEndpointSelect.innerHTML = '';
-  for (const m of models) {
+  for (const m of onlineModels()) {
     const opt = document.createElement('option');
     opt.value = m.id;
     opt.dataset.endpointId = m.endpoint_id;

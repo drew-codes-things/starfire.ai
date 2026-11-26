@@ -14,6 +14,8 @@ import routes
 from config import config
 from model_endpoints import ModelEndpointStore
 
+pytestmark = pytest.mark.usefixtures("unreadable_model_lists")
+
 SECRET_LIKE = ("api_key", "ARTY_ACCESS", "http://", "https://", "/srv/", "password", "token")
 
 

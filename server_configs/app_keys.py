@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import secrets
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime, timezone
 
-from atomic_io import atomic_write_json, holds_file_lock, report_unreadable_store
+from atomic_io import atomic_write_json, holds_file_lock, lock_for, report_unreadable_store, set_aside_unreadable
+
+logger = logging.getLogger(__name__)
 
 KEYS_FILE = "app_keys.json"
 KEY_PREFIX = "sf_"
@@ -91,17 +94,21 @@ def cleaned_name(name: str) -> str:
     return kept
 
 
+def _is_grant_name(name, limit: int) -> bool:
+    return isinstance(name, str) and 0 < len(name) <= limit and name == name.strip()
+
+
 def _is_grant(grant) -> bool:
     return (isinstance(grant, dict) and set(grant) == {"endpoint_id", "model"}
-            and isinstance(grant["endpoint_id"], str) and 0 < len(grant["endpoint_id"].strip()) <= MAX_ENDPOINT_ID_CHARS
-            and isinstance(grant["model"], str) and 0 < len(grant["model"].strip()) <= MAX_MODEL_NAME_CHARS)
+            and _is_grant_name(grant["endpoint_id"], MAX_ENDPOINT_ID_CHARS)
+            and _is_grant_name(grant["model"], MAX_MODEL_NAME_CHARS))
 
 
 def cleaned_grants(grants) -> list[dict]:
     if not isinstance(grants, list) or not all(_is_grant(grant) for grant in grants):
-        raise AppKeyError("grants must be a list of {endpoint_id, model} pairs, model \"*\" for every model of that "
-                          "connection")
-    kept = list({(g["endpoint_id"].strip(), g["model"].strip()): None for g in grants})
+        raise AppKeyError("grants must be a list of {endpoint_id, model} pairs without spaces around the names, "
+                          "model \"*\" for every model of that connection")
+    kept = list({(g["endpoint_id"], g["model"]): None for g in grants})
     if not kept:
         raise AppKeyError("pick at least one model or connection")
     if len(kept) > MAX_KEY_GRANTS:
@@ -125,6 +132,18 @@ def expiry_after(days, now: float) -> float | None:
     return now + days * DAY_SECONDS
 
 
+KNOWN_FIELDS = frozenset(stored.name for stored in fields(AppKey))
+
+
+def _stored_key(item) -> AppKey | None:
+    if not isinstance(item, dict):
+        return None
+    try:
+        return AppKey(**{name: value for name, value in item.items() if name in KNOWN_FIELDS})
+    except TypeError:
+        return None
+
+
 def key_grants(key: AppKey, endpoint_id: str, model: str) -> bool:
     return any(grant["endpoint_id"] == endpoint_id and grant["model"] in (EVERY_MODEL, model) for grant in key.grants)
 
@@ -138,23 +157,32 @@ class AppKeyStore:
     def path(self) -> str:
         return os.path.join(self.data_dir, KEYS_FILE)
 
+    def _set_aside(self, reason: str) -> None:
+        with lock_for(self.path):
+            if not os.path.exists(self.path):
+                return
+            aside = set_aside_unreadable(self.path)
+        logger.error("app keys file %s could not be read because %s; moved it to %s and starting with no keys",
+                     self.path, reason, aside)
+
     def _load(self) -> list[AppKey]:
         if not os.path.exists(self.path):
             return []
         try:
             with open(self.path, "r", encoding="utf-8") as f:
                 raw = json.load(f)
-        except (json.JSONDecodeError, OSError) as error:
+        except json.JSONDecodeError as error:
+            self._set_aside(f"it is not valid JSON ({error})")
+            return []
+        except OSError as error:
             report_unreadable_store(self.path, error)
             return []
         if not isinstance(raw, list):
+            self._set_aside(f"it holds a {type(raw).__name__}, not a list")
             return []
-        keys = []
-        for item in raw:
-            try:
-                keys.append(AppKey(**item))
-            except TypeError:
-                continue
+        keys = [key for key in (_stored_key(item) for item in raw) if key is not None]
+        if len(keys) != len(raw):
+            logger.warning("app keys file %s: skipped %d unreadable entries", self.path, len(raw) - len(keys))
         return keys
 
     def _save(self, keys: list[AppKey]) -> None:

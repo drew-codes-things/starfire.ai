@@ -39,7 +39,7 @@ def test_ollama_payload_carries_think(monkeypatch):
 
     sent = {}
 
-    async def fake_iter(client, url, headers, payload):
+    async def fake_iter(client, url, headers, payload, max_bytes=None):
         sent.update(payload)
         yield ("delta", "ok")
 

@@ -157,7 +157,7 @@ function regenerateModelSelect() {
   heading.disabled = true;
   heading.textContent = REGENERATE_WITH;
   select.appendChild(heading);
-  for (const m of models) {
+  for (const m of onlineModels()) {
     const opt = document.createElement('option');
     opt.value = m.id;
     opt.dataset.endpointId = m.endpoint_id;
@@ -185,6 +185,8 @@ function addRegenerateButton(actions, idx) {
     if (userIdx < 0 || busy) return;
     const text = messages[userIdx].content;
     const overrideModel = regenerateChoice(select.selectedOptions[0]);
+    const target = overrideModel ? pickedModel({ endpoint_id: overrideModel.endpoint_id, model: overrideModel.id }) : currentModel();
+    if (await refuseOfflineModel(target)) return;
     await forkSession(userIdx, messages[userIdx].display ?? text);
     rerenderAll();
     send(text, overrideModel);
@@ -239,6 +241,7 @@ function startEdit(idx) {
   saveBtn.onclick = async () => {
     const newText = ta.value.trim();
     if (!newText) return;
+    if (await refuseOfflineModel(currentModel())) return;
     await forkSession(idx, newText);
     rerenderAll();
     send(newText);

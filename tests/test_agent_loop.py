@@ -262,3 +262,10 @@ def test_odd_argument_types_from_the_model_get_an_error_result_not_a_crash(argum
     assert not agent_loop.builtin_tools.changes_state("manage_email", arguments)
     result = asyncio.run(agent_loop.builtin_tools.call_builtin_tool("manage_email", arguments, None))
     assert result.startswith("error:")
+
+
+@pytest.mark.parametrize("name", [None, 5])
+def test_a_tool_call_whose_name_is_not_text_is_refused_as_not_enabled(name):
+    assert not builtin_tools.is_mcp_tool(name)
+    refusal = agent_loop._refuse_tool_not_offered(name, frozenset({"search_web"}))
+    assert "is not enabled for this chat" in refusal

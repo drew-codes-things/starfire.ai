@@ -25,6 +25,8 @@ from prompt_store import PromptStore
 from task_store import TaskRunStore, TaskStore
 from version import VERSION
 
+pytestmark = pytest.mark.usefixtures("unreadable_model_lists")
+
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
@@ -394,7 +396,7 @@ def test_a_helper_task_asks_for_the_brains_window_without_context_shift(client, 
 
     sent = {}
 
-    async def fake_iter(http_client, url, headers, payload):
+    async def fake_iter(http_client, url, headers, payload, max_bytes=None):
         sent.update(url=url, payload=payload)
         yield ("delta", "Plex setup")
 
@@ -523,7 +525,8 @@ def test_a_task_the_model_creates_in_a_chat_runs_on_that_chat_endpoint(client, m
     import agent_loop
 
     endpoint = SimpleNamespace(id="ep1", base_url="http://model", provider="openai", label="Model", kind="api")
-    monkeypatch.setattr(routes, "endpoints", SimpleNamespace(get=lambda endpoint_id: endpoint if endpoint_id == "ep1" else None))
+    monkeypatch.setattr(routes, "endpoints", SimpleNamespace(get=lambda endpoint_id: endpoint if endpoint_id == "ep1" else None,
+                                                             list=lambda: [endpoint]))
     monkeypatch.setattr(routes, "api_keys", SimpleNamespace(load=lambda: {}))
     monkeypatch.setattr(routes, "usage", SimpleNamespace(record=lambda *args: None))
     create_call = {"id": "c1", "name": "manage_tasks", "arguments": {
@@ -550,7 +553,8 @@ def model_inbox(client, monkeypatch):
     from types import SimpleNamespace
 
     endpoint = SimpleNamespace(id="ep1", base_url="http://model", provider="openai", label="Model", kind="api")
-    monkeypatch.setattr(routes, "endpoints", SimpleNamespace(get=lambda endpoint_id: endpoint if endpoint_id == "ep1" else None))
+    monkeypatch.setattr(routes, "endpoints", SimpleNamespace(get=lambda endpoint_id: endpoint if endpoint_id == "ep1" else None,
+                                                             list=lambda: [endpoint]))
     monkeypatch.setattr(routes, "api_keys", SimpleNamespace(load=lambda: {}))
     monkeypatch.setattr(routes, "usage", SimpleNamespace(record=lambda *args: None))
     received = []

@@ -27,6 +27,8 @@ from auth import SessionStore, UserStore
 from config import config
 from model_endpoints import ModelEndpointStore
 
+pytestmark = pytest.mark.usefixtures("unreadable_model_lists")
+
 PASSWORD = "correct horse battery staple"
 HEADERS = {"X-Starfire-Client": "1"}
 JPEG = base64.b64encode(b"\xff\xd8\xff\xe0 pretend this is a picture").decode()

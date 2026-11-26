@@ -50,7 +50,7 @@ async function updateComposerPopup() {
     if (!documentCache.length) items = [{ key: 'no documents yet', sub: 'upload some in workspace → knowledge', pick: () => openSettings('documents') }];
   } else {
     popupEls.title.textContent = 'models';
-    items = models
+    items = onlineModels()
       .filter(m => m.id.toLowerCase().includes(trigger.query))
       .map(m => ({ key: '@' + m.id, sub: window.providerLabel ? window.providerLabel(m.provider) : m.provider, pick: () => pickMention(m) }));
   }
