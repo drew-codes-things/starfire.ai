@@ -5,11 +5,29 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "server_configs"))
 
+import arty_devices
 import auth_routes
+import auto_model
 import connection_health
 import routes
+from api_key_manager import APIKeyManager
 from auth import LOGIN_ATTEMPT_WINDOW_SECONDS, LOGIN_ATTEMPTS_PER_ADDRESS, LoginLimiter
+from config import config
 from connection_health import ConnectionHealth
+from model_endpoints import ModelEndpointStore
+
+
+@pytest.fixture(autouse=True)
+def separate_data_folder(tmp_path, monkeypatch):
+    data_dir = str(tmp_path)
+    monkeypatch.setattr(config, "data_dir", data_dir)
+    monkeypatch.setattr(routes, "auto_model_settings", auto_model.AutoModelSettings(data_dir))
+    for module in (routes, arty_devices):
+        monkeypatch.setattr(module, "endpoints", ModelEndpointStore(data_dir))
+        monkeypatch.setattr(module, "api_keys", APIKeyManager(data_dir))
+    monkeypatch.setattr(routes, "connection_health", ConnectionHealth(lambda: routes.endpoints.list(),
+                                                                      lambda e: routes._endpoint_key(e),
+                                                                      data_dir=data_dir))
 
 
 @pytest.fixture(autouse=True)

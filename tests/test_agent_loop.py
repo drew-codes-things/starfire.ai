@@ -311,3 +311,42 @@ def test_a_tool_call_whose_name_is_not_text_is_refused_as_not_enabled(name):
     assert not builtin_tools.is_mcp_tool(name)
     refusal = agent_loop._refuse_tool_not_offered(name, frozenset({"search_web"}))
     assert "is not enabled for this chat" in refusal
+
+
+def test_a_reply_cut_off_by_the_length_limit_ends_with_the_note(model, tools):
+    tools(lambda *args: None)
+    model([("delta", "The answer is"), (chat_stream.CUT_OFF_KIND, "length")])
+    events = run_agent({"search_web"})
+
+    assert events == [{"delta": "The answer is"}, {"delta": chat_stream.CUT_OFF_NOTE}, {"cut_off": "length"},
+                      {"done": True}]
+
+
+def test_a_reply_that_was_all_thinking_and_got_cut_off_says_so(model, tools):
+    tools(lambda *args: None)
+    model([("delta", "  \n"), (chat_stream.CUT_OFF_KIND, "length")])
+    events = run_agent({"search_web"})
+
+    assert events == [{"delta": "  \n"}, {"delta": chat_stream.THINKING_ONLY_NOTE}, {"cut_off": "length"},
+                      {"done": True}]
+
+
+@pytest.mark.parametrize("enabled_tools", [set(), {"search_web"}])
+def test_a_collected_result_cut_off_at_the_length_limit_gets_the_plain_note(model, tools, enabled_tools):
+    tools(lambda *args: None)
+    model([("delta", "Half a report"), (chat_stream.CUT_OFF_KIND, "length")])
+    result = asyncio.run(agent_loop.run_chat_collected("http://model", None, "m", USER_TURN,
+                                                       enabled_builtin_tools=enabled_tools, ctx=admin_context()))
+
+    assert result == "Half a report" + agent_loop.COLLECTED_CUT_OFF_NOTE
+    assert "Continue" not in result and agent_loop.COLLECTED_CUT_OFF_NOTE == "\n\n(This result was cut off at the length limit.)"
+
+
+@pytest.mark.parametrize("enabled_tools", [set(), {"search_web"}])
+def test_a_collected_result_that_was_all_thinking_says_so(model, tools, enabled_tools):
+    tools(lambda *args: None)
+    model([(chat_stream.CUT_OFF_KIND, "length")])
+    result = asyncio.run(agent_loop.run_chat_collected("http://model", None, "m", USER_TURN,
+                                                       enabled_builtin_tools=enabled_tools, ctx=admin_context()))
+
+    assert result == chat_stream.THINKING_ONLY_NOTE

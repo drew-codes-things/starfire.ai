@@ -71,3 +71,15 @@ def test_other_providers_are_not_sent_ollama_runner_fields(sent):
     send(OPENAI_URL, {"num_ctx": 4096})
     assert "shift" not in sent
     assert "num_ctx" not in sent
+
+
+def test_the_main_model_always_gets_the_fixed_window_whatever_the_chat_asks(sent, monkeypatch):
+    monkeypatch.setattr(config, "task_model", "qwen3:14b")
+    send(OLLAMA_URL, {"num_ctx": 4096, "temperature": 0.3})
+    assert sent["options"] == {"num_ctx": BRAIN_WINDOW, "temperature": 0.3}
+
+
+def test_other_models_keep_the_context_length_chosen_for_the_chat(sent, monkeypatch):
+    monkeypatch.setattr(config, "task_model", "big:35b")
+    send(OLLAMA_URL, {"num_ctx": 4096})
+    assert sent["options"] == {"num_ctx": 4096}

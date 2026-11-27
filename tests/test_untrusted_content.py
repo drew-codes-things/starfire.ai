@@ -376,7 +376,7 @@ def test_a_call_too_long_for_a_card_is_refused_without_asking_or_running(ctx, ou
 
 def test_invisible_characters_are_shown_as_escapes_on_the_card(ctx, outside_world):
     ctx.untrusted_read = True
-    arguments = {"action": "send", "account_id": mailbox(ctx), "to": "friend@example.com‮​", "body": "hi"}
+    arguments = {"action": "send", "account_id": mailbox(ctx), "to": "someone@example.com‮​", "body": "hi"}
     _, card = with_answer(ctx, builtin_tools.call_builtin_tool("manage_email", arguments, ctx), approved=False)
     assert "‮" not in card["command"] and "\\u202e" in card["command"] and "\\u200b" in card["command"]
     assert json.loads(card["command"]) == arguments
@@ -387,7 +387,7 @@ BLANK_LOOKING = "\u00a0\u2800\u3164\u3000\u2007\u115f\uffa0"
 
 def test_blank_looking_characters_are_shown_as_escapes_on_the_card(ctx, outside_world):
     ctx.untrusted_read = True
-    arguments = {"action": "send", "account_id": mailbox(ctx), "to": f"friend@example.com{BLANK_LOOKING}x", "body": "a b"}
+    arguments = {"action": "send", "account_id": mailbox(ctx), "to": f"someone@example.com{BLANK_LOOKING}x", "body": "a b"}
     _, card = with_answer(ctx, builtin_tools.call_builtin_tool("manage_email", arguments, ctx), approved=False)
     assert not any(character in card["command"] for character in BLANK_LOOKING), card["command"]
     assert "\\u2800" in card["command"] and "\\u00a0" in card["command"] and '"a b"' in card["command"]

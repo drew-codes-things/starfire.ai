@@ -69,7 +69,7 @@ def app(tmp_path, monkeypatch):
 
 @pytest.fixture
 def endpoint(app):
-    return routes.endpoints.add("https://models.example.com/v1", kind="api-key")
+    return routes.endpoints.add("http://192.168.1.60:8080/v1", kind="api-key")
 
 
 @pytest.fixture
@@ -156,15 +156,15 @@ def viewing_for(endpoint, model):
     return asyncio.run(routes._plan_screen_viewing(endpoint, None, model))
 
 
-LOCAL_ENGINE, OTHER_LOCAL_ENGINE, FRIEND_ENGINE = (
-    "http://engine.example:11434", "http://192.168.1.50:11434", "http://friend.example.com:11434")
-FRIEND_VISION, OTHER_VISION, REMOTE_VISION = "llava-friend:7b", "other-vl:3b", "remote/friend/qwen-vl"
+LOCAL_ENGINE, OTHER_LOCAL_ENGINE, REMOTE_A_ENGINE = (
+    "http://192.168.1.40:11434", "http://192.168.1.50:11434", "http://remote-a.example.com:11434")
+REMOTE_A_VISION, OTHER_VISION, REMOTE_VISION = "llava-remote:7b", "other-vl:3b", "remote/remote-a/qwen-vl"
 
 
 @pytest.fixture
 def engine(app, monkeypatch):
     seeing = {VISION: ["completion", "vision"], GENERAL: ["completion", "tools"],
-              FRIEND_VISION: ["completion", "vision"], OTHER_VISION: ["completion", "vision"],
+              REMOTE_A_VISION: ["completion", "vision"], OTHER_VISION: ["completion", "vision"],
               REMOTE_VISION: ["completion", "vision"]}
     engine_endpoint = routes.endpoints.add(LOCAL_ENGINE, kind="ollama")
     listed = [{"id": VISION, "endpoint_id": engine_endpoint.id}, {"id": GENERAL, "endpoint_id": engine_endpoint.id}]
@@ -190,7 +190,7 @@ def add_listed(engine, address, model, kind="ollama"):
 
 def configure_vision(monkeypatch, model):
     monkeypatch.setattr(routes, "_role_sources",
-                        lambda: routes.auto_model.RoleSources(configured={routes.auto_model.VISION: model}))
+                        lambda usable: routes.auto_model.RoleSources(configured={routes.auto_model.VISION: model}))
 
 
 def test_a_model_the_engine_says_is_blind_gets_the_screen_described_by_a_local_vision_model(engine, viewer):
@@ -228,21 +228,21 @@ def test_a_blind_model_with_no_confirmed_local_viewer_is_told_so_before_anything
     assert viewing_for(engine.endpoint, GENERAL).unseen
 
 
-def test_a_vision_model_on_a_friend_or_remote_connection_never_describes_the_screen(engine, viewer, monkeypatch):
+def test_a_vision_model_on_a_remote_connection_never_describes_the_screen(engine, viewer, monkeypatch):
     engine.listed.remove({"id": VISION, "endpoint_id": engine.endpoint.id})
-    friend = add_listed(engine, FRIEND_ENGINE, FRIEND_VISION)
+    remote_a = add_listed(engine, REMOTE_A_ENGINE, REMOTE_A_VISION)
     engine.listed.insert(0, {"id": REMOTE_VISION, "endpoint_id": engine.endpoint.id})
-    configure_vision(monkeypatch, FRIEND_VISION)
+    configure_vision(monkeypatch, REMOTE_A_VISION)
     assert viewing_for(engine.endpoint, GENERAL).unseen
-    assert (friend.base_url, FRIEND_VISION) not in engine.asked and (LOCAL_ENGINE, REMOTE_VISION) not in engine.asked
+    assert (remote_a.base_url, REMOTE_A_VISION) not in engine.asked and (LOCAL_ENGINE, REMOTE_VISION) not in engine.asked
     assert viewer == []
 
 
 def test_a_rejected_auto_vision_pick_falls_through_to_the_next_local_vision_model(engine, viewer, monkeypatch):
-    add_listed(engine, FRIEND_ENGINE, FRIEND_VISION)
+    add_listed(engine, REMOTE_A_ENGINE, REMOTE_A_VISION)
     other = add_listed(engine, OTHER_LOCAL_ENGINE, OTHER_VISION)
     engine.listed.remove({"id": VISION, "endpoint_id": engine.endpoint.id})
-    configure_vision(monkeypatch, FRIEND_VISION)
+    configure_vision(monkeypatch, REMOTE_A_VISION)
     viewing = viewing_for(engine.endpoint, GENERAL)
     assert viewing.described_by == OTHER_VISION
     asyncio.run(viewing.describe(SCREEN_PICTURE))
@@ -271,8 +271,8 @@ def test_auto_sends_each_prompt_to_its_role_model_and_says_which(app, endpoint, 
         "image": picked(ask_auto(sam, "what is in this picture", [image["id"]])),
     }
     assert {name: (a["model"], a["role"]) for name, a in answers.items()} == {
-        "plain": (GENERAL, "chat"), "code": (CODER, "code"), "agent": (ARTY, "agent"), "image": (VISION, "vision")}
-    assert replies == [GENERAL, CODER, ARTY, VISION]
+        "plain": (GENERAL, "chat"), "code": (GENERAL, "code"), "agent": (ARTY, "agent"), "image": (VISION, "vision")}
+    assert replies == [GENERAL, GENERAL, ARTY, VISION]
     assert all(a["auto"] is True and a["endpoint_id"] == endpoint.id for a in answers.values())
 
 
@@ -281,7 +281,7 @@ def test_auto_never_sends_a_normal_account_to_a_restricted_model_an_admin_named(
     saved = admin.put("/api/auto-model", json={"roles": {"chat": RESTRICTED, "code": RESTRICTED}})
     assert saved.status_code == 200 and saved.json()["roles"]["chat"] == RESTRICTED
     assert picked(ask_auto(sam, "hello there"))["model"] == GENERAL
-    assert picked(ask_auto(sam, "```py\nx\n```"))["model"] == CODER
+    assert picked(ask_auto(sam, "```py\nx\n```"))["model"] == GENERAL
     assert picked(ask_auto(admin, "hello there"))["model"] == RESTRICTED
     assert RESTRICTED not in replies[:2]
 
@@ -290,11 +290,12 @@ def test_auto_keeps_to_the_models_an_admin_allowed_for_the_account(app, endpoint
     admin, sam = login(app, "admin@example.com"), login(app, "sam@example.com")
     assert admin.put(f"/api/auth/users/{sam.user_id}/models", json={"models": [SMALL]}).status_code == 200
     for prompt in ("hello", "```py\nx\n```", "remind me to stretch"):
-        assert picked(ask_auto(sam, prompt))["model"] == SMALL
+        refused = ask_auto(sam, prompt)
+        assert refused.status_code == 503 and "Auto found no model" in refused.json()["detail"]
     assert admin.put(f"/api/auth/users/{sam.user_id}/models", json={"models": []}).status_code == 200
     refused = ask_auto(sam, "hello")
     assert refused.status_code == 503 and "Auto found no model" in refused.json()["detail"]
-    assert replies == [SMALL, SMALL, SMALL]
+    assert replies == []
 
 
 def test_a_wildcard_allow_list_does_not_let_auto_send_an_account_to_a_restricted_model(app, endpoint, model_server,
@@ -314,7 +315,7 @@ def test_only_an_admin_sees_or_changes_which_models_auto_uses(app, endpoint, mod
     assert sam.get("/api/auto-model").status_code == 403
     assert sam.put("/api/auto-model", json={"roles": {"chat": SMALL}}).status_code == 403
     view = admin.get("/api/auto-model").json()
-    assert view["picks"]["code"] == {"model": CODER, "filled_by": "code"}
+    assert view["picks"]["code"] == {"model": GENERAL, "filled_by": "chat"}
     assert admin.put("/api/auto-model", json={"roles": {"writing": SMALL}}).status_code == 400
 
 
@@ -323,22 +324,22 @@ def test_the_model_list_names_the_everyday_model_auto_falls_back_on(app, endpoin
     assert sam.get("/api/models").json()["auto_everyday"] == {"endpoint_id": endpoint.id, "model": GENERAL}
 
 
-def test_an_accounts_last_model_choice_is_kept_on_the_server_and_defaults_to_auto(app, endpoint, model_server):
+def test_an_accounts_last_model_choice_is_kept_on_the_server_and_starts_as_nothing_chosen(app, endpoint, model_server):
     admin, sam = login(app, "admin@example.com"), login(app, "sam@example.com")
-    assert sam.get("/api/model-choice").json() == {"endpoint_id": "auto", "model": "auto"}
+    assert sam.get("/api/model-choice").json() == {"endpoint_id": "", "model": ""}
     assert sam.put("/api/model-choice", json={"endpoint_id": endpoint.id, "model": SMALL}).status_code == 200
     assert login(app, "sam@example.com").get("/api/model-choice").json() == {"endpoint_id": endpoint.id, "model": SMALL}
-    assert admin.get("/api/model-choice").json()["model"] == "auto"
+    assert admin.get("/api/model-choice").json()["model"] == ""
     refused = sam.put("/api/model-choice", json={"endpoint_id": endpoint.id, "model": RESTRICTED})
     assert refused.status_code == 403
     assert sam.put("/api/model-choice", json={"endpoint_id": "auto", "model": "auto"}).json()["model"] == "auto"
 
 
-def test_a_kept_choice_the_account_may_no_longer_use_reads_as_auto(app, endpoint, model_server):
+def test_a_kept_choice_the_account_may_no_longer_use_reads_as_nothing_chosen(app, endpoint, model_server):
     admin, sam = login(app, "admin@example.com"), login(app, "sam@example.com")
     sam.put("/api/model-choice", json={"endpoint_id": endpoint.id, "model": SMALL})
     admin.put(f"/api/auth/users/{sam.user_id}/models", json={"models": [GENERAL]})
-    assert sam.get("/api/model-choice").json()["model"] == "auto"
+    assert sam.get("/api/model-choice").json()["model"] == ""
 
 
 def test_a_chat_keeps_auto_as_its_model(app, endpoint):
@@ -372,3 +373,101 @@ def test_auto_never_picks_a_restricted_model_spelled_with_a_tag_or_namespace(app
     asked = ["hello there", "```py\nx\n```", "remind me to stretch", "what is a good name for a cat"]
     picks = [picked(ask_auto(sam, text))["model"] for text in asked]
     assert picks == [GENERAL] * len(asked) and set(replies).isdisjoint(TAGGED_RESTRICTED)
+
+
+@pytest.fixture
+def remote_models(app, endpoint, monkeypatch):
+    remote = routes.endpoints.add("https://remote-a.example.com/v1", kind="api-key")
+    local = [{"id": name, "endpoint_id": endpoint.id} for name in (SMALL, GENERAL)]
+    outside = [{"id": name, "endpoint_id": remote.id} for name in (VISION, CODER, GENERAL, ARTY, "remote-model-a")]
+    listed = outside + local
+
+    async def usable():
+        return list(listed)
+
+    monkeypatch.setattr(routes, "_usable_models", usable)
+    return SimpleNamespace(remote=remote, local=endpoint, listed=listed)
+
+
+def test_with_default_settings_no_auto_route_reaches_a_remote_connection(app, remote_models, model_server, replies,
+                                                                       monkeypatch):
+    monkeypatch.setattr(config, "task_model", "")
+    admin = login(app, "admin@example.com")
+    image = admin.post("/api/attachments", files={"file": ("dot.png", TINY_PNG, "image/png")}).json()
+    prompts = [("hello", None), ("```py\nx\n```", None), ("remind me to stretch", None), ("what is this", [image["id"]])]
+    picks = [picked(ask_auto(admin, text, attachments)) for text, attachments in prompts]
+    assert {pick["endpoint_id"] for pick in picks} == {remote_models.local.id}
+    view = admin.get("/api/auto-model").json()["picks"]
+    assert {pick["model"] for pick in view.values()} <= {SMALL, GENERAL}
+    everyday = admin.get("/api/models").json()["auto_everyday"]
+    assert everyday is None or everyday["endpoint_id"] == remote_models.local.id
+
+
+def test_a_remote_model_named_as_the_coding_model_is_not_used(app, remote_models, model_server, replies, caplog):
+    admin = login(app, "admin@example.com")
+    assert admin.put("/api/auto-model", json={"roles": {"code": "remote-model-a"}}).status_code == 200
+    pick = picked(ask_auto(admin, "```py\nx\n```"))
+    assert pick["endpoint_id"] == remote_models.local.id and pick["model"] != "remote-model-a"
+    assert "remote-model-a" in caplog.text
+
+
+def test_everyday_and_coding_messages_follow_the_default_and_coding_settings(app, endpoint, model_server, replies):
+    admin = login(app, "admin@example.com")
+    assert [picked(ask_auto(admin, text))["model"] for text in ("hello", "```py\nx\n```")] == [GENERAL, GENERAL]
+    assert admin.put("/api/auto-model", json={"roles": {"chat": SMALL}}).status_code == 200
+    assert [picked(ask_auto(admin, text))["model"] for text in ("hello", "```py\nx\n```")] == [SMALL, SMALL]
+    assert admin.put("/api/auto-model", json={"roles": {"chat": SMALL, "code": CODER}}).status_code == 200
+    assert [picked(ask_auto(admin, text))["model"] for text in ("hello", "```py\nx\n```")] == [SMALL, CODER]
+    assert admin.get("/api/models").json()["auto_everyday"]["model"] == SMALL
+
+
+def test_a_picture_goes_to_the_default_model_when_it_can_see_and_to_the_vision_helper_when_it_cannot(app, engine,
+                                                                                                    model_server, replies):
+    admin = login(app, "admin@example.com")
+    image = admin.post("/api/attachments", files={"file": ("dot.png", TINY_PNG, "image/png")}).json()
+    assert picked(ask_auto(admin, "what is this", [image["id"]]))["model"] == VISION
+    engine.seeing[GENERAL] = ["completion", "vision"]
+    seen = picked(ask_auto(admin, "what is this", [image["id"]]))
+    assert (seen["model"], seen["role"], seen["filled_by"]) == (GENERAL, "vision", "chat")
+    assert admin.put("/api/auto-model", json={"roles": {"vision": VISION}}).status_code == 200
+    assert picked(ask_auto(admin, "what is this", [image["id"]]))["model"] == VISION
+
+
+def test_the_default_model_setting_becomes_the_main_for_the_context_and_helpers(app, endpoint, model_server,
+                                                                              monkeypatch):
+    admin = login(app, "admin@example.com")
+    assert routes.main_model() == GENERAL
+    assert admin.put("/api/auto-model", json={"roles": {"chat": CODER}}).status_code == 200
+    assert routes.main_model() == CODER
+    assert chat_stream.is_the_main_on_its_engine("http://127.0.0.1:11434", CODER)
+    assert not chat_stream.is_the_main_on_its_engine("http://127.0.0.1:11434", GENERAL)
+    assert chat_stream.fixed_context_for("http://127.0.0.1:11434", CODER) == config.task_num_ctx
+    assert chat_stream.fixed_context_for("http://127.0.0.1:11434", GENERAL) == 0
+
+
+@pytest.mark.parametrize("saved", [ARTY, "retired-model:9b", "arty/general:14b"])
+def test_a_saved_default_model_that_is_not_a_local_model_falls_back_to_the_task_model(app, endpoint, model_server,
+                                                                                       monkeypatch, caplog, saved):
+    admin = login(app, "admin@example.com")
+    assert admin.put("/api/auto-model", json={"roles": {"chat": saved}}).status_code == 200
+    assert routes.main_model() == GENERAL
+    assert chat_stream.is_the_main_on_its_engine("http://127.0.0.1:11434", GENERAL)
+    assert chat_stream.fixed_context_for("http://127.0.0.1:11434", GENERAL) == config.task_num_ctx
+    assert saved in caplog.text
+
+
+def test_the_auto_settings_offer_only_local_models_for_the_default_and_coding_roles(app, remote_models, model_server):
+    admin = login(app, "admin@example.com")
+    view = admin.get("/api/auto-model").json()
+    assert sorted(view["local_models"]) == sorted([SMALL, GENERAL])
+
+
+def test_auto_is_refused_cleanly_for_an_account_with_only_remote_models(app, monkeypatch):
+    remote = routes.endpoints.add("https://remote-a.example.com/v1", kind="api-key")
+
+    async def usable():
+        return [{"id": "remote-model-a", "endpoint_id": remote.id}]
+
+    monkeypatch.setattr(routes, "_usable_models", usable)
+    response = ask_auto(login(app, "sam@example.com"), "hello")
+    assert response.status_code == 503 and response.json()["detail"] == routes.MAIN_NOT_LISTED.format(main=config.task_model)

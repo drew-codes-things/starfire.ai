@@ -146,8 +146,8 @@
             <span id="modelPickerLabel">Select a model</span> <span class="caret"><svg class="icon" aria-hidden="true"><use href="#i-chevron-down"/></svg></span>
           </button>
           <div class="model-menu" id="modelMenu" hidden>
-            <div class="segmented model-mode" role="group" aria-label="How the model is chosen">
-              <button type="button" id="modelModeAuto" aria-pressed="true">Arty Auto</button>
+            <div class="segmented model-mode" role="group" aria-label="Which models to show">
+              <button type="button" id="modelModeArty" aria-pressed="true">Arty</button>
               <button type="button" id="modelModeChosen" aria-pressed="false">Choose a model</button>
             </div>
             <input id="modelSearch" type="search" placeholder="Search models" aria-label="Search models" autocomplete="off" spellcheck="false" />
@@ -395,7 +395,7 @@
 
             <div class="settings-card">
               <h3>Arty Auto</h3>
-              <p class="settings-hint">Arty Auto picks a model for every message: pictures and video go to the vision model, code to the code model, reminders, phone and home tasks to the agent, and everything else to the chat model. Leave a role on automatic to let starfire choose; accounts only ever get models they are allowed to use.</p>
+              <p class="settings-hint">The default model answers everyday messages and is the main model starfire keeps loaded; code goes to the coding model, pictures to the default model when it can see them (otherwise the vision model), and reminders, phone and home tasks to the agent. A role left on automatic only ever uses a model at home, never a remote connection; accounts only ever get models they are allowed to use.</p>
               <div id="autoModelRoles"></div>
               <div class="settings-row">
                 <button type="button" class="btn send" id="saveAutoModelBtn">Save</button>
@@ -1256,6 +1256,7 @@
   <script src="answerGuard.js"></script>
   <script src="desktopUpdateLogic.js"></script>
   <script src="desktopUpdate.js"></script>
+  <script src="desktopReplyNotice.js"></script>
   <script src="screenLookLogic.js"></script>
   <script src="screenLook.js"></script>
   <script src="browserOpenLogic.js"></script>

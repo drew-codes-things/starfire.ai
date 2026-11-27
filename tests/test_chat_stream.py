@@ -462,3 +462,95 @@ def test_token_counts_past_the_cap_are_left_out_so_the_usage_line_can_be_written
     read = read_stream(iterator, body.replace('"LONG"', LONG_COUNT).replace("LONG", LONG_COUNT))
     json.dumps(read)
     assert read == [("delta", "hi"), ("usage", {"completion_tokens": 3})]
+
+
+def test_an_openai_reply_stopped_by_the_length_limit_says_so():
+    body = openai_lines(openai_choice({"content": "The answer is"}), openai_choice({}, "length"))
+    assert read_stream(chat_stream._iter_openai, body) == [("delta", "The answer is"), (chat_stream.CUT_OFF_KIND, "length")]
+
+
+def test_a_finished_openai_reply_is_not_marked_cut_off():
+    body = openai_lines(openai_choice({"content": "Done."}), openai_choice({}, "stop"))
+    assert read_stream(chat_stream._iter_openai, body) == [("delta", "Done.")]
+
+
+def test_a_local_runner_reply_stopped_by_the_length_limit_says_so():
+    lines = [{"message": {"content": "The answer is"}, "done": False},
+             {"message": {"content": ""}, "done": True, "done_reason": "length"}]
+    body = "".join(json.dumps(line) + "\n" for line in lines)
+    assert read_stream(chat_stream._iter_ollama, body) == [("delta", "The answer is"), (chat_stream.CUT_OFF_KIND, "length")]
+
+
+def test_a_hosted_reply_stopped_by_the_length_limit_says_so():
+    events = [("content_block_delta", {"index": 0, "delta": {"type": "text_delta", "text": "The answer is"}}),
+              ("message_delta", {"delta": {"stop_reason": "max_tokens"}, "usage": {"output_tokens": 9}}),
+              ("message_stop", {})]
+    body = "".join(f"event: {kind}\ndata: {json.dumps(data)}\n\n" for kind, data in events)
+    found = read_stream(chat_stream._iter_anthropic, body)
+    assert ("delta", "The answer is") in found and (chat_stream.CUT_OFF_KIND, "max_tokens") in found
+
+
+def test_a_cut_off_chat_reply_ends_with_a_saved_note_and_a_cut_off_event(monkeypatch):
+    async def scripted(*args, **kwargs):
+        yield ("delta", "The answer is")
+        yield (chat_stream.CUT_OFF_KIND, "length")
+
+    monkeypatch.setattr(chat_stream, "stream_chat_once", scripted)
+
+    async def collect():
+        return [json.loads(line.decode()[len("data:"):])
+                async for line in chat_stream.stream_chat("http://model", None, "m", [], None, None)]
+
+    events = asyncio.run(collect())
+    assert events == [{"delta": "The answer is"}, {"delta": chat_stream.CUT_OFF_NOTE}, {"cut_off": "length"},
+                      {"done": True}]
+    assert "length limit" in chat_stream.CUT_OFF_NOTE and "Continue" in chat_stream.CUT_OFF_NOTE
+
+
+def test_the_page_strips_the_same_cut_off_note_the_server_writes():
+    page_logic = open(os.path.join(ROOT, "static", "uiLogic.js"), encoding="utf-8").read()
+    assert f"const CUT_OFF_NOTE = '{chat_stream.CUT_OFF_NOTE.replace(chr(10), chr(92) + 'n')}';" in page_logic
+    assert f"const THINKING_ONLY_NOTE = '{chat_stream.THINKING_ONLY_NOTE}';" in page_logic
+
+
+def test_a_cut_off_reply_with_no_answer_saves_a_clear_message_instead_of_the_note(monkeypatch):
+    async def scripted(*args, **kwargs):
+        yield ("delta", " ")
+        yield (chat_stream.CUT_OFF_KIND, "length")
+
+    monkeypatch.setattr(chat_stream, "stream_chat_once", scripted)
+
+    async def collect():
+        return [json.loads(line.decode()[len("data:"):])
+                async for line in chat_stream.stream_chat("http://model", None, "m", [], None, None)]
+
+    assert asyncio.run(collect()) == [{"delta": " "}, {"delta": chat_stream.THINKING_ONLY_NOTE},
+                                      {"cut_off": "length"}, {"done": True}]
+    assert chat_stream.THINKING_ONLY_NOTE == ("The model used its whole length limit on thinking and wrote no answer. "
+                                              "Try again or ask for a shorter answer.")
+
+
+def test_the_length_limit_notes_never_go_back_to_the_model(monkeypatch):
+    sent = {}
+
+    async def fake_iter(client, url, headers, payload, max_bytes=None):
+        sent.update(payload)
+        yield ("delta", "ok")
+
+    monkeypatch.setattr(chat_stream, "_iter_ollama", fake_iter)
+    history = [{"role": "user", "content": "one"},
+               {"role": "assistant", "content": "Half" + chat_stream.CUT_OFF_NOTE},
+               {"role": "user", "content": "two"},
+               {"role": "assistant", "content": "Also half" + chat_stream.CUT_OFF_NOTE + "\n "},
+               {"role": "user", "content": "three"},
+               {"role": "assistant", "content": chat_stream.THINKING_ONLY_NOTE},
+               {"role": "assistant", "content": chat_stream.CUT_OFF_NOTE.strip()},
+               {"role": "user", "content": "Quote: " + chat_stream.CUT_OFF_NOTE}]
+
+    async def collect():
+        return [item async for item in chat_stream.stream_chat_once("http://127.0.0.1:11434", None, "llama3.1:8b",
+                                                                    history, None, None)]
+
+    asyncio.run(collect())
+    assert [m["content"] for m in sent["messages"]] == ["one", "Half", "two", "Also half", "three", "", "",
+                                                        "Quote: " + chat_stream.CUT_OFF_NOTE]

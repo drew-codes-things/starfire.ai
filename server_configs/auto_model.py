@@ -4,9 +4,10 @@ import json
 import os
 import re
 from dataclasses import dataclass, field
+from typing import Callable
 
 from atomic_io import atomic_write_json, holds_file_lock, report_unreadable_store
-from model_access import matches_any
+from model_access import WILDCARD_CHARACTERS, matches_any
 
 AUTO = "auto"
 VISION, CODE, AGENT, CHAT = "vision", "code", "agent", "chat"
@@ -15,7 +16,6 @@ SETTINGS_FILE = "auto_model.json"
 MAX_MODEL_NAME_CHARS = 200
 
 VISION_NAME_PATTERNS = ("*vl*", "*vision*", "*llava*")
-CODE_NAME_PATTERNS = ("*code*",)
 SEEN_KINDS = frozenset({"image", "video"})
 HEARD_KINDS = frozenset({"audio"})
 CLASSIFIED_CHARS_AT_EACH_END = 4_000
@@ -69,6 +69,11 @@ class RoleSources:
     task_model: str = ""
     own_tools_patterns: list[str] = field(default_factory=list)
     restricted_patterns: list[str] = field(default_factory=list)
+    outside: Callable[[dict], bool] = lambda model: False
+    hidden_patterns: list[str] = field(default_factory=list)
+
+    def main(self) -> str:
+        return self.configured.get(CHAT) or self.task_model
 
 
 @dataclass(frozen=True)
@@ -83,8 +88,9 @@ class AutoPick:
                 "role": self.role, "filled_by": self.filled_by}
 
 
-def _named(models: list[dict], name: str) -> dict | None:
-    return next((m for m in models if m["id"] == name), None)
+def _named(models: list[dict], name: str, outside: Callable[[dict], bool] = lambda model: False) -> dict | None:
+    named = [m for m in models if m["id"] == name]
+    return next((m for m in named if not outside(m)), named[0] if named else None)
 
 
 def _first_matching(models: list[dict], patterns) -> dict | None:
@@ -99,34 +105,53 @@ def _unrestricted(models: list[dict], sources: RoleSources) -> list[dict]:
     return [m for m in models if not matches_any(m["id"], sources.restricted_patterns)]
 
 
+def _guessable(models: list[dict], sources: RoleSources) -> list[dict]:
+    return [m for m in _unrestricted(models, sources) if not sources.outside(m)]
+
+
+def _shown(models: list[dict], sources: RoleSources) -> list[dict]:
+    return [m for m in models if not matches_any(m["id"], sources.hidden_patterns)]
+
+
+def _exact_names(patterns: list[str]) -> list[str]:
+    return [pattern for pattern in patterns if not WILDCARD_CHARACTERS.intersection(pattern)]
+
+
 def _general(models: list[dict], sources: RoleSources) -> list[dict]:
-    return [m for m in _unrestricted(models, sources)
+    return [m for m in _guessable(models, sources)
             if not matches_any(m["id"], sources.own_tools_patterns) and not matches_any(m["id"], VISION_NAME_PATTERNS)]
 
 
+def _seeing(models: list[dict], sources: RoleSources) -> list[dict]:
+    return [m for m in _guessable(models, sources) if not matches_any(m["id"], sources.own_tools_patterns)]
+
+
 def _guessed_for(role: str, usable: list[dict], sources: RoleSources) -> dict | None:
+    usable = _shown(usable, sources)
     general = _general(usable, sources)
     if role == VISION:
-        seeing = [m for m in _unrestricted(usable, sources) if not matches_any(m["id"], sources.own_tools_patterns)]
-        return _first_matching(seeing, VISION_NAME_PATTERNS)
+        return _first_matching(_seeing(usable, sources), VISION_NAME_PATTERNS)
     if role == CODE:
-        return _first_matching(general, CODE_NAME_PATTERNS)
+        return None
     if role == AGENT:
-        return _first_matching(_unrestricted(usable, sources), sources.own_tools_patterns)
-    return (_named(general, sources.task_model) if sources.task_model else None) or (general[0] if general else None)
+        return _first_matching(_guessable(usable, sources), _exact_names(sources.own_tools_patterns))
+    if sources.main():
+        return _named(general, sources.main())
+    return general[0] if general else None
 
 
 def vision_candidates(usable: list[dict], sources: RoleSources) -> list[dict]:
     configured = sources.configured.get(VISION)
-    chosen = [_named(usable, configured)] if configured and _named(usable, configured) else []
-    seeing = [m for m in _unrestricted(usable, sources) if not matches_any(m["id"], sources.own_tools_patterns)]
+    named = _named(usable, configured, sources.outside) if configured else None
+    chosen = [named] if named else []
+    seeing = _seeing(usable, sources)
     guessed = [m for pattern in VISION_NAME_PATTERNS for m in seeing if matches_any(m["id"], [pattern])]
     return list({(m["endpoint_id"], m["id"]): m for m in chosen + guessed}.values())
 
 
 def model_for_role(role: str, usable: list[dict], sources: RoleSources) -> dict | None:
     configured = sources.configured.get(role)
-    chosen = _named(usable, configured) if configured else None
+    chosen = _named(usable, configured, sources.outside) if configured else None
     return chosen or _guessed_for(role, usable, sources)
 
 
@@ -135,7 +160,7 @@ def choose(role: str, usable: list[dict], sources: RoleSources) -> AutoPick | No
         model = model_for_role(filling_role, usable, sources)
         if model:
             return AutoPick(model["endpoint_id"], model["id"], role, filling_role)
-    leftover = _unrestricted(usable, sources)
+    leftover = [] if sources.main() else _guessable(_shown(usable, sources), sources)
     if leftover:
         return AutoPick(leftover[0]["endpoint_id"], leftover[0]["id"], role, CHAT)
     return None

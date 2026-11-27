@@ -20,7 +20,7 @@ BOB = "b" * 32
 INBOX = [
     {"uid": "3", "from": "Old Boss <boss@work.example>", "subject": "already seen"},
     {"uid": "7", "from": "Boss <BOSS@work.example>", "subject": "Quarterly numbers"},
-    {"uid": "8", "from": "friend@home.example", "subject": "Boss fight tonight?"},
+    {"uid": "8", "from": "someone@home.example", "subject": "Boss fight tonight?"},
     {"uid": "not-a-number", "from": "boss@work.example", "subject": "broken"},
     {"from": "boss@work.example", "subject": "no uid"},
 ]

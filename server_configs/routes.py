@@ -8,7 +8,7 @@ import re
 import tempfile
 import time
 import zipfile
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from typing import Annotated
 from urllib.parse import urlencode, urlsplit
 
@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+import arty_devices
 import auth
 import auth_routes
 import auto_model
@@ -27,6 +28,7 @@ import code_check
 import desktop_control
 import content_screen
 import model_access
+import named_model
 import remote_rules
 import screen_checks
 import date_parsing
@@ -49,7 +51,9 @@ from connection_health import BAD_ANSWER, FAILURE_WORDS, OLLAMA_PROVIDER, Connec
 from model_choice import ModelChoice
 from reply_runs import ReplyRuns, TooManyReplies, finished_reply
 from generation_quota import GenerationQuota
-from chat_stream import _sse_line, stream_chat
+from chat_stream import _sse_line, fixed_context_for, stream_chat
+import main_model as main_model_setting
+from main_model import main_model
 from config import config
 from host_sandbox import HostLimits
 from context_budget import trim_to_budget
@@ -110,6 +114,21 @@ model_access_store = model_access.ModelAccessStore(config.data_dir)
 generation_quota = GenerationQuota()
 model_choice = user_data.PerUser("model_choice")
 auto_model_settings = auto_model.AutoModelSettings(config.data_dir)
+
+
+class LastListing:
+
+    def __init__(self):
+        self.models: list[dict] = []
+
+    def update(self, endpoints_listed, listed: list[dict], failures: dict[str, str]) -> None:
+        answered = {endpoint.id for endpoint in endpoints_listed if endpoint.id not in failures}
+        kept = [model for model in self.models if model.get("endpoint_id") not in answered]
+        self.models = kept + [{"id": model["id"], "endpoint_id": model.get("endpoint_id")} for model in listed
+                              if isinstance(model.get("id"), str)]
+
+
+_last_listing = LastListing()
 reply_runs = ReplyRuns()
 
 def _current_user_is_active_admin() -> bool:
@@ -405,6 +424,7 @@ async def _model_listing() -> tuple[list[dict], dict[str, str]]:
                            FAILURE_WORDS.get(failure, failure))
         else:
             listed.extend(models)
+    _last_listing.update(known, listed, failures)
     return listed, failures
 
 async def _listed_models() -> list[dict]:
@@ -469,8 +489,32 @@ def _remote_connections() -> dict[str, bool]:
     return {e.id: remote_rules.is_remote_connection(e) for e in endpoints.list()}
 
 def _everyday_pick(usable: list[dict]) -> dict | None:
-    pick = auto_model.choose(auto_model.CHAT, usable, _role_sources())
+    pick = auto_model.choose(auto_model.CHAT, usable, _role_sources(usable))
     return {"endpoint_id": pick.endpoint_id, "model": pick.model} if pick else None
+
+def is_hidden_model(model_id: str) -> bool:
+    return any(fnmatch.fnmatchcase(model_id, pattern) for pattern in config.hidden_model_patterns())
+
+def _model_label(model_id: str, labels: dict[str, str]) -> str:
+    if model_id in labels:
+        return labels[model_id]
+    _, cut, served = model_id.partition("/")
+    return labels.get(served, "") if cut and _brings_own_tools(model_id) else ""
+
+def _fixed_window(model: dict) -> int:
+    endpoint = endpoints.get(model.get("endpoint_id") or "")
+    return fixed_context_for(endpoint.base_url, model["id"]) if endpoint else 0
+
+def _for_the_picker(models: list[dict]) -> list[dict]:
+    labels = config.labels()
+    shown = []
+    for m in models:
+        if is_hidden_model(m["id"]):
+            continue
+        label = _model_label(m["id"], labels)
+        fixed = _fixed_window(m)
+        shown.append({**m, **({"label": label} if label else {}), **({"fixed_context": fixed} if fixed else {})})
+    return shown
 
 @router.get("/models")
 async def list_models():
@@ -483,10 +527,42 @@ async def list_models():
               for m in usable + _models_behind_unreadable_lists(failures)]
     offline = [{**m, "own_tools": _brings_own_tools(m["id"]), "remote": remote.get(m.get("endpoint_id"), False)}
                for m in _offline_models(failures)]
-    return {"models": online + offline, "auto_everyday": _everyday_pick(usable)}
+    return {"models": _for_the_picker(online + offline), "auto_everyday": _everyday_pick(usable)}
 
 def _brings_own_tools(model: str) -> bool:
     return any(fnmatch.fnmatchcase(model, pattern) for pattern in config.own_tools_patterns())
+
+RENAMED_TO_ARTY_WITHOUT_ARTY = ("{old} now runs as {new}, but starfire has no Arty connection to send it to. "
+                                "Pick {new} from the model list once Arty is connected.")
+
+def _arty_connection():
+    address = arty_devices.brain_address()
+    return endpoints.find_by_url(address) if address else None
+
+def _renamed_target(endpoint_id: str, model: str) -> tuple[str, str] | None:
+    target = config.renamed(model)
+    if target == model or not _brings_own_tools(target):
+        return endpoint_id, target
+    arty = _arty_connection()
+    if arty:
+        return arty.id, target
+    current = endpoints.get(endpoint_id)
+    return (endpoint_id, target) if current and not _is_a_model_server(current) else None
+
+def _is_a_model_server(endpoint) -> bool:
+    return endpoint.kind in LOCAL_SERVER_KINDS or endpoint.provider == OLLAMA_PROVIDER
+
+def _renamed_or_refused(endpoint_id: str, model: str) -> tuple[str, str]:
+    renamed = _renamed_target(endpoint_id, model)
+    if renamed is None:
+        raise HTTPException(409, RENAMED_TO_ARTY_WITHOUT_ARTY.format(old=model, new=config.renamed(model)))
+    return renamed
+
+def _renamed_for_a_job(endpoint_id: str, model: str) -> tuple[str, str]:
+    renamed = _renamed_target(endpoint_id, model)
+    if renamed is None:
+        raise RuntimeError(RENAMED_TO_ARTY_WITHOUT_ARTY.format(old=model, new=config.renamed(model)))
+    return renamed
 
 REMOTE_RULES_MISSING = "Arty's rules for this model couldn't be loaded, so it can't answer right now. Try again in a minute."
 REMOTE_RULES_FILES = "Files can't go to this connection, because Arty can't check them first. Paste the text instead."
@@ -557,7 +633,7 @@ async def get_local_server_address():
 
 def _voice_rules() -> list[model_voices.VoiceRule]:
     try:
-        return model_voices.parse_rules(config.model_voices)
+        return model_voices.parse_rules(config.voice_rules_text())
     except model_voices.VoiceError as error:
         logging.getLogger(__name__).error("MODEL_VOICES is ignored until it is fixed: %s", error)
         return []
@@ -1038,6 +1114,7 @@ class CreateTaskBody(BaseModel):
 def _task_chat_fn(endpoint_id, model, prompt, enabled_mcp_servers, enabled_builtin_tools):
     from agent_loop import run_chat_collected
 
+    endpoint_id, model = _renamed_for_a_job(endpoint_id, model)
     endpoint = endpoints.get(endpoint_id) if endpoint_id else None
     if not endpoint:
         raise RuntimeError("task has no valid endpoint configured")
@@ -1100,6 +1177,7 @@ def _email_rule_password(account_id: str) -> str | None:
 async def _email_rule_chat_fn(endpoint_id: str, model: str, prompt: str) -> str:
     from agent_loop import run_chat_collected
 
+    endpoint_id, model = _renamed_for_a_job(endpoint_id, model)
     endpoint = endpoints.get(endpoint_id) if endpoint_id else None
     if not endpoint:
         raise RuntimeError("this rule's ai_summarize_note action has no valid endpoint configured")
@@ -1607,6 +1685,7 @@ class ChatBody(BaseModel):
     memory_commands: bool = False
     session_id: str = ""
     reply_index: int = -1
+    names_a_model: bool = False
 
     @field_validator("messages")
     @classmethod
@@ -1705,10 +1784,33 @@ async def _synthetic_reply(text: str):
     yield _sse_line({"delta": text})
     yield _sse_line({"done": True})
 
-def _role_sources() -> auto_model.RoleSources:
-    return auto_model.RoleSources(configured=auto_model_settings.roles(), task_model=config.task_model,
+def _is_outside(model: dict) -> bool:
+    endpoint = endpoints.get(model.get("endpoint_id") or "")
+    return endpoint is None or not _runs_on_a_local_model(endpoint, model["id"])
+
+def _is_a_local_model(model: dict) -> bool:
+    return not _is_outside(model) and not _brings_own_tools(model["id"])
+
+def _local_model_ids() -> set[str] | None:
+    checked = [(endpoint, connection_health.state(endpoint.id) or connection_health.remembered_state(endpoint.id))
+               for endpoint in endpoints.list()]
+    from_checks = [{"id": model["id"], "endpoint_id": endpoint.id}
+                   for endpoint, state in checked if state is not None for model in state.models]
+    current = {endpoint.id for endpoint in endpoints.list()}
+    seen = from_checks + [model for model in _last_listing.models if model.get("endpoint_id") in current]
+    if not seen:
+        return None
+    return {model["id"] for model in seen if _is_a_local_model(model)}
+
+main_model_setting.use_local_listing(_local_model_ids)
+
+def _role_sources(usable: list[dict]) -> auto_model.RoleSources:
+    local = {model["id"] for model in usable if _is_a_local_model(model)}
+    return auto_model.RoleSources(configured=main_model_setting.checked_roles(auto_model_settings.roles(), local),
+                                  task_model=config.task_model,
                                   own_tools_patterns=config.own_tools_patterns(),
-                                  restricted_patterns=config.restricted_model_patterns())
+                                  restricted_patterns=config.restricted_model_patterns(), outside=_is_outside,
+                                  hidden_patterns=config.hidden_model_patterns())
 
 def _attachment_kinds(message: dict) -> set[str]:
     kinds = set()
@@ -1722,12 +1824,71 @@ def _attachment_kinds(message: dict) -> set[str]:
 def _last_user_message(messages: list[dict]) -> dict:
     return next((m for m in reversed(messages) if m.get("role") == "user"), {})
 
+@dataclass(frozen=True)
+class NamedPick:
+    endpoint_id: str
+    model: str
+    persist: bool = False
+
+    def event(self) -> dict:
+        staying = {"persist": True} if self.persist else {}
+        return {"auto": False, "named": True, "endpoint_id": self.endpoint_id, "model": self.model, "role": None,
+                "filled_by": None, **staying}
+
+
+def _message_words(message: dict) -> str:
+    content = message.get("content")
+    return content if isinstance(content, str) else ""
+
+def _named_candidate(model: dict, connections: dict[str, str], remote: dict[str, bool]) -> named_model.Candidate:
+    endpoint_id = model.get("endpoint_id") or ""
+    also_called = (("remote",) if remote.get(endpoint_id) else ()) + (("main", "default") if model["id"] == main_model() else ())
+    return named_model.Candidate(f"{endpoint_id}/{model['id']}", model["id"], model.get("label") or model["id"],
+                                 also_called, connections.get(endpoint_id, ""))
+
+async def _model_named_in(body: "ChatBody") -> tuple[named_model.Asked, NamedPick | None] | None:
+    if not body.names_a_model or not named_model.may_name_a_model(body.messages, _message_words):
+        return None
+    listed = _for_the_picker(await _listed_models())
+    allowed = {(m.get("endpoint_id"), m["id"]) for m in _usable_from(listed)}
+    connections, remote = _connection_labels(), _remote_connections()
+    picks = {f"{m.get('endpoint_id') or ''}/{m['id']}": (m.get("endpoint_id") or "", m["id"]) for m in listed}
+    visible = [_named_candidate(m, connections, remote) for m in listed if (m.get("endpoint_id"), m["id"]) in allowed]
+    locked = [_named_candidate(m, connections, remote) for m in listed if (m.get("endpoint_id"), m["id"]) not in allowed]
+
+    def on_the_chat_s_connection(candidate: named_model.Candidate) -> bool:
+        endpoint_id, _ = picks[candidate.id]
+        return endpoint_id == body.endpoint_id if body.model != auto_model.AUTO else not remote.get(endpoint_id)
+    asked = named_model.asked_model(body.messages, visible, locked, _message_words, on_the_chat_s_connection)
+    if asked is None:
+        return None
+    return asked, NamedPick(*picks[asked.candidate.id], asked.persist) if asked.candidate else None
+
 NO_AUTO_MODEL = "Auto found no model this account may use: pick a model by hand or ask an admin to add one"
+MAIN_NOT_LISTED = ("The main model ({main}) isn't available just now, and Auto never moves to another model by itself. "
+                   "Try again in a moment, or pick a model by hand.")
+
+async def _picture_pick(usable: list[dict], sources: auto_model.RoleSources) -> auto_model.AutoPick | None:
+    if sources.configured.get(auto_model.VISION):
+        return None
+    main = auto_model.model_for_role(auto_model.CHAT, usable, sources)
+    endpoint = endpoints.get(main["endpoint_id"]) if main else None
+    if endpoint is None or not await _engine_says_it_sees(endpoint, main["id"]):
+        return None
+    return auto_model.AutoPick(endpoint.id, main["id"], auto_model.VISION, auto_model.CHAT)
+
+async def _role_pick(role: str, usable: list[dict], sources: auto_model.RoleSources) -> auto_model.AutoPick | None:
+    seen_by_the_main = await _picture_pick(usable, sources) if role == auto_model.VISION else None
+    return seen_by_the_main or auto_model.choose(role, usable, sources)
 
 async def _auto_pick(messages: list[dict]) -> auto_model.AutoPick:
     asked = _last_user_message(messages)
     role = auto_model.prompt_role(asked.get("content") or "", _attachment_kinds(asked))
-    pick = auto_model.choose(role, await _usable_models(), _role_sources())
+    usable = await _usable_models()
+    sources = _role_sources(usable)
+    pick = await _role_pick(role, usable, sources)
+    if not pick and sources.main() and _may_use_model(sources.main()):
+        raise HTTPException(503, MAIN_NOT_LISTED.format(main=_model_label(sources.main(), config.labels()) or sources.main()))
     if not pick:
         raise HTTPException(503, NO_AUTO_MODEL)
     return pick
@@ -1751,7 +1912,8 @@ def _may_describe_the_screen(endpoint, model: str, chat_endpoint) -> bool:
     return endpoint.id == chat_endpoint.id or not remote_rules.is_remote_connection(endpoint)
 
 async def _screen_viewer(chat_endpoint, chat_model: str):
-    for candidate in auto_model.vision_candidates(await _usable_models(), _role_sources()):
+    usable = await _usable_models()
+    for candidate in auto_model.vision_candidates(usable, _role_sources(usable)):
         endpoint = endpoints.get(candidate["endpoint_id"])
         if endpoint is None or (endpoint.id, candidate["id"]) == (chat_endpoint.id, chat_model):
             continue
@@ -1818,52 +1980,17 @@ async def _reply_stream(run):
     async for chunk in reply_runs.follow(run):
         yield chunk
 
+CHECKS_GRACE_SECONDS = 10
+HEARTBEAT_SECONDS = 15
+HEARTBEAT_LINE = b": keep-alive\n\n"
+LATE_FAILURE = "starfire could not answer this request"
+
 def _event_stream(generator) -> StreamingResponse:
     return StreamingResponse(generator, media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "Connection": "keep-alive"})
 
-@router.post("/chat_stream")
-async def chat_stream_endpoint(body: ChatBody):
-    remembered = _remember_command_text(body)
-    if remembered:
-        entry = memory.add(remembered, source="inline_command")
-        return StreamingResponse(_synthetic_reply(f"Saved to memory: “{entry.text}”"),
-                                 media_type="text/event-stream")
-
-    if body.session_id:
-        _require_open_chat(body)
-    pick = await _auto_pick(body.messages) if body.model == auto_model.AUTO else None
-    endpoint_id, model = (pick.endpoint_id, pick.model) if pick else (body.endpoint_id, body.model)
-    endpoint = endpoints.get(endpoint_id)
-    if not endpoint:
-        raise HTTPException(404, "endpoint not found")
-    _require_model(model, endpoint)
-    options = _checked_options(body.options)
-    _take_generation()
-    try:
-        await _require_connection_up(endpoint)
-        if not pick:
-            await _require_listed_model(endpoint, model)
-    except HTTPException:
-        _give_back_generation()
-        raise
-    api_key = _api_key_for(endpoint.id, endpoint.provider)
-
-    DEFAULT_CONTEXT_BUDGET_TOKENS = 8192
-    num_ctx = (options or {}).get("num_ctx", DEFAULT_CONTEXT_BUDGET_TOKENS)
-    messages = trim_to_budget(body.messages, num_ctx)
-    ruled_connection = remote_rules.applies_to(endpoint, _all_endpoints)
-    if ruled_connection:
-        messages = remote_rules.ruled_messages(messages, kept_fields=(ATTACHMENTS_FIELD,))
-    input_text = "\n".join(m.get("content") or "" for m in messages)
-    if ruled_connection and any(_attachment_kinds(m) - {IMAGE_KIND} for m in messages):
-        raise HTTPException(400, REMOTE_RULES_FILES)
-    try:
-        messages = await expand_attachments(messages, attachment_store, endpoint.base_url, api_key,
-                                            _connection_label(endpoint))
-    except AttachmentError as e:
-        raise HTTPException(400, str(e))
-
+async def _answer_after_the_checks(body: ChatBody, pick, endpoint, model: str, messages: list[dict], api_key,
+                                   options: dict | None, input_text: str, ruled_connection: bool) -> StreamingResponse:
     declined = await screen_checks.declined_request(model, _with_system(body.system, messages), arty_checks_it=ruled_connection)
     if declined:
         return StreamingResponse(_synthetic_reply(declined), media_type="text/event-stream")
@@ -1950,6 +2077,84 @@ async def chat_stream_endpoint(body: ChatBody):
         raise HTTPException(429, str(error))
     return _event_stream(_reply_stream(run))
 
+async def _response_or_heartbeats(answering: asyncio.Future) -> StreamingResponse:
+    done, _ = await asyncio.wait({answering}, timeout=CHECKS_GRACE_SECONDS)
+    if done:
+        return answering.result()
+    return _event_stream(_heartbeats_until(answering))
+
+async def _heartbeats_until(answering: asyncio.Future):
+    try:
+        while not answering.done():
+            yield HEARTBEAT_LINE
+            await asyncio.wait({answering}, timeout=HEARTBEAT_SECONDS)
+        try:
+            response = answering.result()
+        except HTTPException as error:
+            yield _sse_line({"error": error.detail})
+            return
+        except Exception:
+            logger.exception("the checks before a chat reply failed after the stream had started")
+            yield _sse_line({"error": LATE_FAILURE})
+            return
+        async for chunk in response.body_iterator:
+            yield chunk
+    finally:
+        if not answering.done():
+            answering.cancel()
+
+@router.post("/chat_stream")
+async def chat_stream_endpoint(body: ChatBody):
+    remembered = _remember_command_text(body)
+    if remembered:
+        entry = memory.add(remembered, source="inline_command")
+        return StreamingResponse(_synthetic_reply(f"Saved to memory: “{entry.text}”"),
+                                 media_type="text/event-stream")
+
+    if body.session_id:
+        _require_open_chat(body)
+    body.endpoint_id, body.model = _renamed_or_refused(body.endpoint_id, body.model)
+    named = await _model_named_in(body)
+    if named and not named[1]:
+        return StreamingResponse(_synthetic_reply(named[0].reply), media_type="text/event-stream")
+    if named:
+        logger.info("the message names %s, so this reply runs on it", named[1].model)
+    pick = named[1] if named else await _auto_pick(body.messages) if body.model == auto_model.AUTO else None
+    endpoint_id, model = (pick.endpoint_id, pick.model) if pick else (body.endpoint_id, body.model)
+    endpoint = endpoints.get(endpoint_id)
+    if not endpoint:
+        raise HTTPException(404, "endpoint not found")
+    _require_model(model, endpoint)
+    options = _checked_options(body.options)
+    _take_generation()
+    try:
+        await _require_connection_up(endpoint)
+        if not pick:
+            await _require_listed_model(endpoint, model)
+    except HTTPException:
+        _give_back_generation()
+        raise
+    api_key = _api_key_for(endpoint.id, endpoint.provider)
+
+    DEFAULT_CONTEXT_BUDGET_TOKENS = 8192
+    num_ctx = fixed_context_for(endpoint.base_url, model) or (options or {}).get("num_ctx", DEFAULT_CONTEXT_BUDGET_TOKENS)
+    messages = trim_to_budget(body.messages, num_ctx)
+    ruled_connection = remote_rules.applies_to(endpoint, _all_endpoints)
+    if ruled_connection:
+        messages = remote_rules.ruled_messages(messages, kept_fields=(ATTACHMENTS_FIELD,))
+    input_text = "\n".join(m.get("content") or "" for m in messages)
+    if ruled_connection and any(_attachment_kinds(m) - {IMAGE_KIND} for m in messages):
+        raise HTTPException(400, REMOTE_RULES_FILES)
+    try:
+        messages = await expand_attachments(messages, attachment_store, endpoint.base_url, api_key,
+                                            _connection_label(endpoint))
+    except AttachmentError as e:
+        raise HTTPException(400, str(e))
+
+    answering = asyncio.ensure_future(_answer_after_the_checks(body, pick, endpoint, model, messages, api_key, options,
+                                                               input_text, ruled_connection))
+    return await _response_or_heartbeats(answering)
+
 def _own_run_or_404(run_id: str):
     run = reply_runs.get(user_data.current_user_id.get(), run_id)
     if not run:
@@ -2016,7 +2221,8 @@ class ImportChatsBody(BaseModel):
 MAX_IMPORT_CHATS = 5000
 
 def _session_summary(s) -> dict:
-    return {"id": s.id, "title": s.title, "endpoint_id": s.endpoint_id, "model": s.model,
+    endpoint_id, model = _renamed_target(s.endpoint_id, s.model) or (s.endpoint_id, s.model)
+    return {"id": s.id, "title": s.title, "endpoint_id": endpoint_id, "model": model,
             "pinned": s.pinned, "parent_session_id": s.parent_session_id, "branch_point": s.branch_point,
             "folder_id": s.folder_id, "archived": s.archived, "tags": s.tags,
             "created": s.created, "updated": s.updated, "message_count": len(s.messages)}
@@ -2214,10 +2420,10 @@ class QuickCompleteBody(BaseModel):
     helper: bool = False
 
 async def _quick_target(body: QuickCompleteBody):
-    helper_endpoint = helper_tasks.ollama_endpoint(endpoints.list()) if body.helper and config.task_model else None
+    main = main_model()
+    helper_endpoint = helper_tasks.ollama_endpoint(endpoints.list()) if body.helper and main else None
     if helper_endpoint:
-        return (helper_endpoint, config.task_model, helper_tasks.helper_options(),
-                helper_tasks.helper_think(config.task_model))
+        return helper_endpoint, main, helper_tasks.helper_options(main), helper_tasks.helper_think(main)
     endpoint = endpoints.get(body.endpoint_id)
     if not endpoint:
         raise HTTPException(404, "endpoint not found")
@@ -2235,10 +2441,11 @@ async def quick_complete(body: QuickCompleteBody):
     messages = [{"role": "user", "content": body.prompt}]
     try:
         if remote_rules.applies_to(endpoint, _all_endpoints):
-            text = await _ruled_collected(endpoint, api_key, model, messages, options=options, think=think)
+            text = await _ruled_collected(endpoint, api_key, model, messages, options=options, think=think,
+                                          notes_cut_off=False)
         else:
             text = await screen_checks.checked_collected(model, messages, run_chat_collected(
-                endpoint.base_url, api_key, model, messages, options=options, think=think))
+                endpoint.base_url, api_key, model, messages, options=options, think=think, notes_cut_off=False))
     except (RuntimeError, ValueError) as e:
         raise HTTPException(502, str(e))
     text = helper_tasks.clean_reply(text)
@@ -2396,12 +2603,19 @@ class ModelChoiceBody(BaseModel):
 def _choice_view(choice: ModelChoice) -> dict:
     return {"endpoint_id": choice.endpoint_id, "model": choice.model}
 
+NOTHING_CHOSEN = {"endpoint_id": "", "model": ""}
+
 @router.get("/model-choice")
 async def get_model_choice():
-    choice = model_choice.get()
-    if not choice.is_auto and not _may_use_model(choice.model):
-        return _choice_view(ModelChoice())
-    return _choice_view(choice)
+    choice = model_choice.stored()
+    if choice is None:
+        return NOTHING_CHOSEN
+    if choice.is_auto:
+        return _choice_view(choice)
+    renamed = _renamed_target(choice.endpoint_id, choice.model)
+    if renamed is None or not _may_use_model(renamed[1]):
+        return NOTHING_CHOSEN
+    return _choice_view(ModelChoice(endpoint_id=renamed[0], model=renamed[1]))
 
 @router.put("/model-choice")
 async def set_model_choice(body: ModelChoiceBody):
@@ -2418,12 +2632,13 @@ class AutoModelBody(BaseModel):
 
 async def _auto_model_view() -> dict:
     usable = await _usable_models()
-    sources = _role_sources()
+    sources = _role_sources(usable)
     picks = {}
     for role in auto_model.ROLES:
-        pick = auto_model.choose(role, usable, sources)
+        pick = await _role_pick(role, usable, sources)
         picks[role] = {"model": pick.model, "filled_by": pick.filled_by} if pick else None
-    return {"roles": sources.configured, "picks": picks}
+    local = sorted({model["id"] for model in usable if _is_a_local_model(model)})
+    return {"roles": auto_model_settings.roles(), "picks": picks, "local_models": local}
 
 @router.get("/auto-model")
 async def get_auto_model():

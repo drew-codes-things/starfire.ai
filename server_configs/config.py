@@ -1,6 +1,27 @@
+import json
+import logging
 import os
+from typing import ClassVar
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
+
+
+def _names_map(setting: str, raw: str) -> dict[str, str]:
+    if not raw.strip():
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except ValueError as error:
+        logger.warning("%s is not JSON, so it is ignored: %s", setting, error)
+        return {}
+    if not isinstance(parsed, dict):
+        logger.warning("%s must be a JSON object of names, so it is ignored", setting)
+        return {}
+    return {key: value.strip() for key, value in parsed.items()
+            if isinstance(key, str) and isinstance(value, str) and value.strip()}
+
 
 class AppConfig(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -12,6 +33,11 @@ class AppConfig(BaseSettings):
     cookie_secure: bool = True
     task_model: str = ""
     task_num_ctx: int = 24576
+    model_labels: str = ""
+    hidden_models: str = ""
+    model_renames: str = ""
+    side_model: str = ""
+    side_model_label: str = ""
     own_tools_models: str = "Arty,assistant-core,arty/*"
     inline_media_prefixes: str = "/arty-files/"
     arty_base_url: str = ""
@@ -60,6 +86,33 @@ class AppConfig(BaseSettings):
 
     def remote_tool_names(self) -> list[str]:
         return [name.strip() for name in self.remote_tools.split(",") if name.strip()]
+
+    SIDE_MODEL_PLACEHOLDER: ClassVar[str] = "{SIDE_MODEL}"
+
+    def side_model_id(self) -> str:
+        return self.side_model.strip()
+
+    def with_side_model(self, text: str) -> str:
+        side = self.side_model_id()
+        return text.replace(self.SIDE_MODEL_PLACEHOLDER, side) if side else text
+
+    def labels(self) -> dict[str, str]:
+        side, side_label = self.side_model_id(), self.side_model_label.strip()
+        side_labels = {side: side_label} if side and side_label else {}
+        return {**side_labels, **_names_map("MODEL_LABELS", self.model_labels)}
+
+    def hidden_model_patterns(self) -> list[str]:
+        patterns = [p.strip() for p in self.hidden_models.split(",") if p.strip()]
+        side = self.side_model_id()
+        return patterns + [side] if side and side not in patterns else patterns
+
+    def renamed(self, model: str) -> str:
+        renames = _names_map("MODEL_RENAMES", self.model_renames)
+        target = self.with_side_model(renames.get(model, model))
+        return model if self.SIDE_MODEL_PLACEHOLDER in target else target
+
+    def voice_rules_text(self) -> str:
+        return self.with_side_model(self.model_voices)
 
     def voices_folder(self) -> str:
         return self.model_voices_dir or os.path.join(self.data_dir, "voices")

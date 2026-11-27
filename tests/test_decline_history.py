@@ -16,13 +16,13 @@ import test_app_keys
 import test_remote_rules
 import user_data
 from test_app_keys import make_key, ruled_ask
-from test_remote_rules import FRIEND_MODEL, chat_messages, login
+from test_remote_rules import REMOTE_A_MODEL, chat_messages, login
 
 clock = test_app_keys.clock
 servers = test_app_keys.servers
 app = test_app_keys.app
 admin = test_app_keys.admin
-friend = test_app_keys.friend
+remote_a = test_app_keys.remote_a
 arty_rules = test_app_keys.arty_rules
 connections = test_remote_rules.connections
 
@@ -64,7 +64,7 @@ def sent_texts(messages):
 
 
 @pytest.mark.parametrize("stream", [False, True])
-def test_an_exchange_arty_leaves_out_never_reaches_the_model(app, admin, friend, servers, arty_rules, leaving_out,
+def test_an_exchange_arty_leaves_out_never_reaches_the_model(app, admin, remote_a, servers, arty_rules, leaving_out,
                                                              stream):
     answered = ruled_ask(app, make_key(admin)["key"], stream=stream, messages=HISTORY)
     assert answered.status_code == 200, answered.text
@@ -75,7 +75,7 @@ def test_an_exchange_arty_leaves_out_never_reaches_the_model(app, admin, friend,
 
 
 @pytest.mark.parametrize("left_out", [MISSING, [2], [-1], ["0"], 0, True])
-def test_rules_that_do_not_say_which_exchanges_to_leave_out_are_refused(app, admin, friend, servers, arty_rules,
+def test_rules_that_do_not_say_which_exchanges_to_leave_out_are_refused(app, admin, remote_a, servers, arty_rules,
                                                                         leaving_out, left_out):
     leaving_out.left_out = left_out
     refused = ruled_ask(app, make_key(admin)["key"], messages=HISTORY)
@@ -83,7 +83,7 @@ def test_rules_that_do_not_say_which_exchanges_to_leave_out_are_refused(app, adm
     assert servers.chats == []
 
 
-def test_a_conversation_with_no_answered_history_needs_no_left_out(app, admin, friend, servers, arty_rules,
+def test_a_conversation_with_no_answered_history_needs_no_left_out(app, admin, remote_a, servers, arty_rules,
                                                                    monkeypatch):
     async def old_brain(method, path, json_body=None, **_):
         return {"system": "You are Arty.", "declined": None, "approvals": True}
@@ -92,14 +92,14 @@ def test_a_conversation_with_no_answered_history_needs_no_left_out(app, admin, f
 
 
 def test_the_web_chat_never_sends_an_exchange_arty_leaves_out(app, connections, leaving_out, monkeypatch):
-    friend, _, _, _ = connections
+    remote_a, _, _, _ = connections
     sent = []
 
     async def plain(base_url, api_key, model, messages, system, options):
         sent.append(messages)
         yield chat_stream._sse_line({"done": True})
     monkeypatch.setattr(routes, "stream_chat", plain)
-    response = chat_messages(login(app, "admin@example.com"), friend.id, FRIEND_MODEL, HISTORY)
+    response = chat_messages(login(app, "admin@example.com"), remote_a.id, REMOTE_A_MODEL, HISTORY)
     assert response.status_code == 200, response.text
     texts = sent_texts(sent[-1])
     assert not any(left in text for left in LEFT_OUT_TEXTS for text in texts)
@@ -108,7 +108,7 @@ def test_the_web_chat_never_sends_an_exchange_arty_leaves_out(app, connections, 
 
 def test_a_task_run_on_a_ruled_connection_never_sends_an_exchange_arty_leaves_out(app, connections, leaving_out,
                                                                                     monkeypatch):
-    friend, _, _, _ = connections
+    remote_a, _, _, _ = connections
     sent = []
 
     async def run_chat_collected(base_url, api_key, model, messages, system=None, **settings):
@@ -116,9 +116,9 @@ def test_a_task_run_on_a_ruled_connection_never_sends_an_exchange_arty_leaves_ou
         return "done"
     import agent_loop
     monkeypatch.setattr(agent_loop, "run_chat_collected", run_chat_collected)
-    endpoint = routes.endpoints.get(friend.id)
+    endpoint = routes.endpoints.get(remote_a.id)
     with user_data.run_as(auth_routes.users.find_by_email("admin@example.com").id):
-        assert asyncio.run(routes._ruled_collected(endpoint, "sk-PLACEHOLDER", FRIEND_MODEL, HISTORY)) == "done"
+        assert asyncio.run(routes._ruled_collected(endpoint, "sk-PLACEHOLDER", REMOTE_A_MODEL, HISTORY)) == "done"
     texts = sent_texts(sent[-1])
     assert not any(left in text for left in LEFT_OUT_TEXTS for text in texts)
     assert texts[-3:] == ["hello", "Hi.", "new question"]
@@ -132,7 +132,7 @@ def on_guard_thread(names, function):
 
 
 def test_a_collected_reply_is_checked_for_arty_s_rules_off_the_event_loop(app, connections, leaving_out, monkeypatch):
-    friend, _, _, _ = connections
+    remote_a, _, _, _ = connections
     names = []
 
     async def run_chat_collected(base_url, api_key, model, messages, system=None, **settings):
@@ -140,9 +140,9 @@ def test_a_collected_reply_is_checked_for_arty_s_rules_off_the_event_loop(app, c
     import agent_loop
     monkeypatch.setattr(agent_loop, "run_chat_collected", run_chat_collected)
     monkeypatch.setattr(remote_rules, "without_rules_text", on_guard_thread(names, remote_rules.without_rules_text))
-    endpoint = routes.endpoints.get(friend.id)
+    endpoint = routes.endpoints.get(remote_a.id)
     with user_data.run_as(auth_routes.users.find_by_email("admin@example.com").id):
-        assert asyncio.run(routes._ruled_collected(endpoint, "sk-PLACEHOLDER", FRIEND_MODEL, HISTORY)) == "done"
+        assert asyncio.run(routes._ruled_collected(endpoint, "sk-PLACEHOLDER", REMOTE_A_MODEL, HISTORY)) == "done"
     assert names and all(name.startswith(remote_rules.GUARD_THREAD_NAME) for name in names)
 
 

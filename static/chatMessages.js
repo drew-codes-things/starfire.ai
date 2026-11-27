@@ -209,7 +209,7 @@ function addListenButton(actions, getText) {
   btn.type = 'button';
   btn.className = 'line-action-btn';
   labelActionButton(btn, 'listen', 'Read aloud');
-  btn.onclick = () => speakText(getText());
+  btn.onclick = () => speakText(withoutCutOffNote(getText()));
   actions.appendChild(btn);
 }
 
@@ -505,7 +505,7 @@ function autosizeEditTextarea(ta) {
 
 function renderStaticMessage(role, msg, idx) {
   const text = role === 'user' ? (msg.display ?? msg.content) : msg.content;
-  const { row, content, actions } = appendMessageRow(role, idx, msg.model ? replyModelLabel(msg) : msg.model, msg.files, msg.attachments, msg.created);
+  const { row, content, actions } = appendMessageRow(role, idx, msg.model ? replyModelLabel({ ...msg, model: nameForModelId(msg.model, models) }) : msg.model, msg.files, msg.attachments, msg.created);
   if (role === 'ai') renderAiContent(content, text, msg.code_checks);
   else content.textContent = text;
   addActionButtons(role, row, actions, idx);

@@ -37,7 +37,7 @@ Arty works without the other two. Arty CLI needs Arty. starfire.ai works with ot
 
 ## Looking at your screen
 
-With the Arty Desktop link on, an admin can ask the chat to "look at my discord": Arty asks you to Allow a screenshot and the model sees it. If ArtyEngine says the chat model cannot see pictures, a vision model on the same connection or on a connection inside the home network (never a `remote/` model, a friend's or other outside connection, or one under Arty's rules) describes the screenshot instead, and the step line names it; if there is none, nothing is captured and the chat says so. See [Set up starfire Desktop](../desktop/README.md#set-up-starfire-desktop).
+With the Arty Desktop link on, an admin can ask the chat to "look at my discord": Arty asks you to Allow a screenshot and the model sees it. If ArtyEngine says the chat model cannot see pictures, a vision model on the same connection or on a connection inside the home network (never a `remote/` model, an outside connection, or one under Arty's rules) describes the screenshot instead, and the step line names it; if there is none, nothing is captured and the chat says so. See [Set up starfire Desktop](../desktop/README.md#set-up-starfire-desktop).
 
 ## Linking starfire Desktop to Arty Desktop
 
@@ -68,5 +68,5 @@ and runs only after you allow it; once anything from outside has entered the rep
 the screen or a step's result), starfire shows its own approval card first as well. A reply may take at most 8 steps.
 Remote and ruled connections, `remote/` models, cloud models (`-cloud` or `:cloud` in the name), small models,
 ordinary accounts, `/v1` and scheduled tasks never get the tool. When an admin in starfire Desktop is not offered it,
-the model is told why (not linked, Arty Desktop not running, screen control off, a cloud, remote or friend model, a
+the model is told why (not linked, Arty Desktop not running, screen control off, a cloud or remote model, a
 model too small) so it can say what to change. See [Control your PC](../desktop/README.md#6b-control-your-pc).

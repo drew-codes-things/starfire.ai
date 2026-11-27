@@ -562,12 +562,96 @@ function isListedChoice(choice, listed) {
   return !!name && listed.some(m => m.id === name && m.endpoint_id === choice.endpoint_id);
 }
 
+const ARTY_MODEL_ID = 'Arty';
+
+function isArtyEntry(model) {
+  return !!model && model.id === ARTY_MODEL_ID && model.own_tools === true;
+}
+
+function defaultChoice(listed) {
+  const arty = listed.find(isArtyEntry);
+  return arty ? { endpoint_id: arty.endpoint_id, model: arty.id } : firstUsableChoice(listed);
+}
+
+const REMOTE_MODEL_PREFIX = 'remote/';
+const EMBEDDING_NAME = /embed/i;
+
+function runsOnALocalModel(model) {
+  return model.remote !== true && !String(model.id).startsWith(REMOTE_MODEL_PREFIX);
+}
+
+function firstUsableChoice(listed) {
+  const entries = [PICKER_MODE_ARTY, PICKER_MODE_CHOSEN]
+    .flatMap(mode => modelMenuEntries(listed, '', mode))
+    .filter(m => !m.heading && !isAutoChoice(m) && !EMBEDDING_NAME.test(m.id));
+  const first = entries.find(runsOnALocalModel) || entries[0];
+  return first ? { endpoint_id: first.endpoint_id, model: first.id } : AUTO_CHOICE;
+}
+
 function modelChoiceToShow(chat, accountChoice, listed) {
+  const autoOffered = offersArty(listed) || !(listed || []).length;
   for (const choice of [chat, accountChoice]) {
-    if (isAutoChoice(choice)) return AUTO_CHOICE;
+    if (isAutoChoice(choice) && autoOffered) return AUTO_CHOICE;
     if (isListedChoice(choice, listed)) return { endpoint_id: choice.endpoint_id, model: choice.model ?? choice.id };
   }
-  return AUTO_CHOICE;
+  return defaultChoice(listed);
+}
+
+const DOWNLOAD_PREFIX = 'hf.co/';
+const DOWNLOAD_FORMAT_SUFFIX = /-gguf$/i;
+
+function shortModelName(id) {
+  const name = String(id || '');
+  const served = name.indexOf('/' + DOWNLOAD_PREFIX);
+  if (served > 0) return name.slice(0, served + 1) + shortModelName(name.slice(served + 1));
+  if (!name.startsWith(DOWNLOAD_PREFIX)) return name;
+  const file = name.slice(name.lastIndexOf('/') + 1);
+  const tag = file.indexOf(':');
+  return (tag >= 0 ? file.slice(0, tag) : file).replace(DOWNLOAD_FORMAT_SUFFIX, '');
+}
+
+function modelDisplayName(model) {
+  if (!model) return '';
+  if (isAutoChoice(model)) return AUTO_MODEL_NAME;
+  return model.label || shortModelName(model.id);
+}
+
+function autoRoleChoices(listed, allowed = null) {
+  const choices = new Map();
+  for (const model of listed || []) {
+    const offered = !Array.isArray(allowed) || (allowed.includes(model.id) && model.remote !== true && model.own_tools !== true);
+    if (choices.has(model.id) || !offered) continue;
+    const throughArty = model.own_tools === true && !isArtyEntry(model);
+    const where = model.remote === true ? ' (remote)' : throughArty ? ' (through Arty)' : '';
+    choices.set(model.id, { id: model.id, text: modelDisplayName(model) + where });
+  }
+  return [...choices.values()];
+}
+
+const CONTEXT_PARAM = 'num_ctx';
+
+function fixedContextOf(model) {
+  const size = model && model.fixed_context;
+  return Number.isInteger(size) && size > 0 ? size : 0;
+}
+
+function fixedContextNote(size) {
+  return `Fixed at ${size.toLocaleString('en-GB')} for this model, so it stays loaded instead of restarting for each chat.`;
+}
+
+function paramFieldState(key, chosen, model) {
+  const fixed = key === CONTEXT_PARAM ? fixedContextOf(model) : 0;
+  if (fixed) return { value: String(fixed), disabled: true, note: fixedContextNote(fixed) };
+  return { value: chosen[key] ?? '', disabled: false, note: '' };
+}
+
+function chatOptionsFor(chosen, keys, model) {
+  const options = {};
+  for (const key of keys) {
+    if (key === CONTEXT_PARAM && fixedContextOf(model)) continue;
+    if (typeof chosen[key] === 'number') options[key] = chosen[key];
+  }
+  return Object.keys(options).length ? options : undefined;
 }
 
 function autoPickLabel(modelName, role) {
@@ -578,15 +662,24 @@ function replyModelLabel(message) {
   return autoPickLabel(message.model || '', message.auto);
 }
 
-const PICKER_MODE_AUTO = 'auto';
+const PICKER_MODE_ARTY = 'arty';
 const PICKER_MODE_CHOSEN = 'chosen';
+const PICKER_TABS = Object.freeze([
+  Object.freeze({ mode: PICKER_MODE_ARTY, name: 'Arty' }),
+  Object.freeze({ mode: PICKER_MODE_CHOSEN, name: 'Choose a model' }),
+]);
 
 function autoModelEntry() {
   return { id: AUTO_MODEL_ID, endpoint_id: AUTO_MODEL_ID, provider: AUTO_MODEL_ID };
 }
 
-function pickerMode(current) {
-  return !current || isAutoChoice(current) ? PICKER_MODE_AUTO : PICKER_MODE_CHOSEN;
+function pickerMode(current, listed = null) {
+  if (Array.isArray(listed) && !offersArty(listed)) return PICKER_MODE_CHOSEN;
+  return !current || isAutoChoice(current) || isArtyEntry(current) ? PICKER_MODE_ARTY : PICKER_MODE_CHOSEN;
+}
+
+function offersArty(listed) {
+  return (listed || []).some(m => m.own_tools === true || (runsOnALocalModel(m) && !EMBEDDING_NAME.test(m.id)));
 }
 
 function autoMatchesSearch(query) {
@@ -594,7 +687,12 @@ function autoMatchesSearch(query) {
 }
 
 function modelMatchesSearch(model, query) {
-  return !query || model.id.toLowerCase().includes(query) || (model.provider || '').toLowerCase().includes(query);
+  return !query || model.id.toLowerCase().includes(query) || modelDisplayName(model).toLowerCase().includes(query)
+    || (model.provider || '').toLowerCase().includes(query);
+}
+
+function labelledFirst(models) {
+  return [...models.filter(m => m.label), ...models.filter(m => !m.label)];
 }
 
 function artyServers(listed) {
@@ -627,12 +725,17 @@ function distinctModels(listed) {
   return kept.map(m => (serversPerName.get(m.id) > 1 ? { ...m, server_note: `server ${numbers.get(m.endpoint_id)}` } : m));
 }
 
-function modelMenuEntries(listed, query) {
+function modelMenuEntries(listed, query, mode = PICKER_MODE_ARTY) {
   const search = (query || '').trim().toLowerCase();
-  const autoShown = autoMatchesSearch(search) ? [autoModelEntry()] : [];
   const { local, remote } = splitByRemote(distinctModels(listed).filter(m => modelMatchesSearch(m, search)));
   const remoteShown = remote.length ? [{ heading: REMOTE_SECTION }, ...remote] : [];
-  return [...autoShown, ...local, ...remoteShown];
+  if (mode === PICKER_MODE_CHOSEN || !offersArty(listed)) return [...labelledFirst(local.filter(m => !isArtyEntry(m))), ...remoteShown];
+  const autoShown = autoMatchesSearch(search) ? [autoModelEntry()] : [];
+  return [...local.filter(isArtyEntry), ...autoShown, ...remoteShown];
+}
+
+function nameForModelId(id, listed) {
+  return modelDisplayName((listed || []).find(m => m.id === id) || { id });
 }
 
 function artyMemoryRows(entities, query) {
@@ -690,6 +793,21 @@ function offlineNotice(model) {
   return `${model.id} is offline right now (${model.connection || 'its connection'}). Pick another model, or try again when it is back.`;
 }
 
+const CUT_OFF_NOTE = '\n\n(This reply hit the length limit and was cut off here. Use Continue to carry on.)';
+
+const THINKING_ONLY_NOTE = 'The model used its whole length limit on thinking and wrote no answer. Try again or ask for a shorter answer.';
+
+function withoutCutOffNote(text) {
+  if (typeof text !== 'string') return text;
+  const kept = text.trimEnd();
+  if ([THINKING_ONLY_NOTE, CUT_OFF_NOTE.trim()].includes(kept.trim())) return '';
+  return kept.endsWith(CUT_OFF_NOTE) ? kept.slice(0, -CUT_OFF_NOTE.length) : text;
+}
+
+function isCutOffNote(delta) {
+  return delta === CUT_OFF_NOTE || delta === THINKING_ONLY_NOTE;
+}
+
 function sameModelSet(before, after) {
   const keys = list => new Set((list || []).map(m => `${m.endpoint_id}\u0000${m.id}`));
   const left = keys(before);
@@ -697,9 +815,15 @@ function sameModelSet(before, after) {
   return left.size === right.size && [...left].every(key => right.has(key));
 }
 
+function persistedChoice(choice) {
+  if (!choice || choice.persist !== true || !choice.model) return null;
+  return { endpoint_id: choice.endpoint_id, model: choice.model };
+}
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    isLocalMediaUrl, isCodeLanguageClass, toolOutcome, toolOutcomeLine,
+    persistedChoice,
+    isLocalMediaUrl, isCodeLanguageClass, toolOutcome, toolOutcomeLine, CUT_OFF_NOTE, THINKING_ONLY_NOTE, withoutCutOffNote, isCutOffNote,
     modelAccessSummary, OFFLINE_WORD, isOfflineModel, withoutOffline, offlineTooltip, offlineNotice, sameModelSet,
     groupModelsByConnection, REMOTE_SECTION, splitByRemote, accessSections, accessMatchesSearch, ticksFromAccess, modelListToSave, modelAccessCount,
     accessBoxState, accessModelTags, toggleModelTick, switchEverything, droppedRestrictedNote, keptControlsShown, selectShown,
@@ -715,8 +839,10 @@ if (typeof module !== 'undefined' && module.exports) {
     showListLoading,
     failureMessage,
     NO_EMAIL_ACCOUNTS, ruleAccountChoices,
-    AUTO_MODEL_ID, AUTO_MODEL_NAME, AUTO_MODEL_HINT, AUTO_CHOICE, isAutoChoice, modelChoiceToShow, autoPickLabel, replyModelLabel,
-    autoModelEntry, PICKER_MODE_AUTO, PICKER_MODE_CHOSEN, pickerMode, distinctModels, modelMenuEntries,
+    AUTO_MODEL_ID, AUTO_MODEL_NAME, AUTO_MODEL_HINT, AUTO_CHOICE, isAutoChoice, modelChoiceToShow,
+    fixedContextNote, paramFieldState, chatOptionsFor, autoRoleChoices, autoPickLabel, replyModelLabel,
+    autoModelEntry, PICKER_MODE_ARTY, PICKER_MODE_CHOSEN, PICKER_TABS, pickerMode, offersArty, distinctModels, modelMenuEntries,
+    ARTY_MODEL_ID, isArtyEntry, shortModelName, modelDisplayName, nameForModelId,
     BACKEND_RUNS_ON_ITS_OWN, NO_LOCAL_OLLAMA, FOUND_NOT_ADDED, backendStatusPlan, scanEndpointBody, scanSummary, addedLocalMessage,
     artyMemoryRows, connectionHealthBadge,
   };

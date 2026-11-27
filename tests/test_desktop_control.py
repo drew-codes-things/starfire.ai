@@ -657,7 +657,7 @@ def test_a_cloud_or_other_remote_host_is_never_offered_the_tool_while_the_look_s
 def test_a_remote_model_through_a_local_connection_is_never_offered_the_tool(app, offered):
     engine = routes.endpoints.add("http://192.168.1.13:8080/v1", kind="api-key")
     admin = login(app, "admin@example.com")
-    chat(admin, engine.id, model="remote/starfire/friend-model", desktop_control=True)
+    chat(admin, engine.id, model="remote/starfire/remote-model-a", desktop_control=True)
     chat(admin, engine.id, model=LOCAL_MODEL, desktop_control=True)
     assert offered[0].tools is None
     assert offered[1].tools == {TOOL}
@@ -694,26 +694,26 @@ class FakeBrain:
 
 
 def test_a_connection_under_arty_s_rules_is_never_offered_the_tool_even_on_a_home_address(app, offered, monkeypatch):
-    friend = routes.endpoints.add("http://192.168.1.50:8080/v1", kind="api-key")
-    routes.api_keys.save(friend.id, "sk-PLACEHOLDER")
-    monkeypatch.setattr(config, "remote_rules_connections", friend.id)
+    remote_a = routes.endpoints.add("http://192.168.1.50:8080/v1", kind="api-key")
+    routes.api_keys.save(remote_a.id, "sk-PLACEHOLDER")
+    monkeypatch.setattr(config, "remote_rules_connections", remote_a.id)
     brain = FakeBrain()
     monkeypatch.setattr(remote_rules.arty_devices, "ask_brain", brain)
-    chat(login(app, "admin@example.com"), friend.id, model="friend-model", tools=["search_web"], desktop_control=True,
+    chat(login(app, "admin@example.com"), remote_a.id, model="remote-model-a", tools=["search_web"], desktop_control=True,
          desktop_screen=True)
     assert brain.asked
     assert TOOL not in (offered[0].tools or set()) and SCREEN not in (offered[0].tools or set())
 
 
 def test_another_connection_on_the_ruled_server_is_not_local_either(app, monkeypatch):
-    friend = routes.endpoints.add("http://192.168.1.50:8080/v1", kind="api-key")
+    remote_a = routes.endpoints.add("http://192.168.1.50:8080/v1", kind="api-key")
     same_box = routes.endpoints.add("http://192.168.1.50:11434", kind="ollama")
     home = routes.endpoints.add("http://192.168.1.13:11434", kind="ollama")
-    monkeypatch.setattr(config, "remote_rules_connections", friend.id)
-    assert not routes._runs_on_a_local_model(friend, LOCAL_MODEL)
+    monkeypatch.setattr(config, "remote_rules_connections", remote_a.id)
+    assert not routes._runs_on_a_local_model(remote_a, LOCAL_MODEL)
     assert not routes._runs_on_a_local_model(same_box, LOCAL_MODEL)
     assert routes._runs_on_a_local_model(home, LOCAL_MODEL)
-    assert not routes._runs_on_a_local_model(home, "remote/starfire/friend-model")
+    assert not routes._runs_on_a_local_model(home, "remote/starfire/remote-model-a")
 
 
 NOTE_START = "You cannot control the user's PC in this chat right now"
@@ -741,14 +741,14 @@ def test_an_admin_in_starfire_desktop_is_told_why_the_page_could_not_offer_contr
     assert "only take screenshots" in note
 
 
-def test_a_remote_or_friend_model_is_named_as_the_reason(app, offered, cloud):
+def test_a_remote_model_is_named_as_the_reason(app, offered, cloud):
     engine = routes.endpoints.add("http://192.168.1.13:8080/v1", kind="api-key")
     admin = login(app, "admin@example.com")
     chat(admin, cloud.id, model="gpt-4o", desktop_control=True, desktop_screen=True)
-    chat(admin, engine.id, model="remote/starfire/friend-model", desktop_control=True)
+    chat(admin, engine.id, model="remote/starfire/remote-model-a", desktop_control=True)
     for run in offered:
         note = control_note(run)
-        assert "runs in the cloud or on a remote or friend's connection" in note
+        assert "runs in the cloud or on a remote connection" in note
         assert "pick a model that runs on this home network" in note
 
 
@@ -786,13 +786,13 @@ def test_an_ordinary_or_demoted_account_hears_nothing_about_the_pc(app, offered,
 
 
 def test_a_connection_under_arty_s_rules_hears_nothing_about_the_pc(app, offered, monkeypatch):
-    friend = routes.endpoints.add("http://192.168.1.50:8080/v1", kind="api-key")
-    routes.api_keys.save(friend.id, "sk-PLACEHOLDER")
-    monkeypatch.setattr(config, "remote_rules_connections", friend.id)
+    remote_a = routes.endpoints.add("http://192.168.1.50:8080/v1", kind="api-key")
+    routes.api_keys.save(remote_a.id, "sk-PLACEHOLDER")
+    monkeypatch.setattr(config, "remote_rules_connections", remote_a.id)
     monkeypatch.setattr(remote_rules.arty_devices, "ask_brain", FakeBrain())
     admin = login(app, "admin@example.com")
-    chat(admin, friend.id, model="friend-model", tools=["search_web"], desktop_control=True)
-    chat(admin, friend.id, model="friend-model", tools=["search_web"], desktop_control_off="not_linked")
+    chat(admin, remote_a.id, model="remote-model-a", tools=["search_web"], desktop_control=True)
+    chat(admin, remote_a.id, model="remote-model-a", tools=["search_web"], desktop_control_off="not_linked")
     assert len(offered) == 2
     assert all("PC" not in run.system for run in offered)
 

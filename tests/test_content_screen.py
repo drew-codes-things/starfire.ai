@@ -30,7 +30,7 @@ import term_starts
 import test_chat_routing
 from test_chat_routing import login
 import test_remote_rules
-from test_remote_rules import ABLITERATED_MODEL, FRIEND_MODEL, FakeBrain, chat, chat_messages, deltas
+from test_remote_rules import ABLITERATED_MODEL, REMOTE_A_MODEL, FakeBrain, chat, chat_messages, deltas
 
 app = test_chat_routing.app
 connections = test_remote_rules.connections
@@ -549,7 +549,7 @@ def test_the_request_check_runs_off_the_event_loop(monkeypatch):
         threads.append(threading.current_thread() is threading.main_thread())
         return checked(text, context)
     monkeypatch.setattr(screen_checks.content_screen, "sexual_with_minors", recording)
-    assert run(screen_checks.declined_request(FRIEND_MODEL, [{"role": "user", "content": "hello"}])) is None
+    assert run(screen_checks.declined_request(REMOTE_A_MODEL, [{"role": "user", "content": "hello"}])) is None
     assert threads == [False]
 
 
@@ -646,7 +646,7 @@ def test_an_unrestricted_model_gets_arty_s_closer_look_on_any_connection(app, co
     assert deltas(chat(admin, local.id, ABLITERATED_MODEL, text=CLOSER_LOOK_REQUEST)) == content_screen.MINORS_REPLY
     assert asked[0]["said"] == CLOSER_LOOK_REQUEST and asked[0]["unrestricted"] is True
     assert calls == []
-    assert content_screen.MINORS_REPLY not in deltas(chat(admin, local.id, FRIEND_MODEL, text=CLOSER_LOOK_REQUEST))
+    assert content_screen.MINORS_REPLY not in deltas(chat(admin, local.id, REMOTE_A_MODEL, text=CLOSER_LOOK_REQUEST))
     assert len(asked) == 1
 
 
@@ -679,12 +679,12 @@ def test_quick_complete_on_an_unruled_connection_is_guarded(app, connections, mo
         return "Mia, 12, undressed and they had sex."
     monkeypatch.setattr(agent_loop, "run_chat_collected", collected)
     admin = login(app, "admin@example.com")
-    refused = admin.post("/api/quick-complete", json={"endpoint_id": local.id, "model": FRIEND_MODEL, "prompt": cases.ABUSE[0][1]})
+    refused = admin.post("/api/quick-complete", json={"endpoint_id": local.id, "model": REMOTE_A_MODEL, "prompt": cases.ABUSE[0][1]})
     assert refused.json()["text"] == content_screen.MINORS_REPLY
     assert seen == []
-    replied = admin.post("/api/quick-complete", json={"endpoint_id": local.id, "model": FRIEND_MODEL, "prompt": "continue"})
+    replied = admin.post("/api/quick-complete", json={"endpoint_id": local.id, "model": REMOTE_A_MODEL, "prompt": "continue"})
     assert replied.json()["text"] == content_screen.MINORS_REPLY
-    assert seen == [FRIEND_MODEL]
+    assert seen == [REMOTE_A_MODEL]
 
 
 def test_a_scheduled_task_on_an_unruled_connection_is_guarded(app, connections, monkeypatch):
@@ -703,11 +703,11 @@ def test_a_scheduled_task_on_an_unruled_connection_is_guarded(app, connections, 
     login(app, "admin@example.com")
     token = user_data.current_user_id.set(routes.auth_routes.users.find_by_email("admin@example.com").id)
     try:
-        assert run(routes._task_chat_fn(local.id, FRIEND_MODEL, cases.ABUSE[1][1], [], [])) == content_screen.MINORS_REPLY
-        assert run(routes._task_chat_fn(local.id, FRIEND_MODEL, "summarise the news", [], [])) == "fine"
+        assert run(routes._task_chat_fn(local.id, REMOTE_A_MODEL, cases.ABUSE[1][1], [], [])) == content_screen.MINORS_REPLY
+        assert run(routes._task_chat_fn(local.id, REMOTE_A_MODEL, "summarise the news", [], [])) == "fine"
     finally:
         user_data.current_user_id.reset(token)
-    assert seen == [FRIEND_MODEL]
+    assert seen == [REMOTE_A_MODEL]
 
 
 def abusive_model(monkeypatch):
@@ -723,11 +723,11 @@ def abusive_model(monkeypatch):
 def test_email_ai_actions_are_guarded(monkeypatch):
     seen = abusive_model(monkeypatch)
     monkeypatch.setattr(builtin_tools, "_may_read_own_data", lambda ctx: True)
-    ctx = SimpleNamespace(base_url="http://m", api_key=None, model=FRIEND_MODEL)
+    ctx = SimpleNamespace(base_url="http://m", api_key=None, model=REMOTE_A_MODEL)
     message = {"from": "a@example.com", "subject": "hi", "body": "see you at the match"}
     for action in ("summarize", "check_urgency", "draft_reply"):
         assert run(builtin_tools.email_ai_action(action, message, "", ctx)) == content_screen.MINORS_REPLY
-    assert seen == [FRIEND_MODEL] * 3
+    assert seen == [REMOTE_A_MODEL] * 3
 
 
 def test_email_rule_summaries_are_guarded(app, connections, monkeypatch):
@@ -742,19 +742,19 @@ def test_email_rule_summaries_are_guarded(app, connections, monkeypatch):
     login(app, "admin@example.com")
     token = user_data.current_user_id.set(routes.auth_routes.users.find_by_email("admin@example.com").id)
     try:
-        assert run(routes._email_rule_chat_fn(local.id, FRIEND_MODEL, "summarise this mail")) == content_screen.MINORS_REPLY
+        assert run(routes._email_rule_chat_fn(local.id, REMOTE_A_MODEL, "summarise this mail")) == content_screen.MINORS_REPLY
     finally:
         user_data.current_user_id.reset(token)
-    assert seen == [FRIEND_MODEL]
+    assert seen == [REMOTE_A_MODEL]
 
 
 def test_a_task_run_from_a_chat_is_guarded(monkeypatch):
     seen = abusive_model(monkeypatch)
-    ctx = SimpleNamespace(base_url="http://m", api_key=None, model=FRIEND_MODEL)
+    ctx = SimpleNamespace(base_url="http://m", api_key=None, model=REMOTE_A_MODEL)
     chat_fn = builtin_tools._make_task_chat_fn(ctx)
-    assert run(chat_fn(None, FRIEND_MODEL, "summarise the news", [], [])) == content_screen.MINORS_REPLY
-    assert run(chat_fn(None, FRIEND_MODEL, cases.ABUSE[0][1], [], [])) == content_screen.MINORS_REPLY
-    assert seen == [FRIEND_MODEL]
+    assert run(chat_fn(None, REMOTE_A_MODEL, "summarise the news", [], [])) == content_screen.MINORS_REPLY
+    assert run(chat_fn(None, REMOTE_A_MODEL, cases.ABUSE[0][1], [], [])) == content_screen.MINORS_REPLY
+    assert seen == [REMOTE_A_MODEL]
 
 
 def test_the_agent_loop_never_runs_a_tool_call_that_crosses_the_line(monkeypatch):

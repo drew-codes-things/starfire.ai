@@ -83,10 +83,11 @@ function renderParamGrid() {
     label.htmlFor = id;
     label.textContent = param.label;
     const input = document.createElement('input');
-    Object.assign(input, { id, type: 'number', step: param.step, placeholder: 'default' });
+    const field = paramFieldState(param.key, chatParams, currentModel());
+    Object.assign(input, { id, type: 'number', step: param.step, placeholder: 'default', disabled: field.disabled });
     if (param.min) input.min = param.min;
     if (param.max) input.max = param.max;
-    input.value = chatParams[param.key] ?? '';
+    input.value = field.value;
     input.addEventListener('input', () => {
       const value = input.value === '' ? null : Number(input.value);
       if (value === null || Number.isNaN(value)) delete chatParams[param.key];
@@ -94,15 +95,19 @@ function renderParamGrid() {
       onChatControlsEdited();
     });
     grid.append(label, input);
+    if (field.note) grid.append(paramNote(id, input, field.note));
   }
 }
 
+function paramNote(id, input, text) {
+  const note = document.createElement('p');
+  Object.assign(note, { id: id + '_note', className: 'settings-hint param-note', textContent: text });
+  input.setAttribute('aria-describedby', note.id);
+  return note;
+}
+
 function chatOptions() {
-  const options = {};
-  for (const { key } of CHAT_PARAMS) {
-    if (typeof chatParams[key] === 'number') options[key] = chatParams[key];
-  }
-  return Object.keys(options).length ? options : undefined;
+  return chatOptionsFor(chatParams, CHAT_PARAMS.map(param => param.key), currentModel());
 }
 
 function toggleControls(force) {
@@ -121,6 +126,7 @@ $('controlsSaveDefaultBtn').onclick = () => {
   saveDefaultChatControls(currentChatControls());
   showToast('Saved as your defaults for new chats');
 };
+els.modelList.addEventListener('change', renderParamGrid);
 renderParamGrid();
 updateControlsScope();
 

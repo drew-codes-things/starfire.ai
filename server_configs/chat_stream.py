@@ -1,10 +1,14 @@
+import asyncio
 import json
 import logging
 import math
+import re
 
 import httpx
 
-from ollama_runner import for_runner
+from main_model import main_model
+from helper_tasks import thinks_by_default
+from ollama_runner import fixed_context, for_runner
 from providers import _detect_provider, build_chat_url, build_headers, build_tools_param
 
 MAX_ERROR_CHARS = 500
@@ -22,6 +26,32 @@ class BrokenOffAfterSending(str):
 
 class NeverReachedServer(str):
     pass
+
+class TimedOut(BrokenOffAfterSending):
+    pass
+
+class NeverReachedInTime(NeverReachedServer):
+    pass
+
+CUT_OFF_KIND = "cut_off"
+CUT_OFF_NOTE = "\n\n(This reply hit the length limit and was cut off here. Use Continue to carry on.)"
+THINKING_ONLY_NOTE = ("The model used its whole length limit on thinking and wrote no answer. "
+                      "Try again or ask for a shorter answer.")
+LENGTH_LIMIT_REASONS = ("length", "max_tokens")
+MAIN_DOWN = "The main model couldn't answer just now ({reason}). Try again in a moment, or pick a different model in the model list."
+REASON_CHARS = 160
+UNREACHABLE_REASON = "the AI engine could not be reached"
+BROKEN_OFF_REASON = "the connection to the AI engine broke"
+ENGINE_PREFIX = "Ollama:"
+BUSY_CARD = re.compile(r"no room on the GPU for .+: every loaded model is busy"
+                       r"|is still answering another request with different settings")
+BUSY_CARD_WAIT_SECONDS = 5
+BUSY_CARD_RETRIES = 1
+CONNECT_TIMEOUTS = (httpx.ConnectTimeout, httpx.PoolTimeout)
+OUTPUT_KINDS = ("delta", "tool_calls")
+SERVER_FAULT_STATUS = 500
+REFUSED_STATUS = re.compile(r"^Ollama (\d{3}):")
+WINDOW_OVERFLOW = re.compile(r"context (size|length|window)|exceed_context_size|longer than the context", re.IGNORECASE)
 
 ROLE_FIELD = "role"
 OUTPUT_EVENT_TYPES = {"content_block_start", "content_block_delta"}
@@ -327,6 +357,8 @@ async def _iter_ollama(client: httpx.AsyncClient, url: str, headers: dict, paylo
                 if calls:
                     yield ("tool_calls", calls)
             if obj.get("done"):
+                if obj.get("done_reason") in LENGTH_LIMIT_REASONS:
+                    yield (CUT_OFF_KIND, obj["done_reason"])
                 usage = _ollama_usage(obj, payload)
                 if usage:
                     yield ("usage", usage)
@@ -396,7 +428,10 @@ async def _iter_anthropic(client: httpx.AsyncClient, url: str, headers: dict, pa
                 return
             elif event_type == "message_delta":
                 output_tokens = shapes.object(obj.get("usage"), "usage").get("output_tokens", output_tokens)
-                if shapes.object(obj.get("delta"), "delta").get("stop_reason") == "tool_use" and tool_blocks:
+                stop_reason = shapes.object(obj.get("delta"), "delta").get("stop_reason")
+                if stop_reason in LENGTH_LIMIT_REASONS:
+                    yield (CUT_OFF_KIND, stop_reason)
+                if stop_reason == "tool_use" and tool_blocks:
                     calls = []
                     for block in tool_blocks.values():
                         if not block["name"]:
@@ -501,6 +536,8 @@ async def _iter_openai(client: httpx.AsyncClient, url: str, headers: dict, paylo
                               "arguments": _parsed_arguments(slot["args_buf"])})
             if calls:
                 yield ("tool_calls", calls)
+        if finish_reason in LENGTH_LIMIT_REASONS:
+            yield (CUT_OFF_KIND, finish_reason)
 
         usage = _openai_usage(reported_usage, reported_timings)
         if usage:
@@ -530,9 +567,82 @@ def _hosted_params(provider: str, options: dict | None) -> dict:
     names = _HOSTED_PARAM_NAMES.get(provider, _HOSTED_PARAM_NAMES["openai"])
     return {names[key]: value for key, value in (options or {}).items() if key in names and value is not None}
 
+def fixed_context_for(base_url: str, model: str) -> int:
+    return fixed_context(model) if _detect_provider(base_url) == "ollama" else 0
+
+def is_the_main_on_its_engine(base_url: str, model: str) -> bool:
+    main = main_model()
+    return bool(main) and model == main and _detect_provider(base_url) == "ollama"
+
+def plain_reason(failure) -> str:
+    if isinstance(failure, NeverReachedServer):
+        return UNREACHABLE_REASON
+    if isinstance(failure, BrokenOffAfterSending):
+        return BROKEN_OFF_REASON
+    text = str(failure).strip()
+    refused = REFUSED_STATUS.match(text)
+    if refused:
+        text = f"the engine answered {refused.group(1)}:{text[refused.end():]}"
+    text = text.removeprefix(ENGINE_PREFIX).strip()
+    return text[:REASON_CHARS] or UNREACHABLE_REASON
+
+def main_down_text(failure) -> str:
+    return MAIN_DOWN.format(reason=plain_reason(failure))
+
+def is_a_model_failure(failure) -> bool:
+    if isinstance(failure, (TimedOut, NeverReachedInTime)) or is_a_busy_card(failure):
+        return False
+    if isinstance(failure, NeverReachedServer):
+        return True
+    if WINDOW_OVERFLOW.search(str(failure)):
+        return False
+    refused = REFUSED_STATUS.match(str(failure))
+    if refused:
+        return int(refused.group(1)) >= SERVER_FAULT_STATUS
+    return str(failure).startswith("Ollama:") or isinstance(failure, BrokenOffAfterSending)
+
+def is_a_busy_card(failure) -> bool:
+    return isinstance(failure, str) and bool(BUSY_CARD.search(failure))
+
+async def wait_for_a_busy_card(seconds: float) -> None:
+    await asyncio.sleep(seconds)
+
+async def _stream_waiting_out_a_busy_card(base_url: str, api_key: str | None, model: str, messages: list[dict],
+                                          system: str | None, options: dict | None, tools: list[dict] | None,
+                                          think: bool | None, max_bytes: int | None):
+    for attempt in range(BUSY_CARD_RETRIES + 1):
+        heard_output = False
+        busy = None
+        async for kind, payload in _stream_from(base_url, api_key, model, messages, system, options, tools, think,
+                                                max_bytes):
+            if kind == "error" and not heard_output and is_a_busy_card(payload) and attempt < BUSY_CARD_RETRIES:
+                busy = payload
+                break
+            heard_output = heard_output or kind in OUTPUT_KINDS
+            yield (kind, payload)
+        if busy is None:
+            return
+        logger.info("%s: the card was busy (%s); asking again in %s seconds", model, busy, BUSY_CARD_WAIT_SECONDS)
+        await wait_for_a_busy_card(BUSY_CARD_WAIT_SECONDS)
+
 async def stream_chat_once(base_url: str, api_key: str | None, model: str, messages: list[dict],
-                            system: str | None, options: dict | None, tools: list[dict] | None = None,
-                            think: bool | None = None, max_bytes: int | None = None):
+                           system: str | None, options: dict | None, tools: list[dict] | None = None,
+                           think: bool | None = None, max_bytes: int | None = None):
+    messages = without_length_limit_notes(messages)
+    is_the_main = is_the_main_on_its_engine(base_url, model)
+    heard_output = False
+    async for kind, payload in _stream_waiting_out_a_busy_card(base_url, api_key, model, messages, system, options,
+                                                               tools, think, max_bytes):
+        if kind == "error" and is_the_main and not heard_output and is_a_model_failure(payload):
+            logger.warning("%s failed before writing anything (%s); no other model answers in its place", model, payload)
+            yield (kind, main_down_text(payload))
+            return
+        heard_output = heard_output or kind in OUTPUT_KINDS
+        yield (kind, payload)
+
+async def _stream_from(base_url: str, api_key: str | None, model: str, messages: list[dict],
+                       system: str | None, options: dict | None, tools: list[dict] | None = None,
+                       think: bool | None = None, max_bytes: int | None = None):
     provider = _detect_provider(base_url)
     url = build_chat_url(base_url)
     headers = build_headers(api_key, base_url)
@@ -548,7 +658,7 @@ async def stream_chat_once(base_url: str, api_key: str | None, model: str, messa
                     "messages": _to_ollama_messages(_build_messages(messages, system)),
                     **({"options": options} if options else {}),
                     **({"tools": tools_param} if tools_param else {}),
-                    **({"think": think} if think is not None else {}),
+                    **({"think": think} if think is not None else {"think": False} if thinks_by_default(model) else {}),
                 })
                 async for item in _iter_ollama(client, url, headers, payload, max_bytes):
                     yield item
@@ -572,19 +682,49 @@ async def stream_chat_once(base_url: str, api_key: str | None, model: str, messa
                 }
                 async for item in _iter_openai_asking_for_usage(client, url, headers, payload, max_bytes):
                     yield item
+        except CONNECT_TIMEOUTS as e:
+            yield ("error", NeverReachedInTime(e))
         except CONNECT_PHASE_ERRORS as e:
             yield ("error", NeverReachedServer(e))
+        except httpx.TimeoutException as e:
+            yield ("error", TimedOut(e))
         except httpx.HTTPError as e:
             yield ("error", BrokenOffAfterSending(e))
 
 async def stream_chat(base_url: str, api_key: str | None, model: str, messages: list[dict],
                        system: str | None, options: dict | None):
+    wrote_an_answer = False
     async for kind, payload in stream_chat_once(base_url, api_key, model, messages, system, options):
         if kind == "delta":
+            wrote_an_answer = wrote_an_answer or bool(payload.strip())
             yield _sse_line({"delta": payload})
         elif kind == "usage":
             yield _sse_line({"usage": payload})
+        elif kind == CUT_OFF_KIND:
+            for event in cut_off_events(payload, wrote_an_answer):
+                yield _sse_line(event)
         elif kind == "error":
             yield _sse_line({"error": payload})
             return
     yield _sse_line({"done": True})
+
+
+def cut_off_note(wrote_an_answer: bool) -> str:
+    return CUT_OFF_NOTE if wrote_an_answer else THINKING_ONLY_NOTE
+
+
+def cut_off_events(reason: str, wrote_an_answer: bool) -> list[dict]:
+    return [{"delta": cut_off_note(wrote_an_answer)}, {CUT_OFF_KIND: reason}]
+
+
+def without_length_limit_note(text: str) -> str:
+    kept = text.rstrip()
+    if kept.strip() in (THINKING_ONLY_NOTE, CUT_OFF_NOTE.strip()):
+        return ""
+    return kept[:-len(CUT_OFF_NOTE)] if kept.endswith(CUT_OFF_NOTE) else text
+
+
+def without_length_limit_notes(messages: list[dict]) -> list[dict]:
+    return [{**message, "content": without_length_limit_note(message["content"])}
+            if message.get("role") == "assistant" and isinstance(message.get("content"), str) else message
+            for message in messages]

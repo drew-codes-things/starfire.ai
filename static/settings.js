@@ -102,11 +102,12 @@ async function refreshEndpointList() {
   }
 }
 
+const LOCAL_ONLY_ROLES = ['chat', 'code'];
 const AUTO_MODEL_ROLE_NAMES = {
+  chat: 'Default model',
+  code: 'Coding model',
   vision: 'Pictures and video',
-  code: 'Code',
   agent: 'Agent (reminders, phone, home)',
-  chat: 'Everything else',
 };
 
 function setAutoModelResult(text, cls = '') {
@@ -116,7 +117,8 @@ function setAutoModelResult(text, cls = '') {
 
 function automaticRoleText(pick) {
   if (!pick) return 'automatic (no model found)';
-  return `automatic (now ${pick.model})`;
+  const listed = onlineModels().find(m => m.id === pick.model);
+  return `automatic (now ${listed ? modelDisplayName(listed) : shortModelName(pick.model)})`;
 }
 
 function autoModelRoleRow(role, view) {
@@ -129,10 +131,12 @@ function autoModelRoleRow(role, view) {
   select.dataset.role = role;
   select.setAttribute('aria-label', `Model Arty Auto uses for ${AUTO_MODEL_ROLE_NAMES[role].toLowerCase()}`);
   select.append(new Option(automaticRoleText(view.picks[role]), ''));
-  const names = [...new Set(onlineModels().map(m => m.id))];
+  const choices = autoRoleChoices(onlineModels(), LOCAL_ONLY_ROLES.includes(role) ? view.local_models : null);
   const configured = view.roles[role] || '';
-  if (configured && !names.includes(configured)) select.append(new Option(`${configured} (not found, so Auto falls back)`, configured));
-  for (const id of names) select.append(new Option(id, id));
+  if (configured && !choices.some(choice => choice.id === configured)) {
+    select.append(new Option(`${configured} (not found, so Auto falls back)`, configured));
+  }
+  for (const choice of choices) select.append(new Option(choice.text, choice.id));
   select.value = configured;
   row.append(name, select);
   return row;

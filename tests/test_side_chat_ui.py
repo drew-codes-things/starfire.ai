@@ -30,7 +30,7 @@ def test_the_side_chat_banner_has_a_way_back_to_the_main_chat():
 def test_replies_in_a_side_chat_see_the_main_chat():
     app = read_app()
     assert "apiMessages(sideChatContext(sideChat, messages))" in app
-    assert "apiMessages(sideChatContext(sideChat, messages.slice(0, idx + 1)))" in app
+    assert "apiMessages(sideChatContext(sideChat, [...messages.slice(0, idx), { ...target, content: kept }]))" in app
 
 
 def test_side_chats_are_never_saved():

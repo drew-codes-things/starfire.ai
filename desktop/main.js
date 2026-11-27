@@ -7,9 +7,9 @@ const { loadSettings } = require('./src/settings');
 const { applyAutostart } = require('./src/autostart');
 const { acceleratorFromKeyEvent } = require('./src/shortcut');
 const { registerIpc } = require('./src/ipc');
-const { isPageBridgeChanged, registerWebBridge, registerVersionAnswer } = require('./src/webBridge');
+const { isPageBridgeChanged, registerWebBridge, registerVersionAnswer, registerReplyNotice } = require('./src/webBridge');
 const { isLocalPageUrl, isPermissionAllowed } = require('./src/navigation');
-const { isReplyFinished, shouldNotify, replyNotification } = require('./src/notify');
+const { shouldNotify, replyNotification } = require('./src/notify');
 const { parseLaunchArgs } = require('./src/launch');
 const { createWindowManager } = require('./src/windows');
 const { createTray } = require('./src/tray');
@@ -26,7 +26,6 @@ const TRAY_ICON_PATH = path.join(__dirname, 'assets', 'tray.png');
 const CONNECTED_PAUSE_MS = 700;
 const SETTINGS_PAGE = 'settings.html';
 const TRY_NEEDS_A_CLICK = { ok: false, error: 'Click Try it in this window to try the link.' };
-const CHAT_STREAM_FILTER = { urls: ['*://*/api/chat_stream*'] };
 const AUTO_LINK_EVERY_MS = 30000;
 
 let windows = null;
@@ -50,16 +49,16 @@ function installStarfireSession() {
   starfire.setPermissionCheckHandler((contents, permission, requestingOrigin, details) => (
     isPermissionAllowed(permission, requestingOrigin, controller.get().address, details)
   ));
-  starfire.webRequest.onCompleted(CHAT_STREAM_FILTER, (details) => {
-    const settings = controller.get();
-    if (!isReplyFinished(details, settings.address)) return;
-    const visible = windows.isMainVisible();
-    if (!shouldNotify({ enabled: settings.notifications, windowVisible: visible, windowFocused: windows.mainIsFocused() })) return;
-    if (!Notification.isSupported()) return;
-    const notification = new Notification(replyNotification());
-    notification.on('click', () => windows.showMain());
-    notification.show();
-  });
+}
+
+function showReplyNotice() {
+  const settings = controller.get();
+  const visible = windows.isMainVisible();
+  if (!shouldNotify({ enabled: settings.notifications, windowVisible: visible, windowFocused: windows.mainIsFocused() })) return;
+  if (!Notification.isSupported()) return;
+  const notification = new Notification(replyNotification());
+  notification.on('click', () => windows.showMain());
+  notification.show();
 }
 
 function installLocalSession() {
@@ -166,6 +165,7 @@ function startApp() {
 
   registerWebBridge({ ipcMain, controller, artyLink, isMainWindow: (event) => windows.isMainContents(event.sender) });
   registerVersionAnswer({ ipcMain, controller, isMainWindow: (event) => windows.isMainContents(event.sender), version: app.getVersion() });
+  registerReplyNotice({ ipcMain, controller, isMainWindow: (event) => windows.isMainContents(event.sender), onReplyReady: showReplyNotice });
 
   const registered = controller.start();
   if (!registered.ok) console.error(registered.error);

@@ -8,6 +8,10 @@ const WEB_CHANNELS = {
 };
 
 const VERSION_CHANNEL = 'starfire-web:version';
+const NOTICE_CHANNELS = {
+  offered: 'starfire-web:reply-notice',
+  ready: 'starfire-web:reply-ready',
+};
 const LOOK_FIELDS = ['app'];
 const OPEN_FIELDS = ['url', 'browser'];
 const CONTROL_FIELDS = ['action', 'arguments'];
@@ -120,4 +124,20 @@ function registerVersionAnswer({ ipcMain, controller, isMainWindow, version }) {
   });
 }
 
-module.exports = { WEB_CHANNELS, VERSION_CHANNEL, isBridgeOffered, isStarfirePage, isPageBridgeChanged, registerWebBridge, registerVersionAnswer };
+function registerReplyNotice({ ipcMain, controller, isMainWindow, onReplyReady }) {
+  function isMainStarfirePage(event) {
+    return isMainWindow(event) && isStarfirePage(event.senderFrame, controller.get().address);
+  }
+
+  ipcMain.on(NOTICE_CHANNELS.offered, (event) => {
+    event.returnValue = isMainStarfirePage(event);
+  });
+  ipcMain.on(NOTICE_CHANNELS.ready, (event) => {
+    if (isMainStarfirePage(event)) onReplyReady();
+  });
+}
+
+module.exports = {
+  WEB_CHANNELS, VERSION_CHANNEL, NOTICE_CHANNELS, isBridgeOffered, isStarfirePage, isPageBridgeChanged, registerWebBridge,
+  registerVersionAnswer, registerReplyNotice,
+};

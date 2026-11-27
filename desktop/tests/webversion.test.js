@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { WEB_CHANNELS, VERSION_CHANNEL, registerVersionAnswer, isPageBridgeChanged } = require('../src/webBridge');
+const { WEB_CHANNELS, VERSION_CHANNEL, NOTICE_CHANNELS, registerVersionAnswer, isPageBridgeChanged } = require('../src/webBridge');
 const { DEFAULT_SETTINGS, applySettingsPatch, loadSettings } = require('../src/settings');
 const os = require('node:os');
 
@@ -76,7 +76,8 @@ test('the preload hands the page the version alone, whether or not the Arty link
     assert.deepEqual(Object.keys(exposed.starfireDesktopApp), ['version']);
     assert.equal(exposed.starfireDesktopApp.version, '1.1.0');
     assert.deepEqual(Object.keys(exposed).sort(), allowed ? ['starfireDesktopApp', 'starfireDesktopLink'] : ['starfireDesktopApp']);
-    assert.deepEqual(sent, allowed ? [VERSION_CHANNEL, WEB_CHANNELS.allowed] : [VERSION_CHANNEL, WEB_CHANNELS.allowed, WEB_CHANNELS.unlinked]);
+    const linkChannels = allowed ? [WEB_CHANNELS.allowed] : [WEB_CHANNELS.allowed, WEB_CHANNELS.unlinked];
+    assert.deepEqual(sent, [VERSION_CHANNEL, ...linkChannels, NOTICE_CHANNELS.offered]);
   }
 });
 
@@ -91,7 +92,7 @@ test('the main process answers with its own app version', () => {
   const main = fs.readFileSync(path.join(ROOT, 'main.js'), 'utf8');
   assert.match(main, /registerVersionAnswer\(\{ ipcMain, controller, isMainWindow: \(event\) => windows\.isMainContents\(event\.sender\), version: app\.getVersion\(\) \}\)/);
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
-  assert.equal(pkg.version, '1.1.0');
+  assert.equal(pkg.version, '1.2.0');
 });
 
 test('the main process still makes no outside request for the version', () => {

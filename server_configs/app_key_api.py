@@ -24,7 +24,7 @@ import user_data
 from app_keys import (EVERY_MODEL, MAX_ENDPOINT_ID_CHARS, MAX_KEY_NAME_CHARS, MAX_MODEL_NAME_CHARS, AppKey,
                       AppKeyError, key_grants)
 from auth import LOCKOUT_SECONDS, LoginLimiter, client_address
-from chat_stream import (CONNECT_PHASE_ERRORS, REPLY_TOO_LONG, BrokenOffAfterSending, NeverReachedServer,
+from chat_stream import (CONNECT_PHASE_ERRORS, CUT_OFF_KIND, REPLY_TOO_LONG, BrokenOffAfterSending, NeverReachedServer,
                          stream_chat_once)
 from config import config
 from connection_health import CHECK_EVERY_SECONDS
@@ -44,6 +44,7 @@ upstream_transport: httpx.AsyncBaseTransport | None = None
 UPSTREAM_TIMEOUT = httpx.Timeout(600.0, connect=10.0)
 BEARER = "bearer"
 MAX_MESSAGES = 4096
+LENGTH_FINISH = "length"
 MAX_JSON_DEPTH = 64
 MAX_JSON_VALUES = 200_000
 MAX_RUNNING_PER_KEY = MAX_RUNNING_PER_ACCOUNT
@@ -260,7 +261,7 @@ async def list_models(request: Request):
     offered = [{"id": public_id(endpoint.id, name), "object": "model", "created": 0, "owned_by": "starfire",
                 "available": state.available}
                for endpoint, state in await checked_connections(granted_connections(key)) for name in model_names(state)
-               if may_offer(key, endpoint, state, name)]
+               if may_offer(key, endpoint, state, name) and not routes.is_hidden_model(name)]
     log_outcome(key, request.url.path, "", 200)
     return {"object": "list", "data": offered}
 
@@ -499,6 +500,9 @@ async def unless_stopped(work, request: Request, key: AppKey):
         await stop_task(task)
 
 
+STREAM_DONE = b"data: [DONE]\n\n"
+
+
 def sse(payload: dict) -> bytes:
     return f"data: {json.dumps(payload)}\n\n".encode()
 
@@ -671,12 +675,12 @@ class Reply:
                  "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}]}
         return {**chunk, "usage": usage} if usage else chunk
 
-    def whole(self, text: str, calls: list[dict], usage: dict | None) -> dict:
+    def whole(self, text: str, calls: list[dict], usage: dict | None, cut_off: bool = False) -> dict:
         message = {"role": "assistant", "content": text or None}
         if calls:
             message["tool_calls"] = [{k: v for k, v in call.items() if k != "index"} for call in calls]
         whole = {"id": self.id, "object": "chat.completion", "created": self.created, "model": self.model,
-                 "choices": [{"index": 0, "message": message, "finish_reason": "tool_calls" if calls else "stop"}]}
+                 "choices": [{"index": 0, "message": message, "finish_reason": finish_reason_of(calls, cut_off)}]}
         return {**whole, "usage": usage} if usage else whole
 
 
@@ -695,9 +699,15 @@ def log_starfire_failure(key: AppKey, model: str) -> None:
     logger.exception("app key %r: starfire failed while answering for %r", key.name, model)
 
 
+def finish_reason_of(calls: list[dict], cut_off: bool) -> str:
+    if calls:
+        return "tool_calls"
+    return LENGTH_FINISH if cut_off else "stop"
+
+
 async def translated_stream(events, reply: Reply, key: AppKey, give_back):
     yield sse(reply.chunk({"role": "assistant", "content": ""}))
-    calls, usage, said_anything, sent_at = [], None, False, time.monotonic()
+    calls, usage, said_anything, sent_at, cut_off = [], None, False, time.monotonic(), False
     try:
         async for kind, item in events:
             if kind == "delta":
@@ -710,6 +720,8 @@ async def translated_stream(events, reply: Reply, key: AppKey, give_back):
                 yield sse(reply.chunk({"tool_calls": made}))
             elif kind == "usage":
                 usage = openai_usage(item)
+            elif kind == CUT_OFF_KIND:
+                cut_off = True
             elif kind == REPLY_TOO_LONG:
                 yield sse(error_body(TOO_LONG, "upstream_error"))
                 return
@@ -725,8 +737,8 @@ async def translated_stream(events, reply: Reply, key: AppKey, give_back):
             give_back()
         yield sse(error_body(STARFIRE_FAILED, "server_error"))
         return
-    yield sse(reply.chunk({}, "tool_calls" if calls else "stop", usage))
-    yield b"data: [DONE]\n\n"
+    yield sse(reply.chunk({}, finish_reason_of(calls, cut_off), usage))
+    yield STREAM_DONE
 
 
 def text_size(text: str) -> int:
@@ -734,7 +746,7 @@ def text_size(text: str) -> int:
 
 
 async def translated_whole(events, reply: Reply, key: AppKey) -> dict:
-    text, calls, usage, size, sent_at = [], [], None, 0, time.monotonic()
+    text, calls, usage, size, sent_at, cut_off = [], [], None, 0, time.monotonic(), False
     try:
         async for kind, item in events:
             if kind == "delta":
@@ -746,6 +758,8 @@ async def translated_whole(events, reply: Reply, key: AppKey) -> dict:
                 size += text_size(json.dumps(made))
             elif kind == "usage":
                 usage = openai_usage(item)
+            elif kind == CUT_OFF_KIND:
+                cut_off = True
             elif kind == "error":
                 log_translated_failure(key, reply.model)
                 gives_back = not (text or calls) and may_give_back_after(item, sent_at)
@@ -760,7 +774,7 @@ async def translated_whole(events, reply: Reply, key: AppKey) -> dict:
         raise ApiRefusal(500, STARFIRE_FAILED, "server_error", gives_back_reply=gives_back) from error
     finally:
         await events.aclose()
-    return reply.whole("".join(text), calls, usage)
+    return reply.whole("".join(text), calls, usage, cut_off)
 
 
 def text_of(content) -> str:
@@ -889,12 +903,42 @@ async def finish_reply(slot: ReplySlot, cleanups: list) -> None:
 async def answer_in_slot(endpoint, model: str, own_tools: bool, body: dict, key: AppKey, request: Request) -> Response:
     slot = running_replies.take(key.id)
     cleanups = []
+    answering = asyncio.ensure_future(answer_counted(endpoint, model, own_tools, body, key, request, cleanups))
     try:
-        response = await answer_counted(endpoint, model, own_tools, body, key, request, cleanups)
+        if body.get("stream"):
+            done, _ = await asyncio.wait({answering}, timeout=routes.CHECKS_GRACE_SECONDS)
+            if not done:
+                return SentThenReleased(kept_alive_stream(answering), slot, cleanups)
+        response = await answering
     except BaseException:
+        if not answering.done():
+            answering.cancel()
         await finish_reply(slot, cleanups)
         raise
     return SentThenReleased(response, slot, cleanups)
+
+
+def kept_alive_stream(answering: asyncio.Future) -> StreamingResponse:
+    return StreamingResponse(keep_alives_until(answering), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache"})
+
+
+async def keep_alives_until(answering: asyncio.Future):
+    try:
+        while not answering.done():
+            yield routes.HEARTBEAT_LINE
+            await asyncio.wait({answering}, timeout=routes.HEARTBEAT_SECONDS)
+        try:
+            response = answering.result()
+        except ApiRefusal as refusal:
+            yield sse(error_body(refusal.message, refusal.code))
+            yield STREAM_DONE
+            return
+        async for chunk in response.body_iterator:
+            yield chunk
+    finally:
+        if not answering.done():
+            answering.cancel()
 
 
 @openai_router.post("/chat/completions")

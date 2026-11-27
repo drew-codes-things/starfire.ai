@@ -17,14 +17,14 @@ from test_app_keys import TOOLS, bearer, make_key, model_id, outside
 admin = test_app_keys.admin
 app = test_app_keys.app
 clock = test_app_keys.clock
-friend = test_app_keys.friend
+remote_a = test_app_keys.remote_a
 servers = test_app_keys.servers
 
 ABUSIVE_ARGUMENTS = json.dumps({"path": "story.md", "content": "Mia, 12, undressed and they had sex."})
 
 
 def tool_call_reply(arguments: str) -> dict:
-    return {"id": "c9", "object": "chat.completion", "model": "friend-model",
+    return {"id": "c9", "object": "chat.completion", "model": "remote-model-a",
             "choices": [{"index": 0, "finish_reason": "tool_calls",
                          "message": {"role": "assistant", "content": None,
                                      "tool_calls": [{"id": "call_9", "type": "function",
@@ -36,12 +36,12 @@ def conversation(text: str, context: str = "") -> list[dict]:
     return earlier + [{"role": "user", "content": text}]
 
 
-def asked(app, secret, text, model="friend-model", context="", **extra):
+def asked(app, secret, text, model="remote-model-a", context="", **extra):
     return outside(app).post("/v1/chat/completions", headers=bearer(secret),
                              json={"model": model_id(model), "messages": conversation(text, context), **extra})
 
 
-def test_a_request_that_crosses_the_line_never_reaches_a_plain_openai_connection(app, admin, friend, servers):
+def test_a_request_that_crosses_the_line_never_reaches_a_plain_openai_connection(app, admin, remote_a, servers):
     secret = make_key(admin)["key"]
     for case, text, context in cases.ABUSE[:9]:
         whole = asked(app, secret, text, context=context)
@@ -54,35 +54,35 @@ def test_a_request_that_crosses_the_line_never_reaches_a_plain_openai_connection
     assert servers.chats == []
 
 
-def test_ordinary_requests_still_reach_a_plain_openai_connection(app, admin, friend, servers):
+def test_ordinary_requests_still_reach_a_plain_openai_connection(app, admin, remote_a, servers):
     secret = make_key(admin)["key"]
     for case, text, _ in cases.ORDINARY[:13]:
         assert asked(app, secret, text).status_code == 200, case
     assert len(servers.chats) == 13
 
 
-def test_a_relayed_tool_call_that_crosses_the_line_is_dropped(app, admin, friend, servers):
+def test_a_relayed_tool_call_that_crosses_the_line_is_dropped(app, admin, remote_a, servers):
     secret = make_key(admin)["key"]
-    servers.friend_chat = httpx.Response(200, json=tool_call_reply(ABUSIVE_ARGUMENTS))
+    servers.remote_chat = httpx.Response(200, json=tool_call_reply(ABUSIVE_ARGUMENTS))
     answered = asked(app, secret, "save the next part", tools=TOOLS)
     assert answered.json()["choices"][0]["message"] == {"role": "assistant", "content": content_screen.MINORS_REPLY}
     harmless = tool_call_reply(json.dumps({"path": "a.txt"}))
-    servers.friend_chat = httpx.Response(200, json=harmless)
+    servers.remote_chat = httpx.Response(200, json=harmless)
     assert asked(app, secret, "read a.txt", tools=TOOLS).json() == harmless
 
 
-def test_a_relayed_streamed_tool_call_that_crosses_the_line_is_dropped(app, admin, friend, servers):
+def test_a_relayed_streamed_tool_call_that_crosses_the_line_is_dropped(app, admin, remote_a, servers):
     secret = make_key(admin)["key"]
     call = {"index": 0, "id": "c1", "type": "function", "function": {"name": "write_file", "arguments": ABUSIVE_ARGUMENTS}}
     chunk = {"choices": [{"index": 0, "delta": {"tool_calls": [call]}, "finish_reason": "tool_calls"}]}
-    servers.friend_chat = httpx.Response(200, content=b"data: " + json.dumps(chunk).encode() + b"\n\ndata: [DONE]\n\n",
+    servers.remote_chat = httpx.Response(200, content=b"data: " + json.dumps(chunk).encode() + b"\n\ndata: [DONE]\n\n",
                                          headers={"content-type": "text/event-stream"})
     streamed = asked(app, secret, "save the next part", stream=True, tools=TOOLS)
     assert "write_file" not in streamed.text
     assert content_screen.MINORS_REPLY in streamed.text
 
 
-def test_an_unrestricted_model_gets_arty_s_closer_look(app, admin, friend, servers, monkeypatch):
+def test_an_unrestricted_model_gets_arty_s_closer_look(app, admin, remote_a, servers, monkeypatch):
     looked = []
 
     async def brain(method, path, json_body=None, **_):

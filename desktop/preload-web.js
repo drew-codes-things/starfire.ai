@@ -32,3 +32,9 @@ if (isOffered) {
 if (isUnlinked) {
   contextBridge.exposeInMainWorld('starfireDesktopUnlinked', true);
 }
+
+if (ipcRenderer.sendSync('starfire-web:reply-notice') === true) {
+  contextBridge.exposeInMainWorld('starfireDesktopReplies', {
+    ready: () => ipcRenderer.send('starfire-web:reply-ready'),
+  });
+}

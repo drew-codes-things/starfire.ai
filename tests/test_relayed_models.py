@@ -7,14 +7,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 from connection_health import models_in_answer
 
 ENGINE = SimpleNamespace(id="engine1", provider="ollama")
-OPENAI = SimpleNamespace(id="friend1", provider="openai")
+OPENAI = SimpleNamespace(id="remote1", provider="openai")
 
 
 def test_an_engine_connection_does_not_list_the_remote_copies_it_publishes():
     answer = {"models": [{"name": "qwen3:14b"}, {"name": "remote/starfire/qwen3-14b"},
-                         {"name": "remote/friend/some-model"}, {"name": "mimo-v2.6:9b"}]}
+                         {"name": "remote/remote-a/some-model"}, {"name": "hf.co/unsloth/Qwen3.6-35B-A3B-GGUF:UD-IQ4_XS"}]}
     ids = [model["id"] for model in models_in_answer(ENGINE, answer)]
-    assert ids == ["qwen3:14b", "mimo-v2.6:9b"]
+    assert ids == ["qwen3:14b", "hf.co/unsloth/Qwen3.6-35B-A3B-GGUF:UD-IQ4_XS"]
 
 
 def test_a_gateway_connection_keeps_a_model_whose_name_starts_with_remote():

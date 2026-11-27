@@ -69,7 +69,7 @@ def test_restricted_patterns_win_over_allow_list_wildcards(allowed):
 
 
 def test_only_an_exact_allow_list_entry_overrides_the_restricted_patterns():
-    assert model_access.may_use("own/Coder", False, ["own/*"], NAMED_RESTRICTED)
+    assert model_access.may_use("own/Persona", False, ["own/*"], NAMED_RESTRICTED)
     assert model_access.may_use("own/Private-Model", False, ["own/private-model"], NAMED_RESTRICTED)
     assert model_access.may_use("own/Private-Model:latest", False, ["own/Private-Model"], NAMED_RESTRICTED)
     assert model_access.may_use("example-abl", False, ["example-abl:latest"], NAMED_RESTRICTED)

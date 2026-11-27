@@ -422,7 +422,8 @@ def test_a_down_connection_keeps_its_models_in_the_picker_marked_offline(app, en
     assert health["available"] is False and health["error_kind"] == "server_error" and health["last_checked"] > 0
 
 
-def test_auto_never_picks_a_model_on_a_down_connection(app, endpoint, switchable_server, replies):
+def test_auto_never_picks_a_model_on_a_down_connection(app, switchable_server, replies):
+    endpoint = routes.endpoints.add("http://10.20.30.16:8080/v1", kind="api-key")
     sam = login(app, "sam@example.com")
     check_connection(endpoint)
     assert sam.get("/api/models").json()["auto_everyday"] is not None
@@ -635,7 +636,7 @@ def test_the_remembered_lists_hold_no_keys_or_addresses(app, endpoint, switchabl
     ("http://10.20.30.16:8080/v1", False), ("http://10.0.0.5/v1", False), ("http://172.20.1.1/v1", False),
     ("http://169.254.3.4/v1", False), ("http://[fd12:3456::1]/v1", False), ("http://[fe80::1]/v1", False),
     ("http://127.0.0.1:11434/v1", False), ("http://localhost:8080/v1", False), ("http://[::1]:8080/v1", False),
-    ("https://friend.example.net/v1", True), ("https://8.8.8.8/v1", True), ("http://172.32.0.1/v1", True),
+    ("https://remote-a.example.net/v1", True), ("https://8.8.8.8/v1", True), ("http://172.32.0.1/v1", True),
     ("https://quick-tunnel-example.trycloudflare.com/v1", True),
 ])
 def test_a_connection_is_remote_when_its_host_is_not_on_the_home_network(app, url, remote):
@@ -651,10 +652,10 @@ def test_a_ruled_connection_is_remote_even_on_a_home_address(app, monkeypatch):
 def test_every_model_says_whether_its_connection_is_remote_and_never_names_the_host(app, model_server):
     admin, sam = login(app, "admin@example.com"), login(app, "sam@example.com")
     home = routes.endpoints.add("http://10.20.30.16:8080/v1", kind="api-key")
-    far = routes.endpoints.add("https://friend.example.net/v1", kind="api-key")
+    far = routes.endpoints.add("https://remote-a.example.net/v1", kind="api-key")
     shown = sam.get("/api/models").json()["models"]
     assert {m["endpoint_id"]: m["remote"] for m in shown} == {home.id: False, far.id: True}
-    assert "friend.example.net" not in sam.get("/api/models").text
+    assert "remote-a.example.net" not in sam.get("/api/models").text
     answer = admin.get(access_url(sam.user_id)).json()
     assert {m["endpoint_id"]: m["remote"] for m in answer["available"]} == {home.id: False, far.id: True}
 
@@ -729,12 +730,12 @@ def test_home_names_and_addresses_stay_home(app, url):
 
 def test_an_ordinary_account_never_sees_a_connection_address(app, model_server):
     routes.endpoints.add("https://someone:hunter2@models.example.com:8443/v1", kind="api-key")
-    labelled = routes.endpoints.add("https://other.example.com/v1", kind="api-key", label="Friend's server")
+    labelled = routes.endpoints.add("https://other.example.com/v1", kind="api-key", label="Remote server")
     sam, admin = login(app, "sam@example.com"), login(app, "admin@example.com")
     shown = {m["endpoint_id"]: m["connection"] for m in sam.get("/api/models").json()["models"]}
-    assert set(shown.values()) == {"Connection 1", "Friend's server"} and shown[labelled.id] == "Friend's server"
+    assert set(shown.values()) == {"Connection 1", "Remote server"} and shown[labelled.id] == "Remote server"
     for_admin = {m["connection"] for m in admin.get("/api/models").json()["models"]}
-    assert for_admin == {"models.example.com:8443", "Friend's server"}
+    assert for_admin == {"models.example.com:8443", "Remote server"}
     assert "hunter2" not in admin.get("/api/models").text + sam.get("/api/models").text
 
 

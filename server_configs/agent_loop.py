@@ -9,7 +9,8 @@ import file_edit_tool
 import screen_checks
 import screen_look
 import user_data
-from chat_stream import _sse_line, stream_chat_once
+from chat_stream import (CUT_OFF_KIND, CUT_OFF_NOTE, THINKING_ONLY_NOTE, _sse_line, cut_off_events,
+                         stream_chat_once)
 from mcp_manager import mcp_manager
 from providers import _detect_provider
 
@@ -23,6 +24,8 @@ FAILED_AFTER_TOOLS_NOTE = "\n\n(The model stopped with an error after the tools 
 UNNAMED_MODEL_ERROR = "the model stopped with an error that gave no detail"
 
 logger = logging.getLogger(__name__)
+COLLECTED_CUT_OFF_NOTE = "\n\n(This result was cut off at the length limit.)"
+LIVE_CUT_OFF_NOTES = (CUT_OFF_NOTE, THINKING_ONLY_NOTE)
 
 async def run_chat_with_tools(base_url: str, api_key: str | None, model: str, messages: list[dict],
                                system: str | None, options: dict | None, enabled_server_ids: set[str],
@@ -41,6 +44,7 @@ async def run_chat_with_tools(base_url: str, api_key: str | None, model: str, me
         text = ""
         tool_calls: list[dict] = []
         failure = None
+        cut_off = None
 
         async for kind, payload in stream_chat_once(base_url, api_key, model, working_messages,
                                                       system, options, tools):
@@ -51,6 +55,8 @@ async def run_chat_with_tools(base_url: str, api_key: str | None, model: str, me
                 tool_calls = payload
             elif kind == "usage":
                 yield _sse_line({"usage": payload})
+            elif kind == CUT_OFF_KIND:
+                cut_off = payload
             elif kind == "error":
                 failure = payload
 
@@ -60,6 +66,8 @@ async def run_chat_with_tools(base_url: str, api_key: str | None, model: str, me
             return
 
         if not tool_calls:
+            for event in cut_off_events(cut_off, bool(text.strip())) if cut_off else []:
+                yield _sse_line(event)
             yield _sse_line({"done": True})
             return
 
@@ -200,19 +208,23 @@ async def run_chat_collected(base_url: str, api_key: str | None, model: str, mes
                               enabled_server_ids: set[str] | None = None,
                               enabled_builtin_tools: set[str] | None = None,
                               ctx: "builtin_tools.ToolContext | None" = None,
-                              think: bool | None = None, max_tools: int | None = None) -> str:
+                              think: bool | None = None, max_tools: int | None = None,
+                              notes_cut_off: bool = True) -> str:
     enabled_server_ids = enabled_server_ids or set()
     enabled_builtin_tools = set(enabled_builtin_tools or ()) - builtin_tools.DESKTOP_TOOLS
 
     text_parts: list[str] = []
     error: str | None = None
+    cut_off = False
 
     if (enabled_server_ids or enabled_builtin_tools) and ctx is not None:
         async for chunk in run_chat_with_tools(base_url, api_key, model, messages, system, options,
                                                  enabled_server_ids, enabled_builtin_tools, ctx, max_tools=max_tools):
             for kind, payload in _parse_sse_bytes(chunk):
-                if kind == "delta":
+                if kind == "delta" and payload not in LIVE_CUT_OFF_NOTES:
                     text_parts.append(payload)
+                elif kind == CUT_OFF_KIND:
+                    cut_off = True
                 elif kind == "error":
                     error = payload
     else:
@@ -220,12 +232,19 @@ async def run_chat_collected(base_url: str, api_key: str | None, model: str, mes
                                                     think=think):
             if kind == "delta":
                 text_parts.append(payload)
+            elif kind == CUT_OFF_KIND:
+                cut_off = True
             elif kind == "error":
                 error = payload
 
     if error is not None:
         raise RuntimeError(error or UNNAMED_MODEL_ERROR)
-    return "".join(text_parts)
+    return collected_text("".join(text_parts), cut_off and notes_cut_off)
+
+def collected_text(text: str, cut_off: bool) -> str:
+    if not cut_off:
+        return text
+    return text + COLLECTED_CUT_OFF_NOTE if text.strip() else THINKING_ONLY_NOTE
 
 def _parse_sse_bytes(chunk: bytes):
     text = chunk.decode("utf-8", errors="replace").strip()
@@ -239,5 +258,7 @@ def _parse_sse_bytes(chunk: bytes):
         yield "error", obj[FAILED_AFTER_TOOLS]
     elif "delta" in obj:
         yield "delta", obj["delta"]
+    elif CUT_OFF_KIND in obj:
+        yield CUT_OFF_KIND, obj[CUT_OFF_KIND]
     elif "error" in obj:
         yield "error", obj["error"]

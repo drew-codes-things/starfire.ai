@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const { WEB_CHANNELS, VERSION_CHANNEL, isBridgeOffered, isStarfirePage, registerWebBridge } = require('../src/webBridge');
+const { WEB_CHANNELS, VERSION_CHANNEL, NOTICE_CHANNELS, isBridgeOffered, isStarfirePage, registerWebBridge } = require('../src/webBridge');
 const { DEFAULT_SETTINGS } = require('../src/settings');
 
 const ADDRESS = 'https://starfire.example.com';
@@ -209,7 +209,11 @@ function loadPreload(allowed, unlinked) {
   const electron = {
     contextBridge: { exposeInMainWorld: (name, api) => { exposed[name] = api; } },
     ipcRenderer: {
-      sendSync: (channel) => { sent.push(channel); return channel === WEB_CHANNELS.unlinked ? unlinked : allowed; },
+      sendSync: (channel) => {
+        sent.push(channel);
+        if (channel === NOTICE_CHANNELS.offered) return undefined;
+        return channel === WEB_CHANNELS.unlinked ? unlinked : allowed;
+      },
       invoke: async (...args) => { invoked.push(JSON.parse(JSON.stringify(args))); return { ok: true }; },
       on: () => { throw new Error('the page bridge must not listen for anything'); },
     },
@@ -226,20 +230,20 @@ test('the preload exposes nothing unless the main process says yes', () => {
   for (const answer of [false, undefined, null, 'true', 1, {}]) {
     const { exposed, sent } = loadPreload(answer, answer);
     assert.deepEqual(exposed, {}, String(answer));
-    assert.deepEqual(sent, [VERSION_CHANNEL, WEB_CHANNELS.allowed, WEB_CHANNELS.unlinked]);
+    assert.deepEqual(sent, [VERSION_CHANNEL, WEB_CHANNELS.allowed, WEB_CHANNELS.unlinked, NOTICE_CHANNELS.offered]);
   }
 });
 
 test('with the link off the preload tells the starfire page only that, and offers it nothing to call', () => {
   const { exposed, invoked, sent } = loadPreload(false, true);
   assert.deepEqual(exposed, { starfireDesktopUnlinked: true });
-  assert.deepEqual(sent, [VERSION_CHANNEL, WEB_CHANNELS.allowed, WEB_CHANNELS.unlinked]);
+  assert.deepEqual(sent, [VERSION_CHANNEL, WEB_CHANNELS.allowed, WEB_CHANNELS.unlinked, NOTICE_CHANNELS.offered]);
   assert.deepEqual(invoked, []);
 });
 
 test('with the link on the preload never asks whether it is off', () => {
   const { exposed, sent } = loadPreload(true, true);
-  assert.deepEqual(sent, [VERSION_CHANNEL, WEB_CHANNELS.allowed]);
+  assert.deepEqual(sent, [VERSION_CHANNEL, WEB_CHANNELS.allowed, NOTICE_CHANNELS.offered]);
   assert.equal('starfireDesktopUnlinked' in exposed, false);
 });
 

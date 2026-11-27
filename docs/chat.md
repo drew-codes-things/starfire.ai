@@ -8,29 +8,50 @@ that Arty's server (any server that lists an `OWN_TOOLS_MODELS` match) offers ag
 `arty/<name>` or `<name>`, next to `<name>` on another server is shown once, as the direct one.
 The same name on two other servers is listed for each of them, marked `server 1`, `server 2` and
 so on in the order the servers answered, so the account can choose where its text goes. Picking a model there sets the chat to that model; picking Arty Auto
-(or **Arty Auto** at the top of the picker) goes back. For every
+(or **Arty Auto** at the top of the picker) goes back. An account that may use only remote models
+sees no Arty tab and no Arty Auto, since Auto never picks a remote model; the server refuses Auto
+for it with its own message. For every
 message the server picks a model from simple fixed rules, without asking another model first:
 
 | The message | Goes to |
 |---|---|
-| has a picture or a video attached | the vision model (names with `vl`, `vision` or `llava`) |
-| has audio attached, or starts with "Arty" / "hey Arty" | the agent (the first `OWN_TOOLS_MODELS` match) |
-| has a code block, a stack trace or error name, a source file name, or asks about code | the code model (names with `code`) |
+| has a picture or a video attached | the default model when its engine says it can see pictures, otherwise the vision model (names with `vl`, `vision` or `llava`, never a hidden one) |
+| has audio attached, or starts with "Arty" / "hey Arty" | the agent (the first `OWN_TOOLS_MODELS` name without a wildcard, such as `Arty`) |
+| has a code block, a stack trace or error name, a source file name, or asks about code | the coding model (the default model until an admin names one) |
 | asks for a reminder, timer, the phone, calendar, inbox, lights, music, the web, weather or news | the agent |
-| anything else | the chat model (`TASK_MODEL` when it is listed, otherwise the first ordinary model) |
+| anything else | the default model (`TASK_MODEL`); only when neither is set, the first ordinary model |
 
-An admin can name the model for each role under **Settings → Connections → Arty Auto**. A role
-with no model falls back to the chat model. Auto only ever picks from the models the account may
+An admin can name the model for each role under **Settings → Connections → Arty Auto**: the
+**Default model** (everything else, and the main model for the fixed context size
+and helper jobs, in place of `TASK_MODEL`), the **Coding model**, pictures and the agent. A role
+with no model falls back to the default model. Left on automatic, Auto only picks models on a
+connection at a home address: never a remote connection, a connection under Arty's rules, a
+`remote/` model or a cloud model. A model the admin names for a role is used wherever it runs. Auto only ever picks from the models the account may
 use, so an ordinary account is never sent to a model matched by `RESTRICTED_MODELS` or left out
 of its own list, even when an admin named that model for a role; the one exception is a
 restricted model an admin put by its full name into that account's own list. A pattern such as
 `*` or `own/*`, or a name without its tag, never opens a restricted model. A guess never lands on a
-restricted model for anyone. Each reply names the model Auto picked and why
+restricted model for anyone. With a default model set, Auto never moves to another model by itself: when the
+default model isn't listed the reply says so, and an account that may not use the default model picks one by hand.
+Each reply names the model Auto picked and why
 (`qwen3:14b · Arty Auto: code`) in its header, in the status line and under **info**.
 
 Every chat keeps its own model (or Auto) on the server, so a refresh, another tab or another
 device opens it with the same choice. A new chat starts with the model you picked last (the star
 marks it), or Auto.
+
+## Naming a model in a message
+
+In the chat page, a sentence that starts with an instruction naming a model ("use qwen3:14b to summarise this",
+"use the 14B for this", "with the coder one, write ...", "ask the remote model to ...") runs that reply on the named
+model, as if it had been picked in the model list and with the same access rules: an account that may not use it is
+told "That model isn't available to you." Only what was typed counts: quoted text, code blocks and attachments never
+switch the model, and API callers (app keys, Arty's apps) never do. A name has to be the model's whole id, its label
+(`MODEL_LABELS`) or a short form of the label: the size ("the 14B"), the size with the rest of the label, or the rest
+of the label with "model" or "one". "From now on use X", "switch to X" or "go back to X" also moves the model picker
+to X, so it stays until another model is picked. When two models match, one on the chat's own connection is taken,
+otherwise the reply asks "Which one did you mean: A or B?". Anything else is answered normally, and hidden models
+(`HIDDEN_MODELS`) can't be named. The reply is labelled and saved as the model that wrote it.
 
 ## Replies
 

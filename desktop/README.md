@@ -230,13 +230,13 @@ refuses anything that looks like a path or an address; an app's name such as `po
 shows it before anything runs. The tool is offered only when the page says the capability is available, to an active admin, on a local model
 (a connection at a home address that is not under Arty's rules, never a `remote/` model, and never a cloud model whose
 name ends in `-cloud` or contains `:cloud`) with the full tool set;
-never in an ordinary browser, never to remote, friend or ruled connections, never on `/v1` app keys, and never in
+never in an ordinary browser, never to remote or ruled connections, never on `/v1` app keys, and never in
 scheduled tasks, helpers or the email AI.
 
 When an admin chats in starfire Desktop and the tool is not offered, the model is told why in one line so it can say "I
 can't control your PC right now because ..." and what to change: starfire Desktop is not linked to Arty Desktop, Arty
 Desktop is not running, screen control is off in Arty Desktop, this starfire Desktop is too old, the model is on a
-remote or friend's connection, or the model is too small for the tool. With the link off or unpaired, the app tells the
+remote connection, or the model is too small for the tool. With the link off or unpaired, the app tells the
 starfire page only that (`starfireDesktopUnlinked`), with nothing to call. Ruled connections, `/v1` and ordinary
 accounts get no note.
 

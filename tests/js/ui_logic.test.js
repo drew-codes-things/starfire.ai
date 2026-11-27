@@ -640,44 +640,44 @@ test('Select all shown with All off skips restricted models and Select none clea
 });
 
 test('a model on a down connection is tagged offline in the access list and can still be ticked', () => {
-  const down = { id: 'friend-7b', endpoint_id: 'f', connection: 'Friend', offline: true, allowed: true, by_pattern: false, restricted: false };
+  const down = { id: 'remote-7b', endpoint_id: 'f', connection: 'Remote', offline: true, allowed: true, by_pattern: false, restricted: false };
   assert.deepEqual(logic.accessModelTags(down, false), ['offline']);
   assert.deepEqual(logic.accessModelTags({ ...down, restricted: true }, true), ['restricted', 'offline', 'allowed by a kept pattern']);
   assert.deepEqual(logic.accessModelTags(ALL_MODELS[0], false), []);
   const available = [...ALL_MODELS, down];
   const state = { everything: false, ticked: new Set() };
-  const ticked = logic.toggleModelTick(state, available, 'friend-7b', true);
+  const ticked = logic.toggleModelTick(state, available, 'remote-7b', true);
   assert.equal(logic.accessBoxState(ticked, down, false).checked, true);
-  assert.deepEqual(logic.modelListToSave({ ...ticked, available, kept: [] }), ['friend-7b']);
+  assert.deepEqual(logic.modelListToSave({ ...ticked, available, kept: [] }), ['remote-7b']);
   const all = { everything: true, ticked: logic.ticksFromAccess({ available }) };
   assert.equal(logic.accessBoxState(all, down, false).checked, true);
 });
 
 test('remote models get their own section after the local ones, each keeping its connections in order', () => {
   const mixed = [
-    { id: 'a', endpoint_id: 'far', connection: 'Friend', remote: true },
+    { id: 'a', endpoint_id: 'far', connection: 'Remote', remote: true },
     { id: 'b', endpoint_id: 'home', connection: 'Home', remote: false },
-    { id: 'c', endpoint_id: 'far', connection: 'Friend', remote: true, offline: true },
+    { id: 'c', endpoint_id: 'far', connection: 'Remote', remote: true, offline: true },
     { id: 'd', endpoint_id: 'lan', connection: 'Lan' },
   ];
   const sections = logic.accessSections(mixed);
   assert.deepEqual(sections.map(s => s.title), ['', 'Remote']);
   assert.deepEqual(sections.map(s => s.groups.map(g => [g.connection, g.models.map(m => m.id)])),
-    [[['Home', ['b']], ['Lan', ['d']]], [['Friend', ['a', 'c']]]]);
+    [[['Home', ['b']], ['Lan', ['d']]], [['Remote', ['a', 'c']]]]);
   assert.deepEqual(logic.accessSections(mixed.filter(m => m.remote)).map(s => s.title), ['Remote']);
   assert.deepEqual(logic.accessSections(mixed.filter(m => !m.remote)).map(s => s.title), ['']);
   assert.deepEqual(logic.accessSections([]), []);
 });
 
-test('the chat picker lists the Auto choice, then local models, then a Remote heading and the remote ones', () => {
+test('the chosen-model tab lists local models, then a Remote heading and the remote ones', () => {
   const listed = [
     { id: 'far-7b', endpoint_id: 'far', remote: true, offline: true },
     { id: 'home-8b', endpoint_id: 'home', remote: false },
   ];
-  const entries = logic.modelMenuEntries(listed, '');
-  assert.deepEqual(entries.map(e => e.heading || e.id), [logic.AUTO_MODEL_ID, 'home-8b', 'Remote', 'far-7b']);
-  assert.deepEqual(logic.modelMenuEntries([listed[1]], '').map(e => e.heading || e.id), [logic.AUTO_MODEL_ID, 'home-8b']);
-  assert.deepEqual(logic.modelMenuEntries(listed, 'far').map(e => e.heading || e.id), ['Remote', 'far-7b']);
+  const chosen = logic.PICKER_MODE_CHOSEN;
+  assert.deepEqual(logic.modelMenuEntries(listed, '', chosen).map(e => e.heading || e.id), ['home-8b', 'Remote', 'far-7b']);
+  assert.deepEqual(logic.modelMenuEntries([listed[1]], '', chosen).map(e => e.heading || e.id), ['home-8b']);
+  assert.deepEqual(logic.modelMenuEntries(listed, 'far', chosen).map(e => e.heading || e.id), ['Remote', 'far-7b']);
 });
 
 test('turning All on names the saved patterns it will drop as well as restricted models', () => {
@@ -729,16 +729,16 @@ test('the Arty memory list is searched by name, type or fact and keeps the match
   assert.deepEqual(logic.artyMemoryRows([{ name: 'Odd', facts: [3, 'kept'] }], ''), [{ name: 'Odd', type: '', facts: ['kept'] }]);
 });
 
-const DOWN = { id: 'friend-model', endpoint_id: 'f', connection: 'friend', offline: true,
+const DOWN = { id: 'remote-model-a', endpoint_id: 'f', connection: 'remote-a', offline: true,
   health: { available: false, error_kind: 'server_error', last_checked: 1000 } };
 
 test('an offline model is recognised and described with its connection, reason and last check', () => {
   assert.equal(logic.isOfflineModel(DOWN), true);
   assert.equal(logic.isOfflineModel({ id: 'm', offline: false }), false);
   assert.equal(logic.isOfflineModel(null), false);
-  assert.equal(logic.offlineTooltip(DOWN, 1130), 'Offline: friend is server error, checked 2 min ago');
+  assert.equal(logic.offlineTooltip(DOWN, 1130), 'Offline: remote-a is server error, checked 2 min ago');
   assert.equal(logic.offlineTooltip({ id: 'm', offline: true }, 5), 'Offline: this connection is not answering, not checked yet');
-  assert.match(logic.offlineNotice(DOWN), /^friend-model is offline right now \(friend\)\. Pick another model/);
+  assert.match(logic.offlineNotice(DOWN), /^remote-model-a is offline right now \(remote-a\)\. Pick another model/);
 });
 
 test('models on a down connection are left out of the lists that must only offer working models', () => {
@@ -748,7 +748,7 @@ test('models on a down connection are left out of the lists that must only offer
 });
 
 test('the picker can tell a changed list of models from a changed health', () => {
-  const up = { id: 'friend-model', endpoint_id: 'f' };
+  const up = { id: 'remote-model-a', endpoint_id: 'f' };
   assert.equal(logic.sameModelSet([up], [DOWN]), true);
   assert.equal(logic.sameModelSet([up], []), false);
   assert.equal(logic.sameModelSet([up], [{ id: 'other', endpoint_id: 'f' }]), false);
@@ -813,4 +813,80 @@ test('the picker refresh waits while a reply runs or the page is hidden', () => 
   assert.equal(logic.shouldRefreshModelHealth({ hidden: false, busy: true, haveModels: true }), false);
   assert.equal(logic.shouldRefreshModelHealth({ hidden: true, busy: false, haveModels: true }), false);
   assert.equal(logic.shouldRefreshModelHealth({ hidden: false, busy: false, haveModels: false }), false);
+});
+
+test('a reply never switches to another model on a fallback event', () => {
+  const send = require('node:fs').readFileSync(path.join(__dirname, '..', '..', 'static', 'chatSend.js'), 'utf8');
+  assert.doesNotMatch(send, /obj\.fallback/);
+  assert.equal(logic.fallbackChoice, undefined);
+});
+
+test('the context length of a model with a fixed window shows the fixed size, locked, with the reason', () => {
+  const main = { id: 'big:35b', endpoint_id: 'engine', fixed_context: 24576 };
+  const state = logic.paramFieldState('num_ctx', { num_ctx: 4096 }, main);
+  assert.deepEqual(state, { value: '24576', disabled: true, note: logic.fixedContextNote(24576) });
+  assert.match(state.note, /^Fixed at 24,576 for this model/);
+  assert.deepEqual(logic.paramFieldState('temperature', { temperature: 0.3 }, main), { value: 0.3, disabled: false, note: '' });
+});
+
+test('other models keep the context length chosen for the chat and its field stays open', () => {
+  const other = { id: 'qwen3:14b', endpoint_id: 'engine' };
+  assert.deepEqual(logic.paramFieldState('num_ctx', { num_ctx: 4096 }, other), { value: 4096, disabled: false, note: '' });
+  assert.deepEqual(logic.paramFieldState('num_ctx', {}, null), { value: '', disabled: false, note: '' });
+  assert.deepEqual(logic.paramFieldState('num_ctx', {}, { id: 'x', fixed_context: 'big' }), { value: '', disabled: false, note: '' });
+});
+
+test('a chat on a model with a fixed window never sends its own context length', () => {
+  const keys = ['temperature', 'num_ctx'];
+  const chosen = { temperature: 0.3, num_ctx: 4096 };
+  assert.deepEqual(logic.chatOptionsFor(chosen, keys, { id: 'big:35b', fixed_context: 24576 }), { temperature: 0.3 });
+  assert.deepEqual(logic.chatOptionsFor(chosen, keys, { id: 'qwen3:14b' }), { temperature: 0.3, num_ctx: 4096 });
+  assert.equal(logic.chatOptionsFor({ num_ctx: 4096 }, keys, { id: 'big:35b', fixed_context: 24576 }), undefined);
+  assert.equal(logic.chatOptionsFor({}, keys, null), undefined);
+});
+
+test('the chat controls draw each field from paramFieldState and send chatOptionsFor', () => {
+  const source = require('node:fs').readFileSync(path.join(__dirname, '..', '..', 'static', 'chatControls.js'), 'utf8');
+  assert.match(source, /paramFieldState\(param\.key, chatParams, currentModel\(\)\)/);
+  assert.match(source, /chatOptionsFor\(chatParams, CHAT_PARAMS\.map\(param => param\.key\), currentModel\(\)\)/);
+  assert.match(source, /els\.modelList\.addEventListener\('change', renderParamGrid\)/);
+});
+
+test('a cut-off note is taken off a reply before Continue carries it on', () => {
+  const note = '\n\n(This reply hit the length limit and was cut off here. Use Continue to carry on.)';
+  assert.equal(logic.withoutCutOffNote('The answer is' + note), 'The answer is');
+  assert.equal(logic.withoutCutOffNote('A whole reply.'), 'A whole reply.');
+  assert.equal(logic.withoutCutOffNote(note + ' more text'), note + ' more text');
+});
+
+test('the length-limit notes are taken off whatever trails them and never sent, spoken or carried on', () => {
+  const note = logic.CUT_OFF_NOTE;
+  assert.equal(logic.withoutCutOffNote('Half' + note + '\n '), 'Half');
+  assert.equal(logic.withoutCutOffNote(logic.THINKING_ONLY_NOTE), '');
+  assert.equal(logic.withoutCutOffNote(' ' + logic.THINKING_ONLY_NOTE + '\n'), '');
+  assert.equal(logic.withoutCutOffNote(note.trim()), '');
+  assert.equal(logic.isCutOffNote(note), true);
+  assert.equal(logic.isCutOffNote(logic.THINKING_ONLY_NOTE), true);
+  assert.equal(logic.isCutOffNote('Half'), false);
+  const fs = require('node:fs');
+  const source = name => fs.readFileSync(path.join(__dirname, '..', '..', 'static', name), 'utf8');
+  assert.match(source('chatSend.js'), /const message = \{ role: m\.role, content: m\.role === 'assistant' \? withoutCutOffNote\(m\.content\) : m\.content \};/);
+  assert.match(source('chatSend.js'), /if \(speaker && !isCutOffNote\(obj\.delta\)\) speaker\.push\(obj\.delta\);/);
+  assert.match(source('chatSend.js'), /speakThenListen\(withoutCutOffNote\(fullText\)\)/);
+  assert.match(source('chatSend.js'), /speakText\(withoutCutOffNote\(fullText\)\)/);
+  assert.match(source('chatMessages.js'), /speakText\(withoutCutOffNote\(getText\(\)\)\)/);
+});
+
+test('a staying switch named in a message gives the picker that model', () => {
+  assert.deepEqual(logic.persistedChoice({ endpoint_id: 'e1', model: 'qwen3:14b', persist: true }), { endpoint_id: 'e1', model: 'qwen3:14b' });
+  assert.equal(logic.persistedChoice({ endpoint_id: 'e1', model: 'qwen3:14b' }), null);
+  assert.equal(logic.persistedChoice({ endpoint_id: 'e1', model: '', persist: true }), null);
+  assert.equal(logic.persistedChoice(undefined), null);
+});
+
+test('the chat page opts in to named models and moves the picker on a staying switch', () => {
+  const send = require('node:fs').readFileSync(path.join(__dirname, '..', '..', 'static', 'chatSend.js'), 'utf8');
+  assert.match(send, /names_a_model: true/);
+  assert.match(send, /persistedChoice\(obj\.model_choice\)/);
+  assert.equal(send.match(/names_a_model/g).length, 1);
 });

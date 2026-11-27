@@ -55,10 +55,39 @@ def test_each_prompt_gets_the_role_its_rules_say(text, kinds, role):
 def test_every_role_has_a_sensible_model_without_any_admin_settings():
     usable = [model(name) for name in LISTED]
     picks = {role: auto_model.choose(role, usable, sources()).model for role in auto_model.ROLES}
-    assert picks == {"vision": VISION, "code": CODER, "agent": ARTY, "chat": GENERAL}
+    assert picks == {"vision": VISION, "code": GENERAL, "agent": ARTY, "chat": GENERAL}
 
 
-@pytest.mark.parametrize("missing, role", [(CODER, "code"), (ARTY, "agent"), (VISION, "vision")])
+def test_the_coding_model_follows_the_default_model_until_an_admin_names_one():
+    usable = [model(name) for name in LISTED]
+    assert auto_model.choose("code", usable, sources()).model == GENERAL
+    assert auto_model.choose("code", usable, sources(configured={"chat": SMALL})).model == SMALL
+    assert auto_model.choose("code", usable, sources(configured={"chat": SMALL, "code": CODER})).model == CODER
+
+
+def test_no_guess_ever_lands_on_an_outside_connection():
+    usable = [model(name, "remote-a") for name in (VISION, CODER, GENERAL, ARTY, SMALL)] + [model("local-chat:9b")]
+    outside = sources(task_model="", outside=lambda m: m["endpoint_id"] == "remote-a")
+    for role in auto_model.ROLES:
+        pick = auto_model.choose(role, usable, outside)
+        assert (pick.endpoint_id, pick.model) == ("ep", "local-chat:9b"), role
+    assert auto_model.vision_candidates(usable, outside) == []
+
+
+def test_only_outside_models_leave_auto_with_nothing_to_guess():
+    usable = [model(name, "remote-a") for name in (VISION, GENERAL, ARTY)]
+    outside = sources(outside=lambda m: m["endpoint_id"] == "remote-a")
+    assert all(auto_model.choose(role, usable, outside) is None for role in auto_model.ROLES)
+
+
+def test_an_outside_model_the_admin_names_is_used():
+    usable = [model(GENERAL, "remote-a"), model(SMALL)]
+    outside = sources(configured={"chat": GENERAL, "code": GENERAL}, outside=lambda m: m["endpoint_id"] == "remote-a")
+    assert (auto_model.choose("chat", usable, outside).endpoint_id, auto_model.choose("code", usable, outside).model) == \
+        ("remote-a", GENERAL)
+
+
+@pytest.mark.parametrize("missing, role", [(ARTY, "agent"), (VISION, "vision")])
 def test_a_role_whose_model_is_missing_falls_back_to_the_chat_model(missing, role):
     usable = [model(name) for name in LISTED if name != missing]
     pick = auto_model.choose(role, usable, sources())
@@ -69,7 +98,7 @@ def test_the_admins_choice_fills_a_role_and_a_vanished_choice_falls_back_to_the_
     usable = [model(name) for name in LISTED]
     configured = {"chat": SMALL, "code": "gone-model"}
     assert auto_model.choose("chat", usable, sources(configured=configured)).model == SMALL
-    assert auto_model.choose("code", usable, sources(configured=configured)).model == CODER
+    assert auto_model.choose("code", usable, sources(configured=configured)).model == SMALL
 
 
 def test_without_a_task_model_the_chat_role_takes_the_first_general_model():
@@ -80,7 +109,7 @@ def test_without_a_task_model_the_chat_role_takes_the_first_general_model():
 def test_a_guess_never_lands_on_a_restricted_model_even_for_an_admin():
     usable = [model(RESTRICTED), model(VISION)]
     for role in auto_model.ROLES:
-        assert auto_model.choose(role, usable, sources()).model == VISION
+        assert auto_model.choose(role, usable, sources(task_model="")).model == VISION
     assert auto_model.choose("chat", [model(RESTRICTED)], sources()) is None
 
 
@@ -144,3 +173,39 @@ def test_only_the_start_and_the_end_of_a_long_message_decide_its_role():
     middle = len(prose) // 2
     assert auto_model.prompt_role(prose[:middle] + "\n```\n" + prose[middle:], set()) == auto_model.CHAT
     assert auto_model.prompt_role("Arty, " + prose, set()) == auto_model.AGENT
+
+
+def test_a_named_model_on_both_a_local_and_a_remote_connection_is_taken_from_the_local_one():
+    for listed in ([{"id": "shared-name:14b", "endpoint_id": "far"}, {"id": "shared-name:14b", "endpoint_id": "home"}],
+                   [{"id": "shared-name:14b", "endpoint_id": "home"}, {"id": "shared-name:14b", "endpoint_id": "far"}]):
+        for role in (auto_model.CHAT, auto_model.VISION):
+            sources = auto_model.RoleSources(configured={role: "shared-name:14b"}, task_model="",
+                                             outside=lambda model: model["endpoint_id"] == "far")
+            assert auto_model.choose(role, listed, sources).endpoint_id == "home"
+            assert [m["endpoint_id"] for m in auto_model.vision_candidates(listed, sources)][:1] == (
+                ["home"] if role == auto_model.VISION else [])
+    only_far = [{"id": "far-only:14b", "endpoint_id": "far"}]
+    sources = auto_model.RoleSources(configured={auto_model.CHAT: "far-only:14b"}, outside=lambda model: True)
+    assert auto_model.choose(auto_model.CHAT, only_far, sources).endpoint_id == "far"
+
+
+def test_auto_never_guesses_another_model_when_the_main_is_missing():
+    usable = [model(name) for name in LISTED if name != GENERAL]
+    assert all(auto_model.choose(role, usable, sources()) is None for role in ("chat", "code"))
+
+
+def test_a_missing_default_model_is_never_replaced_by_the_task_model_or_the_first_model():
+    usable = [model(name) for name in LISTED]
+    assert auto_model.choose("chat", usable, sources(configured={"chat": "gone-main:35b"}, task_model=SMALL)) is None
+
+
+def test_a_hidden_picture_helper_is_never_guessed_for_pictures():
+    usable = [model(name) for name in LISTED]
+    pick = auto_model.choose("vision", usable, sources(hidden_patterns=["*vl*"]))
+    assert (pick.model, pick.filled_by) == (GENERAL, "chat")
+
+
+def test_the_agent_guess_takes_only_arty_itself_never_a_smaller_model_behind_arty():
+    usable = [model("arty/qwen3:14b"), model(GENERAL)]
+    pick = auto_model.choose("agent", usable, sources())
+    assert (pick.model, pick.filled_by) == (GENERAL, "chat")

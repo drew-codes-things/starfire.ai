@@ -26,16 +26,19 @@ class ModelChoiceStore:
         self.path = os.path.join(data_dir, CHOICE_FILE)
 
     def get(self) -> ModelChoice:
+        return self.stored() or ModelChoice()
+
+    def stored(self) -> ModelChoice | None:
         if not os.path.exists(self.path):
-            return ModelChoice()
+            return None
         try:
             with open(self.path, "r", encoding="utf-8") as f:
                 raw = json.load(f)
         except (json.JSONDecodeError, OSError) as error:
             report_unreadable_store(self.path, error)
-            return ModelChoice()
+            return None
         if not isinstance(raw, dict) or not isinstance(raw.get("model"), str) or not raw["model"]:
-            return ModelChoice()
+            return None
         if raw["model"] == AUTO:
             return ModelChoice()
         endpoint_id = raw.get("endpoint_id")

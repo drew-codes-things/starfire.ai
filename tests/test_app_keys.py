@@ -45,9 +45,9 @@ from model_endpoints import ModelEndpointStore
 PASSWORD = "correct horse battery staple"
 HEADERS = {"X-Starfire-Client": "1"}
 ROUTER_ONLY_INSTALLERS = ("addons",)
-FRIEND_URL = "https://friend.drew-gnr.xyz/v1"
-FRIEND_KEY = "llama-server-key-for-tests"
-LISTED = ["friend-model", "other-model", "example-9b-abl"]
+REMOTE_A_URL = "https://remote-a.example/v1"
+REMOTE_A_KEY = "llama-server-key-for-tests"
+LISTED = ["remote-model-a", "other-model", "example-9b-abl"]
 BRAIN_URL = "https://brain.example.com/v1"
 BRAIN_LISTED = ["Arty", "solo/plain:latest"]
 OTHER_URL = "https://local.example.com/v1"
@@ -64,7 +64,7 @@ STREAMED_TOOL_CALL = (
     b'"function":{"arguments":"{\\"path\\": \\"a.txt\\"}"}}]},"finish_reason":"tool_calls"}]}\n\n'
     b"data: [DONE]\n\n"
 )
-WHOLE_TOOL_CALL = {"id": "c2", "object": "chat.completion", "model": "friend-model",
+WHOLE_TOOL_CALL = {"id": "c2", "object": "chat.completion", "model": "remote-model-a",
                    "choices": [{"index": 0, "finish_reason": "tool_calls",
                                 "message": {"role": "assistant", "content": None,
                                             "tool_calls": [{"id": "call_2", "type": "function",
@@ -89,29 +89,29 @@ class FakeModelServers:
         self.model_lists = 0
         self.list_encodings = []
         self.list_auths = {}
-        self.friend_down = None
-        self.friend_list = None
-        self.friend_chat = None
+        self.remote_down = None
+        self.remote_list = None
+        self.remote_chat = None
         self.brain_listed = list(BRAIN_LISTED)
 
-    def friend_failure(self, request: httpx.Request) -> httpx.Response:
-        if self.friend_down == "refused":
+    def remote_failure(self, request: httpx.Request) -> httpx.Response:
+        if self.remote_down == "refused":
             raise httpx.ConnectError("connection refused", request=request)
-        if self.friend_down == "timeout":
+        if self.remote_down == "timeout":
             raise httpx.ReadTimeout("timed out", request=request)
-        return httpx.Response(int(self.friend_down), json={"error": "down"})
+        return httpx.Response(int(self.remote_down), json={"error": "down"})
 
     def model_list(self, host: str) -> httpx.Response:
         if host == "brain.example.com":
             return httpx.Response(200, json={"data": [{"id": name} for name in self.brain_listed]})
-        if self.friend_list is not None and host == "friend.drew-gnr.xyz":
-            return self.friend_list()
+        if self.remote_list is not None and host == "remote-a.example":
+            return self.remote_list()
         return httpx.Response(200, json={"data": [{"id": name} for name in LISTED]})
 
     def answer(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
-        if self.friend_down and request.url.host == "friend.drew-gnr.xyz":
-            return self.friend_failure(request)
+        if self.remote_down and request.url.host == "remote-a.example":
+            return self.remote_failure(request)
         if path.endswith("/models") or path.endswith("/api/tags"):
             self.model_lists += 1
             self.list_encodings.append(request.headers.get("accept-encoding"))
@@ -123,8 +123,8 @@ class FakeModelServers:
         sent = json.loads(request.content)
         self.chats.append({"url": str(request.url), "auth": request.headers.get("authorization"), "body": sent,
                            "accept_encoding": request.headers.get("accept-encoding")})
-        if self.friend_chat is not None and request.url.host == "friend.drew-gnr.xyz":
-            return self.friend_chat
+        if self.remote_chat is not None and request.url.host == "remote-a.example":
+            return self.remote_chat
         if path.endswith("/api/chat"):
             return httpx.Response(200, content=b"".join(json.dumps(line).encode() + b"\n" for line in self.ollama_lines))
         if sent.get("stream"):
@@ -196,8 +196,8 @@ def admin(app):
 
 
 @pytest.fixture
-def friend(admin, servers):
-    added = admin.post("/api/model-endpoints", json={"base_url": FRIEND_URL, "api_key": FRIEND_KEY, "kind": "api-key",
+def remote_a(admin, servers):
+    added = admin.post("/api/model-endpoints", json={"base_url": REMOTE_A_URL, "api_key": REMOTE_A_KEY, "kind": "api-key",
                                                      "label": "Other (OpenAI-compatible)"})
     assert added.status_code == 200, added.text
     return added.json()
@@ -250,14 +250,14 @@ def bearer(secret):
     return {"Authorization": f"Bearer {secret}"}
 
 
-def ask(app, secret, model="friend-model", stream=False, **extra):
+def ask(app, secret, model="remote-model-a", stream=False, **extra):
     wanted = model if "/" in model else model_id(model)
     return outside(app).post("/v1/chat/completions", headers=bearer(secret),
                              json={"model": wanted, "stream": stream, "messages": [{"role": "user", "content": PROMPT}],
                                    **extra})
 
 
-def test_a_new_key_is_shown_once_and_only_its_hash_is_stored(app, admin, friend, tmp_path):
+def test_a_new_key_is_shown_once_and_only_its_hash_is_stored(app, admin, remote_a, tmp_path):
     made = make_key(admin)
     secret = made["key"]
     assert secret.startswith("sf_") and len(secret) >= 3 + 43
@@ -268,23 +268,23 @@ def test_a_new_key_is_shown_once_and_only_its_hash_is_stored(app, admin, friend,
     assert [k["name"] for k in listed] == ["Arty phone"]
     assert secret not in json.dumps(listed) and key_digest(secret) not in json.dumps(listed)
     assert "key" not in listed[0] and "digest" not in listed[0]
-    assert listed[0]["grants"] == [{"endpoint_id": friend["id"], "model": "*", "connection": "Other (OpenAI-compatible)"}]
+    assert listed[0]["grants"] == [{"endpoint_id": remote_a["id"], "model": "*", "connection": "Other (OpenAI-compatible)"}]
 
 
-def test_the_made_key_answer_is_never_cached(admin, friend):
+def test_the_made_key_answer_is_never_cached(admin, remote_a):
     assert new_key(admin).headers["cache-control"] == "no-store"
 
 
-def test_two_keys_are_never_the_same(admin, friend):
+def test_two_keys_are_never_the_same(admin, remote_a):
     assert make_key(admin)["key"] != make_key(admin)["key"]
 
 
-def test_a_key_needs_at_least_one_grant(admin, friend):
+def test_a_key_needs_at_least_one_grant(admin, remote_a):
     assert new_key(admin, grants=[]).status_code == 422
     assert new_key(admin, grants=[{"endpoint_id": "nosuchconnection", "model": "*"}]).status_code == 400
 
 
-def test_only_an_admin_manages_app_keys(app, admin, friend):
+def test_only_an_admin_manages_app_keys(app, admin, remote_a):
     sam = login(app, "sam@example.com")
     assert sam.get("/api/app-keys").status_code == 403
     assert sam.post("/api/app-keys", json={"name": "mine", "user_id": sam.user_id, "grants": every_connection()}
@@ -294,57 +294,64 @@ def test_only_an_admin_manages_app_keys(app, admin, friend):
     assert sam.delete(f"/api/app-keys/{secret_id}").status_code == 403
 
 
-def test_the_form_lists_each_connection_with_the_models_the_account_may_use(admin, friend):
+def test_the_form_lists_each_connection_with_the_models_the_account_may_use(admin, remote_a):
     offered = admin.get(f"/api/app-keys/models/{user_id('sam@example.com')}").json()
     assert offered["admin"] is False
-    assert offered["connections"] == [{"endpoint_id": friend["id"], "label": "Other (OpenAI-compatible)", "available": True,
-                                       "own_tools": False, "models": [{"name": "friend-model", "own_tools": False},
+    assert offered["connections"] == [{"endpoint_id": remote_a["id"], "label": "Other (OpenAI-compatible)", "available": True,
+                                       "own_tools": False, "models": [{"name": "remote-model-a", "own_tools": False},
                                                   {"name": "other-model", "own_tools": False}]}]
 
 
 
-def test_v1_models_ids_name_their_connection(app, admin, friend):
+def test_v1_models_ids_name_their_connection(app, admin, remote_a):
     secret = make_key(admin)["key"]
     listed = outside(app).get("/v1/models", headers=bearer(secret))
     assert listed.status_code == 200
     assert listed.json() == {"object": "list", "data": [
-        {"id": f"{friend['id']}/friend-model", "object": "model", "created": 0, "owned_by": "starfire", "available": True},
-        {"id": f"{friend['id']}/other-model", "object": "model", "created": 0, "owned_by": "starfire", "available": True}]}
+        {"id": f"{remote_a['id']}/remote-model-a", "object": "model", "created": 0, "owned_by": "starfire", "available": True},
+        {"id": f"{remote_a['id']}/other-model", "object": "model", "created": 0, "owned_by": "starfire", "available": True}]}
 
 
-def test_a_key_with_one_model_lists_only_that(app, admin, friend):
-    secret = make_key(admin, grants=[{"endpoint_id": friend["id"], "model": "friend-model"}])["key"]
+def test_a_hidden_model_is_left_out_of_v1_models_but_still_named_by_id(app, admin, remote_a, monkeypatch):
+    monkeypatch.setattr(routes.config, "hidden_models", "other-*")
+    secret = make_key(admin)["key"]
+    listed = outside(app).get("/v1/models", headers=bearer(secret)).json()["data"]
+    assert [m["id"] for m in listed] == [model_id("remote-model-a")]
+
+
+def test_a_key_with_one_model_lists_only_that(app, admin, remote_a):
+    secret = make_key(admin, grants=[{"endpoint_id": remote_a["id"], "model": "remote-model-a"}])["key"]
     assert [m["id"] for m in outside(app).get("/v1/models", headers=bearer(secret)).json()["data"]] == [
-        model_id("friend-model")]
+        model_id("remote-model-a")]
 
 
-def test_a_model_outside_the_key_grants_is_refused(app, admin, friend, servers):
-    secret = make_key(admin, grants=[{"endpoint_id": friend["id"], "model": "friend-model"}])["key"]
+def test_a_model_outside_the_key_grants_is_refused(app, admin, remote_a, servers):
+    secret = make_key(admin, grants=[{"endpoint_id": remote_a["id"], "model": "remote-model-a"}])["key"]
     refused = ask(app, secret, model="other-model")
     assert refused.status_code == 403 and refused.json()["error"]["code"] == "model_not_allowed"
     assert servers.chats == []
 
 
-def test_a_bare_model_name_is_not_a_model_id(app, admin, friend, servers):
+def test_a_bare_model_name_is_not_a_model_id(app, admin, remote_a, servers):
     secret = make_key(admin)["key"]
     refused = outside(app).post("/v1/chat/completions", headers=bearer(secret),
-                                json={"model": "friend-model", "messages": [{"role": "user", "content": "hi"}]})
+                                json={"model": "remote-model-a", "messages": [{"role": "user", "content": "hi"}]})
     assert refused.status_code == 404 and refused.json()["error"]["code"] == "model_not_found"
     assert servers.chats == []
 
 
-def test_a_restricted_model_is_refused_to_an_ordinary_account_key(app, admin, friend, servers):
+def test_a_restricted_model_is_refused_to_an_ordinary_account_key(app, admin, remote_a, servers):
     secret = make_key(admin)["key"]
     assert ask(app, secret, model="example-9b-abl").status_code == 403
     assert servers.chats == []
 
 
-def test_a_key_for_an_ordinary_account_cannot_be_given_a_restricted_model(admin, friend):
-    refused = new_key(admin, grants=[{"endpoint_id": friend["id"], "model": "example-9b-abl"}])
+def test_a_key_for_an_ordinary_account_cannot_be_given_a_restricted_model(admin, remote_a):
+    refused = new_key(admin, grants=[{"endpoint_id": remote_a["id"], "model": "example-9b-abl"}])
     assert refused.status_code == 400 and "example-9b-abl" in refused.json()["detail"]
 
 
-def test_an_admin_account_key_may_use_a_restricted_model(app, admin, friend, servers):
+def test_an_admin_account_key_may_use_a_restricted_model(app, admin, remote_a, servers):
     secret = make_key(admin, email="admin@example.com")["key"]
     assert ask(app, secret, model="example-9b-abl").status_code == 200
 
@@ -357,7 +364,7 @@ def key_made_before_the_brain_answered(admin, servers):
     return secret
 
 
-def test_arty_is_left_out_of_every_key_by_default(app, admin, friend, brain, servers):
+def test_arty_is_left_out_of_every_key_by_default(app, admin, remote_a, brain, servers):
     secret = key_made_before_the_brain_answered(admin, servers)
     assert model_id("Arty") not in [m["id"] for m in outside(app).get("/v1/models", headers=bearer(secret)).json()["data"]]
     refused = ask(app, secret, model="Arty")
@@ -370,7 +377,7 @@ def test_arty_cannot_be_named_in_a_key_without_the_opt_in(admin, brain):
     assert refused.status_code == 400 and "Arty" in refused.json()["detail"]
 
 
-def test_every_model_on_the_arty_connection_needs_the_opt_in(app, admin, friend, brain, servers):
+def test_every_model_on_the_arty_connection_needs_the_opt_in(app, admin, remote_a, brain, servers):
     secret = key_made_before_the_brain_answered(admin, servers)
     assert [m["id"] for m in listed_models(app, secret)] == [model_id(name) for name in LISTED]
     refused = ask(app, secret, model=model_id("solo/plain:latest"))
@@ -384,7 +391,7 @@ def test_no_model_of_the_arty_connection_can_be_granted_without_the_opt_in(admin
         assert refused.status_code == 400 and "Arty option" in refused.json()["detail"]
 
 
-def test_the_form_marks_the_whole_arty_connection(admin, friend, brain):
+def test_the_form_marks_the_whole_arty_connection(admin, remote_a, brain):
     mine = {c["endpoint_id"]: c for c in admin.get(f"/api/app-keys/models/{user_id('admin@example.com')}").json()["connections"]}
     assert mine[brain["id"]]["own_tools"] is True
     assert mine[brain["id"]]["models"] == [{"name": "Arty", "own_tools": True},
@@ -412,12 +419,12 @@ def test_the_configured_arty_address_is_an_arty_connection_whatever_it_lists(app
     assert set(servers.chats[-1]["body"]) == {"model", "messages", "stream"}
 
 
-def test_only_an_admin_account_key_may_opt_in_to_arty(admin, friend):
+def test_only_an_admin_account_key_may_opt_in_to_arty(admin, remote_a):
     refused = new_key(admin, allow_own_tools=True)
     assert refused.status_code == 400
 
 
-def test_an_opted_in_key_reaches_arty_with_standard_fields_only(app, admin, friend, brain, servers):
+def test_an_opted_in_key_reaches_arty_with_standard_fields_only(app, admin, remote_a, brain, servers):
     secret = make_key(admin, email="admin@example.com", allow_own_tools=True)["key"]
     assert model_id("Arty") in [m["id"] for m in outside(app).get("/v1/models", headers=bearer(secret)).json()["data"]]
     answered = outside(app).post("/v1/chat/completions", headers=bearer(secret), json={
@@ -429,7 +436,7 @@ def test_an_opted_in_key_reaches_arty_with_standard_fields_only(app, admin, frie
     assert sent["model"] == "Arty" and sent["messages"] == [{"role": "user", "content": PROMPT}]
 
 
-def test_an_arty_key_stops_working_for_arty_when_its_account_is_no_longer_admin(app, admin, friend, brain, servers):
+def test_an_arty_key_stops_working_for_arty_when_its_account_is_no_longer_admin(app, admin, remote_a, brain, servers):
     users = auth_routes.users
     users.upsert("second@example.com", "Second", "admin", users.find_by_email("admin@example.com").password_hash)
     secret = make_key(admin, email="second@example.com", allow_own_tools=True)["key"]
@@ -437,21 +444,21 @@ def test_an_arty_key_stops_working_for_arty_when_its_account_is_no_longer_admin(
     assert ask(app, secret, model="Arty").status_code == 403
 
 
-def test_other_fields_still_pass_through_for_plain_models(app, admin, friend, servers):
+def test_other_fields_still_pass_through_for_plain_models(app, admin, remote_a, servers):
     secret = make_key(admin)["key"]
     assert ask(app, secret, top_k=5, repeat_penalty=1.1).status_code == 200
-    assert servers.chats[-1]["body"]["top_k"] == 5 and servers.chats[-1]["body"]["model"] == "friend-model"
+    assert servers.chats[-1]["body"]["top_k"] == 5 and servers.chats[-1]["body"]["model"] == "remote-model-a"
 
 
-def test_a_wrong_or_missing_key_is_refused(app, friend, servers):
+def test_a_wrong_or_missing_key_is_refused(app, remote_a, servers):
     for headers in ({}, bearer("sf_" + "A" * 43), bearer(PASSWORD), {"Authorization": "Basic abc"}):
         refused = outside(app).get("/v1/models", headers=headers)
         assert refused.status_code == 401 and refused.json()["error"]["code"] == "invalid_api_key"
     assert servers.chats == []
 
 
-def test_a_signed_in_session_cookie_does_not_open_the_api(app, admin, friend, servers):
-    refused = admin.post("/v1/chat/completions", json={"model": model_id("friend-model"),
+def test_a_signed_in_session_cookie_does_not_open_the_api(app, admin, remote_a, servers):
+    refused = admin.post("/v1/chat/completions", json={"model": model_id("remote-model-a"),
                                                        "messages": [{"role": "user", "content": "hi"}]})
     assert refused.status_code == 401
     assert admin.get("/v1/models").status_code == 401
@@ -463,7 +470,7 @@ def test_other_v1_paths_are_not_served(app, admin):
     assert outside(app).get("/v1/embeddings").status_code == 404
 
 
-def test_a_revoked_key_is_refused_at_once(app, admin, friend):
+def test_a_revoked_key_is_refused_at_once(app, admin, remote_a):
     made = make_key(admin)
     assert ask(app, made["key"]).status_code == 200
     assert admin.delete(f"/api/app-keys/{made['id']}").status_code == 200
@@ -471,14 +478,14 @@ def test_a_revoked_key_is_refused_at_once(app, admin, friend):
     assert admin.get("/api/app-keys").json()["keys"] == []
 
 
-def test_an_expired_key_is_refused(app, admin, friend, clock):
+def test_an_expired_key_is_refused(app, admin, remote_a, clock):
     secret = make_key(admin, expires_in_days=1)["key"]
     assert ask(app, secret).status_code == 200
     clock.now += 24 * 3600
     assert ask(app, secret).status_code == 401
 
 
-def test_disabling_an_account_revokes_its_keys(app, admin, friend):
+def test_disabling_an_account_revokes_its_keys(app, admin, remote_a):
     secret = make_key(admin)["key"]
     sam = user_id("sam@example.com")
     assert admin.patch(f"/api/auth/users/{sam}", json={"disabled": True}).status_code == 200
@@ -488,7 +495,7 @@ def test_disabling_an_account_revokes_its_keys(app, admin, friend):
     assert admin.get("/api/app-keys").json()["keys"] == []
 
 
-def test_resetting_a_password_revokes_the_account_keys(app, admin, friend):
+def test_resetting_a_password_revokes_the_account_keys(app, admin, remote_a):
     secret = make_key(admin)["key"]
     kept = make_key(admin, email="admin@example.com")["key"]
     reset = admin.post(f"/api/auth/users/{user_id('sam@example.com')}/password", json={"password": "another long password"})
@@ -497,14 +504,14 @@ def test_resetting_a_password_revokes_the_account_keys(app, admin, friend):
     assert ask(app, kept).status_code == 200
 
 
-def test_deleting_an_account_removes_its_keys(app, admin, friend):
+def test_deleting_an_account_removes_its_keys(app, admin, remote_a):
     secret = make_key(admin)["key"]
     assert admin.delete(f"/api/auth/users/{user_id('sam@example.com')}").status_code == 200
     assert ask(app, secret).status_code == 401
     assert admin.get("/api/app-keys").json()["keys"] == []
 
 
-def test_a_key_daily_limit_answers_429(app, admin, friend, servers):
+def test_a_key_daily_limit_answers_429(app, admin, remote_a, servers):
     secret = make_key(admin, daily_limit=2)["key"]
     assert [ask(app, secret).status_code for _ in range(2)] == [200, 200]
     refused = ask(app, secret)
@@ -512,7 +519,7 @@ def test_a_key_daily_limit_answers_429(app, admin, friend, servers):
     assert len(servers.chats) == 2
 
 
-def test_a_key_over_its_limit_makes_no_model_list_requests(app, admin, friend, servers):
+def test_a_key_over_its_limit_makes_no_model_list_requests(app, admin, remote_a, servers):
     secret = make_key(admin, daily_limit=1)["key"]
     assert ask(app, secret).status_code == 200
     lists = servers.model_lists
@@ -520,7 +527,7 @@ def test_a_key_over_its_limit_makes_no_model_list_requests(app, admin, friend, s
     assert servers.model_lists == lists
 
 
-def test_the_key_daily_limit_starts_again_the_next_day(app, admin, friend, clock):
+def test_the_key_daily_limit_starts_again_the_next_day(app, admin, remote_a, clock):
     secret = make_key(admin, daily_limit=1)["key"]
     assert ask(app, secret).status_code == 200
     assert ask(app, secret).status_code == 429
@@ -528,14 +535,14 @@ def test_the_key_daily_limit_starts_again_the_next_day(app, admin, friend, clock
     assert ask(app, secret).status_code == 200
 
 
-def test_the_account_daily_reply_count_applies_to_its_keys(app, admin, friend, monkeypatch):
+def test_the_account_daily_reply_count_applies_to_its_keys(app, admin, remote_a, monkeypatch):
     monkeypatch.setattr(config, "generations_per_day", 1)
     secret = make_key(admin)["key"]
     assert ask(app, secret).status_code == 200
     assert ask(app, secret).status_code == 429
 
 
-def test_every_key_has_a_per_minute_limit_even_on_an_admin_account(app, admin, friend, monkeypatch, clock):
+def test_every_key_has_a_per_minute_limit_even_on_an_admin_account(app, admin, remote_a, monkeypatch, clock):
     monkeypatch.setattr(config, "app_key_requests_per_minute", 3)
     secret = make_key(admin, email="admin@example.com")["key"]
     assert outside(app).get("/v1/models", headers=bearer(secret)).status_code == 200
@@ -545,14 +552,14 @@ def test_every_key_has_a_per_minute_limit_even_on_an_admin_account(app, admin, f
     assert ask(app, secret).status_code == 200
 
 
-def test_last_used_is_shown_after_a_reply(app, admin, friend, clock):
+def test_last_used_is_shown_after_a_reply(app, admin, remote_a, clock):
     secret = make_key(admin)["key"]
     assert admin.get("/api/app-keys").json()["keys"][0]["last_used"] is None
     ask(app, secret)
     assert admin.get("/api/app-keys").json()["keys"][0]["last_used"] == clock.now
 
 
-def test_wrong_keys_lock_out_wrong_keys_but_never_a_right_key(app, admin, friend):
+def test_wrong_keys_lock_out_wrong_keys_but_never_a_right_key(app, admin, remote_a):
     secret = make_key(admin)["key"]
     for _ in range(app_key_api.BAD_KEY_MAX_FAILURES):
         assert outside(app).get("/v1/models", headers=bearer("sf_" + "B" * 43)).status_code == 401
@@ -562,13 +569,13 @@ def test_wrong_keys_lock_out_wrong_keys_but_never_a_right_key(app, admin, friend
     assert ask(app, secret).status_code == 200
 
 
-def test_requests_without_a_key_are_not_counted(app, admin, friend):
+def test_requests_without_a_key_are_not_counted(app, admin, remote_a):
     for _ in range(app_key_api.BAD_KEY_MAX_FAILURES * 3):
         assert outside(app).get("/v1/models").status_code == 401
     assert outside(app).get("/v1/models", headers=bearer("sf_" + "D" * 43)).status_code == 401
 
 
-def test_the_lockout_follows_the_visitor_address_behind_a_trusted_proxy(app, admin, friend):
+def test_the_lockout_follows_the_visitor_address_behind_a_trusted_proxy(app, admin, remote_a):
     proxy = ("127.0.0.1", 40000)
     for _ in range(app_key_api.BAD_KEY_MAX_FAILURES):
         outside(app, proxy, {"CF-Connecting-IP": "203.0.113.5"}).get("/v1/models", headers=bearer("sf_" + "C" * 43))
@@ -578,25 +585,25 @@ def test_the_lockout_follows_the_visitor_address_behind_a_trusted_proxy(app, adm
         "/v1/models", headers=bearer("sf_" + "C" * 43)).status_code == 401
 
 
-def test_a_streamed_tool_call_passes_through_untouched(app, admin, friend, servers):
+def test_a_streamed_tool_call_passes_through_untouched(app, admin, remote_a, servers):
     secret = make_key(admin)["key"]
     answered = ask(app, secret, stream=True, tools=TOOLS, tool_choice="auto")
     assert answered.status_code == 200
     assert answered.content == STREAMED_TOOL_CALL
     sent = servers.chats[-1]
-    assert sent["url"] == FRIEND_URL + "/chat/completions"
-    assert sent["auth"] == f"Bearer {FRIEND_KEY}"
+    assert sent["url"] == REMOTE_A_URL + "/chat/completions"
+    assert sent["auth"] == f"Bearer {REMOTE_A_KEY}"
     assert sent["body"]["tools"] == TOOLS and sent["body"]["tool_choice"] == "auto"
     assert sent["body"]["messages"] == [{"role": "user", "content": PROMPT}]
 
 
-def test_a_whole_reply_with_a_tool_call_passes_through_untouched(app, admin, friend, servers):
+def test_a_whole_reply_with_a_tool_call_passes_through_untouched(app, admin, remote_a, servers):
     secret = make_key(admin)["key"]
     history = [{"role": "user", "content": PROMPT},
                {"role": "assistant", "content": None, "tool_calls": WHOLE_TOOL_CALL["choices"][0]["message"]["tool_calls"]},
                {"role": "tool", "tool_call_id": "call_2", "content": "file text"}]
     answered = outside(app).post("/v1/chat/completions", headers=bearer(secret),
-                                 json={"model": model_id("friend-model"), "messages": history, "tools": TOOLS})
+                                 json={"model": model_id("remote-model-a"), "messages": history, "tools": TOOLS})
     assert answered.status_code == 200 and answered.json() == WHOLE_TOOL_CALL
     assert servers.chats[-1]["body"]["messages"] == history
 
@@ -648,28 +655,28 @@ def test_an_ollama_error_text_is_not_shown_and_the_reply_is_given_back(app, admi
     assert answered.status_code == 502
 
 
-def test_a_refused_upstream_key_is_not_reported_as_a_bad_app_key(app, admin, friend, servers, monkeypatch):
+def test_a_refused_upstream_key_is_not_reported_as_a_bad_app_key(app, admin, remote_a, servers, monkeypatch):
     secret = make_key(admin)["key"]
     check_connections()
-    monkeypatch.setattr(servers, "answer", lambda request: httpx.Response(401, json={"error": f"bad key {FRIEND_KEY}"}))
+    monkeypatch.setattr(servers, "answer", lambda request: httpx.Response(401, json={"error": f"bad key {REMOTE_A_KEY}"}))
     refused = ask(app, secret)
-    assert refused.status_code == 502 and FRIEND_KEY not in refused.text
+    assert refused.status_code == 502 and REMOTE_A_KEY not in refused.text
 
 
-def test_upstream_error_text_never_reaches_the_key_holder(app, admin, friend, servers, monkeypatch, caplog):
+def test_upstream_error_text_never_reaches_the_key_holder(app, admin, remote_a, servers, monkeypatch, caplog):
     caplog.set_level(logging.DEBUG)
     secret = make_key(admin)["key"]
     check_connections()
-    echo = f"you sent Authorization: Bearer {FRIEND_KEY} and {PROMPT}"
+    echo = f"you sent Authorization: Bearer {REMOTE_A_KEY} and {PROMPT}"
     monkeypatch.setattr(servers, "answer", lambda request: httpx.Response(400, json={"error": {"message": echo}}))
     refused = ask(app, secret)
     assert refused.status_code == 400 and refused.json()["error"]["code"] == "upstream_refused"
-    assert FRIEND_KEY not in refused.text and PROMPT not in refused.text
+    assert REMOTE_A_KEY not in refused.text and PROMPT not in refused.text
     logged = "\n".join(record.getMessage() for record in caplog.records)
-    assert FRIEND_KEY not in logged and PROMPT not in logged
+    assert REMOTE_A_KEY not in logged and PROMPT not in logged
 
 
-def test_a_failing_model_server_does_not_use_up_the_daily_replies(app, admin, friend, servers, monkeypatch):
+def test_a_failing_model_server_does_not_use_up_the_daily_replies(app, admin, remote_a, servers, monkeypatch):
     secret = make_key(admin, daily_limit=1)["key"]
     check_connections()
     working = servers.answer
@@ -680,7 +687,7 @@ def test_a_failing_model_server_does_not_use_up_the_daily_replies(app, admin, fr
     assert ask(app, secret).status_code == 429
 
 
-def test_more_than_one_reply_per_request_is_refused(app, admin, friend, servers):
+def test_more_than_one_reply_per_request_is_refused(app, admin, remote_a, servers):
     secret = make_key(admin)["key"]
     assert ask(app, secret, n=3).status_code == 400
     assert servers.chats == []
@@ -690,7 +697,7 @@ def test_more_than_one_reply_per_request_is_refused(app, admin, friend, servers)
     "[" * 100_000 + "]" * 100_000,
     json.dumps({"model": "x/y", "messages": [{"role": "user", "content": "hi"}], "deep": NESTED_TOO_DEEP}),
 ])
-def test_deeply_nested_json_is_a_bad_request(app, admin, friend, servers, body):
+def test_deeply_nested_json_is_a_bad_request(app, admin, remote_a, servers, body):
     secret = make_key(admin, daily_limit=1)["key"]
     refused = outside(app).post("/v1/chat/completions", headers={**bearer(secret), "Content-Type": "application/json"},
                                 content=body)
@@ -699,19 +706,19 @@ def test_deeply_nested_json_is_a_bad_request(app, admin, friend, servers, body):
 
 
 @pytest.mark.parametrize("tool_calls", [5, "call", [1], [{"function": "read_file"}], [{"function": {"arguments": "{}"}}]])
-def test_malformed_tool_calls_are_a_bad_request(app, admin, friend, servers, tool_calls):
+def test_malformed_tool_calls_are_a_bad_request(app, admin, remote_a, servers, tool_calls):
     secret = make_key(admin, daily_limit=1)["key"]
     for stream in (False, True):
         refused = outside(app).post(
             "/v1/chat/completions", headers=bearer(secret),
-            json={"model": model_id("friend-model"), "stream": stream,
+            json={"model": model_id("remote-model-a"), "stream": stream,
                   "messages": [{"role": "assistant", "content": None, "tool_calls": tool_calls}]})
         assert refused.status_code == 400
     assert servers.chats == []
     assert admin.get("/api/app-keys").json()["keys"][0]["last_used"] is None
 
 
-def test_an_oversized_request_is_refused_before_it_is_read(app, admin, friend, servers):
+def test_an_oversized_request_is_refused_before_it_is_read(app, admin, remote_a, servers):
     secret = make_key(admin)["key"]
     big = "x" * (17 * 1024 * 1024)
     refused = ask(app, secret, extra_text=big)
@@ -719,27 +726,27 @@ def test_an_oversized_request_is_refused_before_it_is_read(app, admin, friend, s
     assert servers.chats == []
 
 
-def test_the_key_and_the_prompt_are_never_logged(app, admin, friend, caplog):
+def test_the_key_and_the_prompt_are_never_logged(app, admin, remote_a, caplog):
     caplog.set_level(logging.DEBUG)
     secret = make_key(admin, name="ArtyCode laptop")["key"]
     ask(app, secret)
     ask(app, secret, stream=True)
     outside(app).get("/v1/models", headers=bearer(secret[:-1] + "Z"))
     logged = "\n".join(record.getMessage() for record in caplog.records)
-    assert "ArtyCode laptop" in logged and "friend-model" in logged
+    assert "ArtyCode laptop" in logged and "remote-model-a" in logged
     assert secret not in logged and secret[3:] not in logged
-    assert PROMPT not in logged and FRIEND_KEY not in logged
+    assert PROMPT not in logged and REMOTE_A_KEY not in logged
 
 
-def test_an_outside_openai_compatible_server_is_stored_with_its_key(admin, friend, tmp_path):
-    stored = routes.endpoints.get(friend["id"])
-    assert stored.base_url == FRIEND_URL and stored.provider == "openai" and stored.kind == "api-key"
-    assert routes.api_keys.load()[friend["id"]] == FRIEND_KEY
-    assert FRIEND_KEY not in (tmp_path / "api_keys.json").read_text()
-    assert "friend-model" in [m["id"] for m in admin.get("/api/models").json()["models"]]
+def test_an_outside_openai_compatible_server_is_stored_with_its_key(admin, remote_a, tmp_path):
+    stored = routes.endpoints.get(remote_a["id"])
+    assert stored.base_url == REMOTE_A_URL and stored.provider == "openai" and stored.kind == "api-key"
+    assert routes.api_keys.load()[remote_a["id"]] == REMOTE_A_KEY
+    assert REMOTE_A_KEY not in (tmp_path / "api_keys.json").read_text()
+    assert "remote-model-a" in [m["id"] for m in admin.get("/api/models").json()["models"]]
 
 
-def test_a_backup_leaves_out_the_keys_and_a_restore_never_brings_one_back(app, admin, friend, tmp_path):
+def test_a_backup_leaves_out_the_keys_and_a_restore_never_brings_one_back(app, admin, remote_a, tmp_path):
     made = make_key(admin)
     archive = admin.get("/api/backup").content
     assert "app_keys.json" not in zipfile.ZipFile(io.BytesIO(archive)).namelist()
@@ -770,24 +777,24 @@ def other(admin, servers):
     return added.json()
 
 
-def test_v1_models_says_each_model_is_available(app, admin, friend):
+def test_v1_models_says_each_model_is_available(app, admin, remote_a):
     secret = make_key(admin)["key"]
     assert [m["available"] for m in listed_models(app, secret)] == [True, True]
 
 
-def test_a_down_connection_keeps_its_models_listed_as_unavailable(app, admin, friend, servers):
+def test_a_down_connection_keeps_its_models_listed_as_unavailable(app, admin, remote_a, servers):
     secret = make_key(admin)["key"]
     assert all(model["available"] for model in listed_models(app, secret))
-    servers.friend_down = "refused"
+    servers.remote_down = "refused"
     check_connections()
-    assert [(m["id"], m["available"]) for m in listed_models(app, secret)] == [(model_id("friend-model"), False),
+    assert [(m["id"], m["available"]) for m in listed_models(app, secret)] == [(model_id("remote-model-a"), False),
                                                                                (model_id("other-model"), False)]
 
 
-def test_a_model_on_a_down_connection_is_refused_at_once(app, admin, friend, servers):
+def test_a_model_on_a_down_connection_is_refused_at_once(app, admin, remote_a, servers):
     secret = make_key(admin, daily_limit=5)["key"]
     listed_models(app, secret)
-    servers.friend_down = "timeout"
+    servers.remote_down = "timeout"
     check_connections()
     refused = ask(app, secret)
     assert refused.status_code == 503 and refused.json()["error"]["code"] == "model_unavailable"
@@ -796,43 +803,43 @@ def test_a_model_on_a_down_connection_is_refused_at_once(app, admin, friend, ser
     assert admin.get("/api/app-keys").json()["keys"][0]["last_used"] is None
 
 
-def test_the_same_name_on_two_connections_never_falls_over(app, admin, friend, other, servers):
+def test_the_same_name_on_two_connections_never_falls_over(app, admin, remote_a, other, servers):
     secret = make_key(admin)["key"]
     ids = [m["id"] for m in listed_models(app, secret)]
-    assert ids == [f"{friend['id']}/friend-model", f"{friend['id']}/other-model",
-                   f"{other['id']}/friend-model", f"{other['id']}/other-model"]
-    servers.friend_down = "refused"
+    assert ids == [f"{remote_a['id']}/remote-model-a", f"{remote_a['id']}/other-model",
+                   f"{other['id']}/remote-model-a", f"{other['id']}/other-model"]
+    servers.remote_down = "refused"
     check_connections()
-    refused = ask(app, secret, model=f"{friend['id']}/friend-model")
+    refused = ask(app, secret, model=f"{remote_a['id']}/remote-model-a")
     assert refused.status_code == 503
     assert servers.chats == []
-    assert ask(app, secret, model=f"{other['id']}/friend-model").status_code == 200
+    assert ask(app, secret, model=f"{other['id']}/remote-model-a").status_code == 200
     assert [chat["url"] for chat in servers.chats] == [OTHER_URL + "/chat/completions"]
 
 
-def test_a_key_for_one_connection_never_reaches_another(app, admin, friend, other, servers):
+def test_a_key_for_one_connection_never_reaches_another(app, admin, remote_a, other, servers):
     secret = make_key(admin, grants=[{"endpoint_id": other["id"], "model": "*"}])["key"]
     assert {m["id"].split("/")[0] for m in listed_models(app, secret)} == {other["id"]}
-    servers.friend_down = "refused"
+    servers.remote_down = "refused"
     check_connections()
-    assert ask(app, secret, model=f"{friend['id']}/friend-model").status_code == 403
+    assert ask(app, secret, model=f"{remote_a['id']}/remote-model-a").status_code == 403
     assert servers.chats == []
 
 
-def test_a_connection_that_answers_again_is_available_again(app, admin, friend, servers):
+def test_a_connection_that_answers_again_is_available_again(app, admin, remote_a, servers):
     secret = make_key(admin)["key"]
     check_connections()
-    servers.friend_down = "500"
+    servers.remote_down = "500"
     check_connections()
     assert ask(app, secret).status_code == 503
-    servers.friend_down = None
+    servers.remote_down = None
     check_connections()
     assert ask(app, secret).status_code == 200
     assert all(model["available"] for model in listed_models(app, secret))
 
 
-def test_a_connection_never_seen_up_offers_no_models(app, admin, friend, servers):
-    servers.friend_down = "refused"
+def test_a_connection_never_seen_up_offers_no_models(app, admin, remote_a, servers):
+    servers.remote_down = "refused"
     secret = make_key(admin)["key"]
     check_connections()
     assert listed_models(app, secret) == []
@@ -842,30 +849,30 @@ def test_a_connection_never_seen_up_offers_no_models(app, admin, friend, servers
 @pytest.mark.parametrize("failure, kind", [("refused", "unreachable"), ("timeout", "timeout"),
                                            ("401", "unauthorized"), ("403", "unauthorized"),
                                            ("502", "server_error"), ("404", "http_error")])
-def test_each_failure_is_named_without_secrets(app, admin, friend, servers, failure, kind):
-    servers.friend_down = failure
+def test_each_failure_is_named_without_secrets(app, admin, remote_a, servers, failure, kind):
+    servers.remote_down = failure
     check_connections()
-    health = next(e for e in admin.get("/api/model-endpoints").json()["endpoints"] if e["id"] == friend["id"])["health"]
+    health = next(e for e in admin.get("/api/model-endpoints").json()["endpoints"] if e["id"] == remote_a["id"])["health"]
     assert health["available"] is False and health["error_kind"] == kind
     assert set(health) == {"available", "last_checked", "last_change", "error_kind"}
-    assert FRIEND_KEY not in json.dumps(health)
+    assert REMOTE_A_KEY not in json.dumps(health)
 
 
-def test_last_change_moves_only_when_the_connection_flips(app, admin, friend, servers, clock):
+def test_last_change_moves_only_when_the_connection_flips(app, admin, remote_a, servers, clock):
     check_connections()
-    first = routes.connection_health.state(friend["id"])
+    first = routes.connection_health.state(remote_a["id"])
     clock.now += 60
     check_connections()
-    steady = routes.connection_health.state(friend["id"])
+    steady = routes.connection_health.state(remote_a["id"])
     assert steady.last_checked == clock.now and steady.last_change == first.last_change
     clock.now += 60
-    servers.friend_down = "refused"
+    servers.remote_down = "refused"
     check_connections()
-    flipped = routes.connection_health.state(friend["id"])
+    flipped = routes.connection_health.state(remote_a["id"])
     assert flipped.available is False and flipped.last_change == clock.now
 
 
-def test_chat_requests_use_the_checked_model_list(app, admin, friend, servers):
+def test_chat_requests_use_the_checked_model_list(app, admin, remote_a, servers):
     secret = make_key(admin)["key"]
     ask(app, secret)
     lists_before = servers.model_lists
@@ -874,11 +881,11 @@ def test_chat_requests_use_the_checked_model_list(app, admin, friend, servers):
     assert servers.model_lists == lists_before
 
 
-def test_a_removed_connection_is_forgotten(app, admin, friend):
+def test_a_removed_connection_is_forgotten(app, admin, remote_a):
     check_connections()
-    assert admin.delete(f"/api/model-endpoints/{friend['id']}").status_code == 200
+    assert admin.delete(f"/api/model-endpoints/{remote_a['id']}").status_code == 200
     check_connections()
-    assert routes.connection_health.state(friend["id"]) is None
+    assert routes.connection_health.state(remote_a["id"]) is None
 
 
 def test_the_checker_stops_when_told(servers):
@@ -914,22 +921,22 @@ def timed(call):
     return result, time.monotonic() - started
 
 
-def test_a_dripping_model_list_never_holds_up_a_key_for_another_connection(app, admin, friend, other, servers,
+def test_a_dripping_model_list_never_holds_up_a_key_for_another_connection(app, admin, remote_a, other, servers,
                                                                              quick_deadline):
-    servers.friend_list = lambda: httpx.Response(200, content=dripping_body())
+    servers.remote_list = lambda: httpx.Response(200, content=dripping_body())
     secret = make_key(admin, grants=[{"endpoint_id": other["id"], "model": "*"}])["key"]
     for _ in range(3):
-        answered, took = timed(lambda: ask(app, secret, model=f"{other['id']}/friend-model"))
+        answered, took = timed(lambda: ask(app, secret, model=f"{other['id']}/remote-model-a"))
         assert answered.status_code == 200 and took < ANSWER_WITHIN_SECONDS
 
 
-def test_a_dripping_model_list_is_cut_off_at_the_deadline(app, admin, friend, other, servers, quick_deadline):
-    servers.friend_list = lambda: httpx.Response(200, content=dripping_body())
+def test_a_dripping_model_list_is_cut_off_at_the_deadline(app, admin, remote_a, other, servers, quick_deadline):
+    servers.remote_list = lambda: httpx.Response(200, content=dripping_body())
     secret = make_key(admin)["key"]
     listed, took = timed(lambda: listed_models(app, secret))
     assert took < ANSWER_WITHIN_SECONDS
     assert {m["id"].split("/")[0] for m in listed} == {other["id"]}
-    assert routes.connection_health.state(friend["id"]).error_kind == "timeout"
+    assert routes.connection_health.state(remote_a["id"]).error_kind == "timeout"
     _, round_took = timed(check_connections)
     assert round_took < ANSWER_WITHIN_SECONDS
     assert routes.connection_health.state(other["id"]).available is True
@@ -940,7 +947,7 @@ BAD_MODEL_LISTS = {
     "data is null": {"data": None},
     "data is a number": {"data": 5},
     "an id is a number": {"data": [{"id": 5}]},
-    "an entry is a string": {"data": ["friend-model"]},
+    "an entry is a string": {"data": ["remote-model-a"]},
     "an id is too long": {"data": [{"id": TOO_LONG_ID}]},
     "too many models": {"data": [{"id": f"model-{n}"} for n in range(1001)]},
     "not an object": [1, 2, 3],
@@ -948,17 +955,17 @@ BAD_MODEL_LISTS = {
 
 
 @pytest.mark.parametrize("answer", BAD_MODEL_LISTS.values(), ids=BAD_MODEL_LISTS.keys())
-def test_a_bad_model_list_marks_the_connection_down_and_keeps_the_last_good_list(app, admin, friend, other, servers,
+def test_a_bad_model_list_marks_the_connection_down_and_keeps_the_last_good_list(app, admin, remote_a, other, servers,
                                                                                 answer):
     secret = make_key(admin)["key"]
     check_connections()
-    servers.friend_list = lambda: httpx.Response(200, json=answer)
+    servers.remote_list = lambda: httpx.Response(200, json=answer)
     check_connections()
-    friend_state = routes.connection_health.state(friend["id"])
-    assert friend_state.available is False and friend_state.error_kind == "bad_answer"
-    assert [m["id"] for m in friend_state.models] == LISTED
-    assert ask(app, secret, model=f"{other['id']}/friend-model").status_code == 200
-    assert listed_models(app, secret)[0] == {"id": model_id("friend-model", connection_of_id(friend["id"])),
+    remote_state = routes.connection_health.state(remote_a["id"])
+    assert remote_state.available is False and remote_state.error_kind == "bad_answer"
+    assert [m["id"] for m in remote_state.models] == LISTED
+    assert ask(app, secret, model=f"{other['id']}/remote-model-a").status_code == 200
+    assert listed_models(app, secret)[0] == {"id": model_id("remote-model-a", connection_of_id(remote_a["id"])),
                                              "object": "model", "created": 0, "owned_by": "starfire", "available": False}
 
 
@@ -966,53 +973,53 @@ def connection_of_id(endpoint_id):
     return routes.endpoints.get(endpoint_id)
 
 
-def test_a_huge_model_list_is_not_read_past_the_cap(app, admin, friend, other, servers):
+def test_a_huge_model_list_is_not_read_past_the_cap(app, admin, remote_a, other, servers):
     padding = "x" * (connection_health.MAX_LIST_BYTES + 1)
-    servers.friend_list = lambda: httpx.Response(200, json={"data": [{"id": "friend-model"}], "padding": padding})
+    servers.remote_list = lambda: httpx.Response(200, json={"data": [{"id": "remote-model-a"}], "padding": padding})
     check_connections()
-    assert routes.connection_health.state(friend["id"]).error_kind == "bad_answer"
+    assert routes.connection_health.state(remote_a["id"]).error_kind == "bad_answer"
     assert routes.connection_health.state(other["id"]).available is True
 
 
-def test_any_failure_inside_one_check_is_kept_to_that_connection(app, admin, friend, other, monkeypatch):
+def test_any_failure_inside_one_check_is_kept_to_that_connection(app, admin, remote_a, other, monkeypatch):
     def key_for(endpoint):
-        if endpoint.id == friend["id"]:
+        if endpoint.id == remote_a["id"]:
             raise RuntimeError("the key store broke")
         return None
 
     monkeypatch.setattr(routes.connection_health, "api_key_fn", key_for)
     check_connections()
-    assert routes.connection_health.state(friend["id"]).error_kind == "bad_answer"
+    assert routes.connection_health.state(remote_a["id"]).error_kind == "bad_answer"
     assert routes.connection_health.state(other["id"]).available is True
 
 
-def test_a_grant_names_its_model_exactly(app, admin, friend, servers):
-    servers.friend_list = lambda: httpx.Response(200, json={"data": [{"id": name} for name in
-                                                                     ("friend-model", "FRIEND-MODEL", "friend-model ")]})
-    secret = make_key(admin, grants=[{"endpoint_id": friend["id"], "model": "friend-model"}])["key"]
-    assert [m["id"] for m in listed_models(app, secret)] == [f"{friend['id']}/friend-model"]
-    assert ask(app, secret, model=f"{friend['id']}/FRIEND-MODEL").status_code == 403
+def test_a_grant_names_its_model_exactly(app, admin, remote_a, servers):
+    servers.remote_list = lambda: httpx.Response(200, json={"data": [{"id": name} for name in
+                                                                     ("remote-model-a", "REMOTE-MODEL-A", "remote-model-a ")]})
+    secret = make_key(admin, grants=[{"endpoint_id": remote_a["id"], "model": "remote-model-a"}])["key"]
+    assert [m["id"] for m in listed_models(app, secret)] == [f"{remote_a['id']}/remote-model-a"]
+    assert ask(app, secret, model=f"{remote_a['id']}/REMOTE-MODEL-A").status_code == 403
     assert servers.chats == []
 
 
-def test_a_model_named_star_is_never_the_whole_connection(app, admin, friend, servers):
-    servers.friend_list = lambda: httpx.Response(200, json={"data": [{"id": "*"}, {"id": "friend-model"}]})
+def test_a_model_named_star_is_never_the_whole_connection(app, admin, remote_a, servers):
+    servers.remote_list = lambda: httpx.Response(200, json={"data": [{"id": "*"}, {"id": "remote-model-a"}]})
     offered = admin.get(f"/api/app-keys/models/{user_id('sam@example.com')}").json()["connections"][0]["models"]
-    assert [model["name"] for model in offered] == ["friend-model"]
-    secret = make_key(admin, grants=[{"endpoint_id": friend["id"], "model": "friend-model"}])["key"]
-    assert ask(app, secret, model=f"{friend['id']}/*").status_code == 403
+    assert [model["name"] for model in offered] == ["remote-model-a"]
+    secret = make_key(admin, grants=[{"endpoint_id": remote_a["id"], "model": "remote-model-a"}])["key"]
+    assert ask(app, secret, model=f"{remote_a['id']}/*").status_code == 403
     assert servers.chats == []
 
 
 @pytest.mark.parametrize("status", [301, 302, 307])
-def test_an_upstream_redirect_is_an_upstream_error_and_the_reply_is_given_back(app, admin, friend, servers, status):
+def test_an_upstream_redirect_is_an_upstream_error_and_the_reply_is_given_back(app, admin, remote_a, servers, status):
     secret = make_key(admin, daily_limit=1)["key"]
-    servers.friend_chat = httpx.Response(status, headers={"location": "https://elsewhere.example.com/"},
+    servers.remote_chat = httpx.Response(status, headers={"location": "https://elsewhere.example.com/"},
                                          content=b"moved, here is a private note")
     refused = ask(app, secret)
     assert refused.status_code == 502 and refused.json()["error"]["code"] == "upstream_error"
     assert "private note" not in refused.text
-    servers.friend_chat = None
+    servers.remote_chat = None
     assert ask(app, secret).status_code == 200
 
 
@@ -1025,14 +1032,14 @@ def last_used(admin):
     return admin.get("/api/app-keys").json()["keys"][0]["last_used"]
 
 
-def test_a_request_over_four_mib_is_refused_before_it_is_read(app, admin, friend, servers):
+def test_a_request_over_four_mib_is_refused_before_it_is_read(app, admin, remote_a, servers):
     secret = make_key(admin)["key"]
     refused = ask(app, secret, extra_text="x" * (5 * 1024 * 1024))
     assert refused.status_code == 413
     assert servers.chats == []
 
 
-def test_a_request_with_too_many_json_values_is_a_bad_request(app, admin, friend, servers):
+def test_a_request_with_too_many_json_values_is_a_bad_request(app, admin, remote_a, servers):
     secret = make_key(admin, daily_limit=1)["key"]
     many_parts = [0] * (app_key_api.MAX_JSON_VALUES + 1)
     refused = ask(app, secret, metadata=many_parts)
@@ -1041,16 +1048,16 @@ def test_a_request_with_too_many_json_values_is_a_bad_request(app, admin, friend
     assert servers.chats == [] and last_used(admin) is None
 
 
-def test_cheap_shape_checks_come_before_the_walk_over_every_value(app, admin, friend, servers):
+def test_cheap_shape_checks_come_before_the_walk_over_every_value(app, admin, remote_a, servers):
     secret = make_key(admin)["key"]
     too_many = [{"role": "user", "content": "hi"}] * (app_key_api.MAX_MESSAGES + 1)
-    refused = raw_ask(app, secret, json.dumps({"model": model_id("friend-model"), "messages": too_many,
+    refused = raw_ask(app, secret, json.dumps({"model": model_id("remote-model-a"), "messages": too_many,
                                                "deep": NESTED_TOO_DEEP}))
     assert refused.status_code == 400
     assert refused.json()["error"]["message"].startswith("messages must be a list of 1 to")
 
 
-def test_the_request_is_parsed_and_checked_off_the_event_loop(app, admin, friend, servers, monkeypatch):
+def test_the_request_is_parsed_and_checked_off_the_event_loop(app, admin, remote_a, servers, monkeypatch):
     secret = make_key(admin)["key"]
     ran_in_thread = []
     real_to_thread = app_key_api.asyncio.to_thread
@@ -1079,14 +1086,14 @@ NOT_PLAIN_JSON = {
 
 
 @pytest.mark.parametrize("template", NOT_PLAIN_JSON.values(), ids=NOT_PLAIN_JSON.keys())
-def test_values_a_model_server_cannot_take_are_a_bad_request(app, admin, friend, servers, template):
+def test_values_a_model_server_cannot_take_are_a_bad_request(app, admin, remote_a, servers, template):
     secret = make_key(admin, daily_limit=1)["key"]
-    refused = raw_ask(app, secret, template % model_id("friend-model"))
+    refused = raw_ask(app, secret, template % model_id("remote-model-a"))
     assert refused.status_code == 400
     assert servers.chats == [] and last_used(admin) is None
 
 
-def test_a_lone_surrogate_in_the_model_id_is_a_bad_request(app, admin, friend, servers):
+def test_a_lone_surrogate_in_the_model_id_is_a_bad_request(app, admin, remote_a, servers):
     secret = make_key(admin)["key"]
     refused = raw_ask(app, secret, '{"model": "x/' + LONE_SURROGATE + '", "messages": [{"role": "user", "content": "hi"}]}')
     assert refused.status_code == 400
@@ -1099,12 +1106,12 @@ def test_a_refusal_naming_a_lone_surrogate_is_still_sent(app):
     assert json.loads(sent.body)["error"]["message"] == "no model x\ud800"
 
 
-def test_a_whole_reply_over_the_cap_is_an_upstream_error_and_still_uses_up_the_reply(app, admin, friend, servers):
+def test_a_whole_reply_over_the_cap_is_an_upstream_error_and_still_uses_up_the_reply(app, admin, remote_a, servers):
     secret = make_key(admin, daily_limit=1)["key"]
-    servers.friend_chat = httpx.Response(200, content=b"x" * (app_key_api.MAX_REPLY_BYTES + 1))
+    servers.remote_chat = httpx.Response(200, content=b"x" * (app_key_api.MAX_REPLY_BYTES + 1))
     refused = ask(app, secret)
     assert refused.status_code == 502 and refused.json()["error"]["code"] == "upstream_error"
-    servers.friend_chat = None
+    servers.remote_chat = None
     assert ask(app, secret).status_code == 429
 
 
@@ -1119,16 +1126,16 @@ class UnreadableBody(httpx.AsyncByteStream):
 
 
 @pytest.mark.parametrize("stream", [False, True])
-def test_an_error_body_from_the_model_server_is_never_read(app, admin, friend, servers, stream):
+def test_an_error_body_from_the_model_server_is_never_read(app, admin, remote_a, servers, stream):
     secret = make_key(admin)["key"]
     body = UnreadableBody()
-    servers.friend_chat = httpx.Response(500, stream=body)
+    servers.remote_chat = httpx.Response(500, stream=body)
     refused = ask(app, secret, stream=stream)
     assert refused.status_code == 502
     assert body.read is False
 
 
-def test_starfire_asks_the_model_server_for_plain_uncompressed_bytes(app, admin, friend, servers):
+def test_starfire_asks_the_model_server_for_plain_uncompressed_bytes(app, admin, remote_a, servers):
     secret = make_key(admin)["key"]
     ask(app, secret)
     ask(app, secret, stream=True)
@@ -1150,7 +1157,7 @@ def slow_whole_reply(servers, seconds):
     return answer
 
 
-def test_a_whole_reply_past_the_deadline_is_stopped(app, admin, friend, servers, short_deadline, monkeypatch):
+def test_a_whole_reply_past_the_deadline_is_stopped(app, admin, remote_a, servers, short_deadline, monkeypatch):
     secret = make_key(admin, daily_limit=1)["key"]
     check_connections()
     monkeypatch.setattr(servers, "answer", slow_whole_reply(servers, 5))
@@ -1164,9 +1171,9 @@ async def slow_stream():
         await asyncio.sleep(0.1)
 
 
-def test_a_stream_past_the_deadline_is_stopped(app, admin, friend, servers, short_deadline):
+def test_a_stream_past_the_deadline_is_stopped(app, admin, remote_a, servers, short_deadline):
     secret = make_key(admin)["key"]
-    servers.friend_chat = httpx.Response(200, content=slow_stream(), headers={"content-type": "text/event-stream"})
+    servers.remote_chat = httpx.Response(200, content=slow_stream(), headers={"content-type": "text/event-stream"})
     streamed, took = timed(lambda: ask(app, secret, stream=True))
     assert took < ANSWER_WITHIN_SECONDS
     assert app_key_api.TOO_SLOW in streamed.text
@@ -1177,16 +1184,16 @@ async def breaking_stream():
     raise httpx.ReadError("the connection broke")
 
 
-def test_a_stream_that_breaks_off_ends_with_an_upstream_error_event(app, admin, friend, servers, caplog):
+def test_a_stream_that_breaks_off_ends_with_an_upstream_error_event(app, admin, remote_a, servers, caplog):
     secret = make_key(admin)["key"]
-    servers.friend_chat = httpx.Response(200, content=breaking_stream(), headers={"content-type": "text/event-stream"})
+    servers.remote_chat = httpx.Response(200, content=breaking_stream(), headers={"content-type": "text/event-stream"})
     streamed = ask(app, secret, stream=True)
     events = [json.loads(line[len("data: "):]) for line in streamed.text.split("\n\n") if line.startswith("data: ")]
     assert events[-1]["error"]["code"] == "upstream_error"
     assert any("broke off (ReadError)" in record.getMessage() for record in caplog.records)
 
 
-def test_a_key_may_run_only_a_few_replies_at_once(app, admin, friend, servers, monkeypatch):
+def test_a_key_may_run_only_a_few_replies_at_once(app, admin, remote_a, servers, monkeypatch):
     monkeypatch.setattr(app_key_api, "running_replies", app_key_api.RunningReplies(1))
     made = make_key(admin)
     held = app_key_api.running_replies.take(made["id"])
@@ -1195,7 +1202,7 @@ def test_a_key_may_run_only_a_few_replies_at_once(app, admin, friend, servers, m
     held.release()
     for stream in (False, True, False):
         assert ask(app, made["key"], stream=stream).status_code == 200
-    servers.friend_chat = httpx.Response(500, json={"error": "down"})
+    servers.remote_chat = httpx.Response(500, json={"error": "down"})
     assert ask(app, made["key"]).status_code == 502
     assert app_key_api.running_replies.running == {}
 
@@ -1204,7 +1211,7 @@ def test_the_running_limit_matches_the_web_chat(app):
     assert app_key_api.MAX_RUNNING_PER_KEY == 3
 
 
-def test_revoking_a_key_stops_its_whole_reply_at_once(app, admin, friend, servers, monkeypatch):
+def test_revoking_a_key_stops_its_whole_reply_at_once(app, admin, remote_a, servers, monkeypatch):
     monkeypatch.setattr(app_key_api, "KEY_RECHECK_SECONDS", 0.05)
     made = make_key(admin)
     check_connections()
@@ -1388,16 +1395,16 @@ def test_add_ons_add_routers_but_no_middleware(monkeypatch):
     assert server.user_middleware[0].cls is caller_watch.KeepServerReceive
 
 
-def test_failed_upstream_requests_still_count_toward_the_minute_limit(app, admin, friend, servers, monkeypatch):
+def test_failed_upstream_requests_still_count_toward_the_minute_limit(app, admin, remote_a, servers, monkeypatch):
     monkeypatch.setattr(config, "app_key_requests_per_minute", 2)
     secret = make_key(admin)["key"]
-    servers.friend_chat = httpx.Response(500, json={"error": "down"})
+    servers.remote_chat = httpx.Response(500, json={"error": "down"})
     assert [ask(app, secret).status_code for _ in range(3)] == [502, 502, 429]
 
 
-@pytest.mark.parametrize("grant", [{"model": " friend-model"}, {"model": "friend-model "}])
-def test_a_grant_name_with_surrounding_spaces_is_refused_not_trimmed(admin, friend, grant):
-    refused = new_key(admin, grants=[{"endpoint_id": friend["id"], **grant}])
+@pytest.mark.parametrize("grant", [{"model": " remote-model-a"}, {"model": "remote-model-a "}])
+def test_a_grant_name_with_surrounding_spaces_is_refused_not_trimmed(admin, remote_a, grant):
+    refused = new_key(admin, grants=[{"endpoint_id": remote_a["id"], **grant}])
     assert refused.status_code == 400
     assert admin.get("/api/app-keys").json()["keys"] == []
 
@@ -1406,7 +1413,7 @@ def stored_keys(tmp_path):
     return json.loads((tmp_path / "app_keys.json").read_text())
 
 
-def test_an_unknown_field_in_the_key_file_does_not_drop_the_key(app, admin, friend, tmp_path):
+def test_an_unknown_field_in_the_key_file_does_not_drop_the_key(app, admin, remote_a, tmp_path):
     secret = make_key(admin)["key"]
     keys = stored_keys(tmp_path)
     keys[0]["added_by_a_newer_version"] = True
@@ -1414,7 +1421,7 @@ def test_an_unknown_field_in_the_key_file_does_not_drop_the_key(app, admin, frie
     assert ask(app, secret).status_code == 200
 
 
-def test_a_broken_entry_in_the_key_file_is_logged_and_the_others_kept(app, admin, friend, tmp_path, caplog):
+def test_a_broken_entry_in_the_key_file_is_logged_and_the_others_kept(app, admin, remote_a, tmp_path, caplog):
     secret = make_key(admin)["key"]
     keys = stored_keys(tmp_path)
     (tmp_path / "app_keys.json").write_text(json.dumps([{"name": "half a key"}, "junk", *keys]))
@@ -1423,7 +1430,7 @@ def test_a_broken_entry_in_the_key_file_is_logged_and_the_others_kept(app, admin
     assert "skipped 2 unreadable entries" in logged
 
 
-def test_an_unreadable_key_file_is_set_aside_not_overwritten(app, admin, friend, tmp_path, caplog):
+def test_an_unreadable_key_file_is_set_aside_not_overwritten(app, admin, remote_a, tmp_path, caplog):
     (tmp_path / "app_keys.json").write_text("[{not json")
     make_key(admin)
     aside = list(tmp_path.glob("app_keys.json.unreadable-*"))
@@ -1458,18 +1465,18 @@ class FakeArty:
 
 
 @pytest.fixture
-def arty_rules(friend, servers, monkeypatch):
+def arty_rules(remote_a, servers, monkeypatch):
     fake = FakeArty()
     monkeypatch.setattr(remote_rules.arty_devices, "ask_brain", fake)
-    monkeypatch.setattr(config, "remote_rules_connections", friend["id"])
-    servers.friend_chat = httpx.Response(200, content=openai_stream("It works ", f"{EM_DASH} mostly."),
+    monkeypatch.setattr(config, "remote_rules_connections", remote_a["id"])
+    servers.remote_chat = httpx.Response(200, content=openai_stream("It works ", f"{EM_DASH} mostly."),
                                          headers={"content-type": "text/event-stream"})
     return fake
 
 
 def ruled_ask(app, secret, stream=False, messages=None, **extra):
     return outside(app).post("/v1/chat/completions", headers=bearer(secret), json={
-        "model": model_id("friend-model"), "stream": stream,
+        "model": model_id("remote-model-a"), "stream": stream,
         "messages": messages or [{"role": "system", "content": "Answer briefly."}, {"role": "user", "content": PROMPT}],
         **extra})
 
@@ -1480,7 +1487,7 @@ def streamed_text(answered):
     return "".join(chunk["choices"][0]["delta"].get("content") or "" for chunk in chunks if "choices" in chunk)
 
 
-def test_a_key_on_a_ruled_connection_gets_artys_rules_and_no_long_dashes(app, admin, friend, servers, arty_rules):
+def test_a_key_on_a_ruled_connection_gets_artys_rules_and_no_long_dashes(app, admin, remote_a, servers, arty_rules):
     secret = make_key(admin)["key"]
     answered = ruled_ask(app, secret, tools=[*TOOLS, SEARCH_TOOL])
     assert answered.status_code == 200, answered.text
@@ -1494,7 +1501,7 @@ def test_a_key_on_a_ruled_connection_gets_artys_rules_and_no_long_dashes(app, ad
     assert "search_web" in arty_rules.asked[-1][2]["said"]
 
 
-def test_a_streamed_reply_on_a_ruled_connection_has_no_long_dashes(app, admin, friend, servers, arty_rules):
+def test_a_streamed_reply_on_a_ruled_connection_has_no_long_dashes(app, admin, remote_a, servers, arty_rules):
     secret = make_key(admin)["key"]
     answered = ruled_ask(app, secret, stream=True)
     assert answered.status_code == 200
@@ -1502,14 +1509,14 @@ def test_a_streamed_reply_on_a_ruled_connection_has_no_long_dashes(app, admin, f
     assert EM_DASH not in answered.text
 
 
-def test_tools_outside_the_remote_list_are_never_sent_to_a_ruled_connection(app, admin, friend, servers, arty_rules):
+def test_tools_outside_the_remote_list_are_never_sent_to_a_ruled_connection(app, admin, remote_a, servers, arty_rules):
     secret = make_key(admin)["key"]
     assert ruled_ask(app, secret, tools=TOOLS, tool_choice="auto").status_code == 200
     assert "tools" not in servers.chats[-1]["body"] and "tool_choice" not in servers.chats[-1]["body"]
 
 
 @pytest.mark.parametrize("stream", [False, True])
-def test_a_request_arty_declines_never_reaches_the_model(app, admin, friend, servers, arty_rules, stream):
+def test_a_request_arty_declines_never_reaches_the_model(app, admin, remote_a, servers, arty_rules, stream):
     arty_rules.declined = ARTY_DECLINE
     secret = make_key(admin)["key"]
     answered = ruled_ask(app, secret, stream=stream)
@@ -1519,14 +1526,14 @@ def test_a_request_arty_declines_never_reaches_the_model(app, admin, friend, ser
     assert servers.chats == []
 
 
-def test_text_sent_as_parts_still_reaches_artys_check(app, admin, friend, servers, arty_rules):
+def test_text_sent_as_parts_still_reaches_artys_check(app, admin, remote_a, servers, arty_rules):
     secret = make_key(admin)["key"]
     parts = [{"role": "user", "content": [{"type": "text", "text": PROMPT}]}]
     assert ruled_ask(app, secret, messages=parts).status_code == 200
     assert arty_rules.asked[-1][2]["said"] == PROMPT
 
 
-def test_a_ruled_connection_is_refused_when_arty_cannot_be_reached(app, admin, friend, servers, arty_rules):
+def test_a_ruled_connection_is_refused_when_arty_cannot_be_reached(app, admin, remote_a, servers, arty_rules):
     arty_rules.down = True
     secret = make_key(admin, daily_limit=1)["key"]
     refused = ruled_ask(app, secret)
@@ -1536,7 +1543,7 @@ def test_a_ruled_connection_is_refused_when_arty_cannot_be_reached(app, admin, f
     assert ruled_ask(app, secret).status_code == 200
 
 
-def test_a_connection_without_rules_is_still_passed_through(app, admin, friend, servers, monkeypatch):
+def test_a_connection_without_rules_is_still_passed_through(app, admin, remote_a, servers, monkeypatch):
     monkeypatch.setattr(config, "remote_rules_connections", "some-other-connection")
     secret = make_key(admin)["key"]
     answered = ask(app, secret, tools=TOOLS)
@@ -1548,19 +1555,19 @@ def picker(client):
     return client.get("/api/models").json()["models"]
 
 
-def test_model_lists_are_asked_for_as_plain_uncompressed_bytes(app, admin, friend, servers):
+def test_model_lists_are_asked_for_as_plain_uncompressed_bytes(app, admin, remote_a, servers):
     servers.list_encodings.clear()
     check_connections()
     picker(admin)
     assert servers.list_encodings and set(servers.list_encodings) == {"identity"}
 
 
-def test_one_unreadable_entry_does_not_drop_the_rest_of_a_connections_list(app, admin, friend, servers, caplog):
-    servers.friend_list = lambda: httpx.Response(200, json={"data": [{"id": "friend-model"}, {"id": 5}, "junk"]})
-    assert [m["id"] for m in picker(admin)] == ["friend-model"]
+def test_one_unreadable_entry_does_not_drop_the_rest_of_a_connections_list(app, admin, remote_a, servers, caplog):
+    servers.remote_list = lambda: httpx.Response(200, json={"data": [{"id": "remote-model-a"}, {"id": 5}, "junk"]})
+    assert [m["id"] for m in picker(admin)] == ["remote-model-a"]
     assert any("skipped 2 unreadable entries" in record.getMessage() for record in caplog.records)
     check_connections()
-    assert routes.connection_health.state(friend["id"]).available is True
+    assert routes.connection_health.state(remote_a["id"]).available is True
 
 
 def test_an_unreadable_list_is_logged_as_unreadable_without_its_address(app, admin, servers, caplog):
@@ -1574,21 +1581,21 @@ def test_an_unreadable_list_is_logged_as_unreadable_without_its_address(app, adm
     assert "hunter2" not in logged and "not a JSON object" not in logged
 
 
-def test_the_picker_list_has_the_same_size_cap_as_the_health_check(app, admin, friend, other, servers):
+def test_the_picker_list_has_the_same_size_cap_as_the_health_check(app, admin, remote_a, other, servers):
     padding = "x" * (connection_health.MAX_LIST_BYTES + 1)
-    servers.friend_list = lambda: httpx.Response(200, json={"data": [{"id": "friend-model"}], "padding": padding})
+    servers.remote_list = lambda: httpx.Response(200, json={"data": [{"id": "remote-model-a"}], "padding": padding})
     assert {m["endpoint_id"] for m in picker(admin) if not m["offline"]} == {other["id"]}
 
 
-def test_a_connection_whose_list_shrank_does_not_show_its_old_models_as_offline(app, admin, friend, servers):
+def test_a_connection_whose_list_shrank_does_not_show_its_old_models_as_offline(app, admin, remote_a, servers):
     check_connections()
-    servers.friend_list = lambda: httpx.Response(200, json={"data": []})
+    servers.remote_list = lambda: httpx.Response(200, json={"data": []})
     assert picker(admin) == []
 
 
-def test_a_listing_failure_names_its_own_reason_even_when_the_last_check_was_fine(app, admin, friend, servers):
+def test_a_listing_failure_names_its_own_reason_even_when_the_last_check_was_fine(app, admin, remote_a, servers):
     check_connections()
-    servers.friend_list = lambda: httpx.Response(500, json={"error": "busy"})
+    servers.remote_list = lambda: httpx.Response(500, json={"error": "busy"})
     shown = picker(admin)
     assert shown and all(m["offline"] and m["health"]["error_kind"] == "server_error" for m in shown)
 
@@ -1610,22 +1617,22 @@ def test_an_admin_sees_host_and_port_never_the_sign_in_part_of_an_address(app, a
 
 
 @pytest.mark.parametrize("stream", [False, True])
-def test_a_number_too_large_to_hold_is_a_bad_request(app, admin, friend, servers, stream):
+def test_a_number_too_large_to_hold_is_a_bad_request(app, admin, remote_a, servers, stream):
     secret = make_key(admin)["key"]
     refused = raw_ask(app, secret, '{"model": "%s", "temperature": 1e999, "stream": %s, "messages": [{"role": "user", '
-                                   '"content": "hi"}]}' % (model_id("friend-model"), json.dumps(stream)))
+                                   '"content": "hi"}]}' % (model_id("remote-model-a"), json.dumps(stream)))
     assert refused.status_code == 400 and refused.json()["error"]["type"] == "invalid_request_error"
     assert servers.chats == []
 
 
-def test_a_reply_stopped_for_being_too_long_still_uses_up_a_daily_reply(app, admin, friend, servers, monkeypatch):
+def test_a_reply_stopped_for_being_too_long_still_uses_up_a_daily_reply(app, admin, remote_a, servers, monkeypatch):
     monkeypatch.setattr(app_key_api, "MAX_REPLY_BYTES", 1000)
     secret = make_key(admin, daily_limit=1)["key"]
-    servers.friend_chat = httpx.Response(200, content=b"x" * 5000)
+    servers.remote_chat = httpx.Response(200, content=b"x" * 5000)
     assert [ask(app, secret).status_code for _ in range(2)] == [502, 429]
 
 
-def test_a_reply_stopped_for_being_too_slow_still_uses_up_a_daily_reply(app, admin, friend, servers, monkeypatch):
+def test_a_reply_stopped_for_being_too_slow_still_uses_up_a_daily_reply(app, admin, remote_a, servers, monkeypatch):
     monkeypatch.setattr(app_key_api, "REPLY_DEADLINE_SECONDS", 0.2)
     monkeypatch.setattr(app_key_api, "KEY_RECHECK_SECONDS", 0.05)
     secret = make_key(admin, daily_limit=1)["key"]
@@ -1650,22 +1657,22 @@ async def thinking_only(seconds, before=None):
     yield b"data: [DONE]\n\n"
 
 
-def test_a_ruled_stream_that_only_thinks_is_stopped_at_the_deadline(app, admin, friend, servers, arty_rules,
+def test_a_ruled_stream_that_only_thinks_is_stopped_at_the_deadline(app, admin, remote_a, servers, arty_rules,
                                                                     monkeypatch):
     monkeypatch.setattr(app_key_api, "REPLY_DEADLINE_SECONDS", 0.3)
     monkeypatch.setattr(app_key_api, "KEY_RECHECK_SECONDS", 0.05)
     made = make_key(admin)
-    servers.friend_chat = httpx.Response(200, content=thinking_only(3.0), headers={"content-type": "text/event-stream"})
+    servers.remote_chat = httpx.Response(200, content=thinking_only(3.0), headers={"content-type": "text/event-stream"})
     streamed, took = timed(lambda: ruled_ask(app, made["key"], stream=True))
     assert app_key_api.TOO_SLOW in streamed.text and took < ANSWER_WITHIN_SECONDS
 
 
-def test_a_ruled_stream_that_only_thinks_stops_when_its_key_is_revoked(app, admin, friend, servers, arty_rules,
+def test_a_ruled_stream_that_only_thinks_stops_when_its_key_is_revoked(app, admin, remote_a, servers, arty_rules,
                                                                        monkeypatch):
     monkeypatch.setattr(app_key_api, "KEY_RECHECK_SECONDS", 0.05)
     made = make_key(admin)
     revoke = functools.partial(auth_routes.app_keys.revoke, made["id"])
-    servers.friend_chat = httpx.Response(200, content=thinking_only(3.0, revoke),
+    servers.remote_chat = httpx.Response(200, content=thinking_only(3.0, revoke),
                                          headers={"content-type": "text/event-stream"})
     streamed, took = timed(lambda: ruled_ask(app, made["key"], stream=True))
     assert app_key_api.STOPPED in streamed.text and took < ANSWER_WITHIN_SECONDS
@@ -1688,11 +1695,11 @@ async def one_endless_line():
 
 @pytest.mark.parametrize("upstream", [endless_tool_arguments, one_endless_line], ids=["tool arguments", "one line"])
 @pytest.mark.parametrize("stream", [False, True])
-def test_a_ruled_reply_is_cut_off_by_its_raw_size(app, admin, friend, servers, arty_rules, monkeypatch, upstream,
+def test_a_ruled_reply_is_cut_off_by_its_raw_size(app, admin, remote_a, servers, arty_rules, monkeypatch, upstream,
                                                   stream):
     monkeypatch.setattr(app_key_api, "MAX_REPLY_BYTES", 10_000)
     made = make_key(admin)
-    servers.friend_chat = httpx.Response(200, content=upstream(), headers={"content-type": "text/event-stream"})
+    servers.remote_chat = httpx.Response(200, content=upstream(), headers={"content-type": "text/event-stream"})
     answered = ruled_ask(app, made["key"], stream=stream, tools=[SEARCH_TOOL])
     assert app_key_api.TOO_LONG in answered.text and "tool_calls\": [{" not in answered.text
 
@@ -1714,73 +1721,75 @@ def plain_web_replies(monkeypatch):
     return asked
 
 
-def test_the_web_chat_refuses_a_model_its_connection_does_not_list(app, admin, friend, servers, plain_web_replies):
+def test_the_web_chat_refuses_a_model_its_connection_does_not_list(app, admin, remote_a, servers, plain_web_replies):
     check_connections()
     sam = login(app, "sam@example.com")
-    answers = [web_chat(sam, friend["id"], name).status_code for name in ("friend-model", "any-name-at-all",
+    answers = [web_chat(sam, remote_a["id"], name).status_code for name in ("remote-model-a", "any-name-at-all",
                                                                           "example-9b-abl/")]
-    assert answers == [200, 404, 403] and plain_web_replies == ["friend-model"]
+    assert answers == [200, 404, 403] and plain_web_replies == ["remote-model-a"]
 
 
-def test_the_web_chat_rechecks_a_stale_list_before_refusing(app, admin, friend, servers, plain_web_replies, clock):
+def test_the_web_chat_rechecks_a_stale_list_before_refusing(app, admin, remote_a, servers, plain_web_replies, clock):
     check_connections()
-    servers.friend_list = lambda: httpx.Response(200, json={"data": [{"id": "friend-model"}, {"id": "new-model"}]})
+    servers.remote_list = lambda: httpx.Response(200, json={"data": [{"id": "remote-model-a"}, {"id": "new-model"}]})
     sam = login(app, "sam@example.com")
-    assert web_chat(sam, friend["id"], "new-model").status_code == 404
+    assert web_chat(sam, remote_a["id"], "new-model").status_code == 404
     clock.now += routes.FRESH_CHECK_SECONDS
-    assert web_chat(sam, friend["id"], "new-model").status_code == 200 and plain_web_replies == ["new-model"]
+    assert web_chat(sam, remote_a["id"], "new-model").status_code == 200 and plain_web_replies == ["new-model"]
 
 
-def test_the_web_chat_still_takes_auto_and_arty(app, admin, friend, brain, servers, plain_web_replies):
+def test_the_web_chat_still_takes_auto_and_arty(app, admin, remote_a, brain, servers, plain_web_replies, monkeypatch):
+    monkeypatch.setattr(routes, "auto_model_settings", auto_model.AutoModelSettings(config.data_dir))
+    assert admin.put("/api/auto-model", json={"roles": {"chat": LISTED[0]}}).status_code == 200
     check_connections()
     assert web_chat(admin, brain["id"], "Arty").status_code == 200
-    assert web_chat(admin, "", auto_model.AUTO).status_code == 200
-    assert plain_web_replies[0] == "Arty" and len(plain_web_replies) == 2
+    assert web_chat(admin, "", auto_model.AUTO).status_code == 503
+    assert plain_web_replies == ["Arty"]
 
 
-def test_models_behind_an_unreadable_list_stay_choosable(app, admin, friend, servers):
+def test_models_behind_an_unreadable_list_stay_choosable(app, admin, remote_a, servers):
     check_connections()
-    servers.friend_list = lambda: httpx.Response(200, content=b"<html>tunnel error page</html>")
+    servers.remote_list = lambda: httpx.Response(200, content=b"<html>tunnel error page</html>")
     check_connections()
-    state = routes.connection_health.state(friend["id"])
+    state = routes.connection_health.state(remote_a["id"])
     assert state.error_kind == connection_health.BAD_ANSWER and routes._may_chat_through(state)
     shown = picker(admin)
     assert {m["id"] for m in shown} == set(LISTED) and not any(m["offline"] for m in shown)
 
 
-def test_other_listing_failures_still_mark_their_models_offline(app, admin, friend, servers):
+def test_other_listing_failures_still_mark_their_models_offline(app, admin, remote_a, servers):
     check_connections()
-    servers.friend_list = lambda: httpx.Response(503, json={"error": "busy"})
+    servers.remote_list = lambda: httpx.Response(503, json={"error": "busy"})
     shown = picker(admin)
     assert shown and all(m["offline"] for m in shown)
 
 
-def test_the_web_chat_checks_a_connection_never_checked_before_it_answers(app, admin, friend, servers,
+def test_the_web_chat_checks_a_connection_never_checked_before_it_answers(app, admin, remote_a, servers,
                                                                           plain_web_replies):
-    assert routes.connection_health.state(friend["id"]) is None
+    assert routes.connection_health.state(remote_a["id"]) is None
     sam = login(app, "sam@example.com")
-    answers = [web_chat(sam, friend["id"], name).status_code for name in ("any-name-at-all", "friend-model")]
-    assert answers == [404, 200] and plain_web_replies == ["friend-model"]
+    answers = [web_chat(sam, remote_a["id"], name).status_code for name in ("any-name-at-all", "remote-model-a")]
+    assert answers == [404, 200] and plain_web_replies == ["remote-model-a"]
 
 
-def test_a_ruled_request_asks_the_model_server_for_plain_bytes(app, admin, friend, servers, arty_rules):
+def test_a_ruled_request_asks_the_model_server_for_plain_bytes(app, admin, remote_a, servers, arty_rules):
     ruled_ask(app, make_key(admin)["key"])
     assert servers.chats[-1]["accept_encoding"] == "identity"
 
 
 @pytest.mark.parametrize("stream", [False, True])
-def test_a_model_server_that_times_out_after_the_request_still_uses_up_a_reply(app, admin, friend, servers, stream):
+def test_a_model_server_that_times_out_after_the_request_still_uses_up_a_reply(app, admin, remote_a, servers, stream):
     secret = make_key(admin, daily_limit=1)["key"]
     check_connections()
-    servers.friend_down = "timeout"
+    servers.remote_down = "timeout"
     assert [ask(app, secret, stream=stream).status_code for _ in range(2)] == [502, 429]
 
 
 @pytest.mark.parametrize("stream", [False, True])
-def test_a_model_server_that_cannot_be_reached_gives_the_reply_back(app, admin, friend, servers, stream):
+def test_a_model_server_that_cannot_be_reached_gives_the_reply_back(app, admin, remote_a, servers, stream):
     secret = make_key(admin, daily_limit=1)["key"]
     check_connections()
-    servers.friend_down = "refused"
+    servers.remote_down = "refused"
     assert [ask(app, secret, stream=stream).status_code for _ in range(2)] == [502, 502]
 
 
@@ -1791,29 +1800,29 @@ class TimesOutAfterSomeBytes(httpx.AsyncByteStream):
         raise httpx.ReadTimeout("no bytes for a long time")
 
 
-def test_a_whole_reply_that_breaks_off_after_some_bytes_still_uses_up_a_reply(app, admin, friend, servers):
+def test_a_whole_reply_that_breaks_off_after_some_bytes_still_uses_up_a_reply(app, admin, remote_a, servers):
     secret = make_key(admin, daily_limit=1)["key"]
-    servers.friend_chat = httpx.Response(200, stream=TimesOutAfterSomeBytes())
+    servers.remote_chat = httpx.Response(200, stream=TimesOutAfterSomeBytes())
     assert [ask(app, secret).status_code for _ in range(2)] == [502, 429]
 
 
 @pytest.mark.parametrize("failure, given_back", [("timeout", False), ("refused", True)])
-def test_a_ruled_whole_reply_gives_back_only_when_the_model_server_was_never_reached(app, admin, friend, servers,
+def test_a_ruled_whole_reply_gives_back_only_when_the_model_server_was_never_reached(app, admin, remote_a, servers,
                                                                                      arty_rules, failure, given_back):
     secret = make_key(admin, daily_limit=1)["key"]
     check_connections()
-    servers.friend_down = failure
+    servers.remote_down = failure
     statuses = [ruled_ask(app, secret).status_code for _ in range(2)]
     assert statuses == ([502, 502] if given_back else [502, 429])
 
 
 @pytest.mark.parametrize("down", ["refused", "timeout", "503"])
-def test_a_first_chat_to_a_connection_that_turns_out_down_is_refused(app, admin, friend, servers,
+def test_a_first_chat_to_a_connection_that_turns_out_down_is_refused(app, admin, remote_a, servers,
                                                                      plain_web_replies, down):
-    servers.friend_down = down
-    assert routes.connection_health.state(friend["id"]) is None
+    servers.remote_down = down
+    assert routes.connection_health.state(remote_a["id"]) is None
     sam = login(app, "sam@example.com")
-    assert web_chat(sam, friend["id"], "any-name-at-all").status_code == 503
+    assert web_chat(sam, remote_a["id"], "any-name-at-all").status_code == 503
     assert plain_web_replies == []
 
 
@@ -1840,28 +1849,28 @@ def replies_used_today():
 
 @pytest.mark.parametrize("stream", [False, True])
 @pytest.mark.parametrize("work", UNSPOKEN_WORK.keys())
-def test_a_ruled_reply_that_fails_after_unspoken_work_still_uses_up_a_reply(app, admin, friend, servers, arty_rules,
+def test_a_ruled_reply_that_fails_after_unspoken_work_still_uses_up_a_reply(app, admin, remote_a, servers, arty_rules,
                                                                             work, stream):
     secret = make_key(admin, daily_limit=5)["key"]
-    servers.friend_chat = httpx.Response(200, content=pieces_then_an_error(UNSPOKEN_WORK[work]), headers=EVENT_STREAM)
+    servers.remote_chat = httpx.Response(200, content=pieces_then_an_error(UNSPOKEN_WORK[work]), headers=EVENT_STREAM)
     answered = ruled_ask(app, secret, stream=stream, tools=[SEARCH_TOOL])
     assert app_key_api.UPSTREAM_FAILED in answered.text and replies_used_today() == 1
 
 
 @pytest.mark.parametrize("stream", [False, True])
-def test_a_ruled_reply_that_fails_before_any_work_gives_the_reply_back(app, admin, friend, servers, arty_rules, stream):
+def test_a_ruled_reply_that_fails_before_any_work_gives_the_reply_back(app, admin, remote_a, servers, arty_rules, stream):
     secret = make_key(admin, daily_limit=5)["key"]
-    servers.friend_chat = httpx.Response(200, content=pieces_then_an_error([]), headers=EVENT_STREAM)
+    servers.remote_chat = httpx.Response(200, content=pieces_then_an_error([]), headers=EVENT_STREAM)
     answered = ruled_ask(app, secret, stream=stream)
     assert app_key_api.UPSTREAM_FAILED in answered.text and replies_used_today() == 0
 
 
-def friend_chats_answer_after(servers, monkeypatch, seconds, status):
+def remote_chats_answer_after(servers, monkeypatch, seconds, status):
     real = servers.answer
 
     async def answer_late(request):
-        is_friend_chat = str(request.url).startswith(FRIEND_URL) and not request.url.path.endswith("/models")
-        if not is_friend_chat:
+        is_remote_chat = str(request.url).startswith(REMOTE_A_URL) and not request.url.path.endswith("/models")
+        if not is_remote_chat:
             return real(request)
         await asyncio.sleep(seconds)
         return httpx.Response(status, json={"error": {"message": "Failed to parse tool call arguments as JSON"}})
@@ -1874,41 +1883,41 @@ LATE_SECONDS = 0.3
 
 @pytest.mark.parametrize("stream", [False, True])
 @pytest.mark.parametrize("status", [500, 401])
-def test_a_model_server_failure_that_comes_late_still_uses_up_a_reply(app, admin, friend, servers, monkeypatch,
+def test_a_model_server_failure_that_comes_late_still_uses_up_a_reply(app, admin, remote_a, servers, monkeypatch,
                                                                        status, stream):
     monkeypatch.setattr(app_key_api, "GIVE_BACK_WITHIN_SECONDS", LATE_SECONDS / 3)
     secret = make_key(admin, daily_limit=5)["key"]
     check_connections()
-    friend_chats_answer_after(servers, monkeypatch, LATE_SECONDS, status)
+    remote_chats_answer_after(servers, monkeypatch, LATE_SECONDS, status)
     assert ask(app, secret, stream=stream).status_code == 502 and replies_used_today() == 1
 
 
 @pytest.mark.parametrize("stream", [False, True])
-def test_a_model_server_failure_that_comes_quickly_gives_the_reply_back(app, admin, friend, servers, monkeypatch,
+def test_a_model_server_failure_that_comes_quickly_gives_the_reply_back(app, admin, remote_a, servers, monkeypatch,
                                                                          stream):
     secret = make_key(admin, daily_limit=5)["key"]
     check_connections()
-    friend_chats_answer_after(servers, monkeypatch, 0, 500)
+    remote_chats_answer_after(servers, monkeypatch, 0, 500)
     assert ask(app, secret, stream=stream).status_code == 502 and replies_used_today() == 0
 
 
 @pytest.mark.parametrize("stream", [False, True])
-def test_a_ruled_model_server_failure_that_comes_late_still_uses_up_a_reply(app, admin, friend, servers, arty_rules,
+def test_a_ruled_model_server_failure_that_comes_late_still_uses_up_a_reply(app, admin, remote_a, servers, arty_rules,
                                                                             monkeypatch, stream):
     monkeypatch.setattr(app_key_api, "GIVE_BACK_WITHIN_SECONDS", LATE_SECONDS / 3)
     secret = make_key(admin, daily_limit=5)["key"]
-    friend_chats_answer_after(servers, monkeypatch, LATE_SECONDS, 500)
+    remote_chats_answer_after(servers, monkeypatch, LATE_SECONDS, 500)
     answered = ruled_ask(app, secret, stream=stream)
     assert app_key_api.UPSTREAM_FAILED in answered.text and replies_used_today() == 1
 
 
 @pytest.mark.parametrize("stream", [False, True])
-def test_a_ruled_model_server_never_reached_gives_the_reply_back_however_long_it_took(app, admin, friend, servers,
+def test_a_ruled_model_server_never_reached_gives_the_reply_back_however_long_it_took(app, admin, remote_a, servers,
                                                                                       arty_rules, monkeypatch, stream):
     monkeypatch.setattr(app_key_api, "GIVE_BACK_WITHIN_SECONDS", -1.0)
     secret = make_key(admin, daily_limit=5)["key"]
     check_connections()
-    servers.friend_down = "refused"
+    servers.remote_down = "refused"
     answered = ruled_ask(app, secret, stream=stream)
     assert app_key_api.UPSTREAM_FAILED in answered.text and replies_used_today() == 0
 
@@ -1920,9 +1929,9 @@ async def thinking_then_a_misshapen_chunk_then_text():
 
 
 @pytest.mark.parametrize("stream", [False, True])
-def test_a_misshapen_chunk_is_skipped_and_the_reply_goes_on(app, admin, friend, servers, arty_rules, stream):
+def test_a_misshapen_chunk_is_skipped_and_the_reply_goes_on(app, admin, remote_a, servers, arty_rules, stream):
     secret = make_key(admin, daily_limit=5)["key"]
-    servers.friend_chat = httpx.Response(200, content=thinking_then_a_misshapen_chunk_then_text(),
+    servers.remote_chat = httpx.Response(200, content=thinking_then_a_misshapen_chunk_then_text(),
                                          headers=EVENT_STREAM)
     answered = ruled_ask(app, secret, stream=stream)
     assert answered.status_code == 200 and "done" in answered.text and replies_used_today() == 1
@@ -1946,7 +1955,7 @@ STARFIRE_BREAKS = {"at once": ((), True), "after some text": ((("delta", "hi"),)
 
 @pytest.mark.parametrize("stream", [False, True])
 @pytest.mark.parametrize("when", STARFIRE_BREAKS.keys())
-def test_a_starfire_failure_in_a_ruled_reply_gives_back_only_before_any_text(app, admin, friend, servers, arty_rules,
+def test_a_starfire_failure_in_a_ruled_reply_gives_back_only_before_any_text(app, admin, remote_a, servers, arty_rules,
                                                                              monkeypatch, when, stream):
     before, given_back = STARFIRE_BREAKS[when]
     monkeypatch.setattr(app_key_api, "translated_events", events_that_break(before))
@@ -1957,7 +1966,7 @@ def test_a_starfire_failure_in_a_ruled_reply_gives_back_only_before_any_text(app
 
 
 @pytest.mark.parametrize("stream", [False, True])
-def test_a_starfire_failure_in_a_ruled_reply_that_comes_late_still_uses_up_a_reply(app, admin, friend, servers,
+def test_a_starfire_failure_in_a_ruled_reply_that_comes_late_still_uses_up_a_reply(app, admin, remote_a, servers,
                                                                                     arty_rules, monkeypatch, stream):
     monkeypatch.setattr(app_key_api, "GIVE_BACK_WITHIN_SECONDS", -1.0)
     monkeypatch.setattr(app_key_api, "translated_events", events_that_break())
@@ -1971,10 +1980,84 @@ async def forwarding_that_breaks(*args):
 
 
 @pytest.mark.parametrize("window, used", [(app_key_api.GIVE_BACK_WITHIN_SECONDS, 0), (-1.0, 1)])
-def test_a_starfire_failure_gives_the_reply_back_only_when_it_comes_quickly(app, admin, friend, servers, monkeypatch,
+def test_a_starfire_failure_gives_the_reply_back_only_when_it_comes_quickly(app, admin, remote_a, servers, monkeypatch,
                                                                             window, used):
     monkeypatch.setattr(app_key_api, "GIVE_BACK_WITHIN_SECONDS", window)
     monkeypatch.setattr(app_key_api, "forward_as_is", forwarding_that_breaks)
     secret = make_key(admin, daily_limit=5)["key"]
     check_connections()
     assert ask(app, secret).status_code == 500 and replies_used_today() == used
+
+
+def test_a_reply_cut_off_by_the_length_limit_reports_finish_reason_length(app, admin, servers):
+    routes.endpoints.add("http://localhost:11434", kind="ollama")
+    servers.ollama_lines = [
+        {"message": {"role": "assistant", "content": "The answer is"}, "done": False},
+        {"message": {"role": "assistant", "content": ""}, "done": True, "done_reason": "length"},
+    ]
+    secret = make_key(admin, email="admin@example.com")["key"]
+    answered = ask(app, secret, model="local-ollama:8b")
+    assert answered.status_code == 200, answered.text
+    choice = answered.json()["choices"][0]
+    assert choice["finish_reason"] == "length"
+    assert choice["message"]["content"] == "The answer is"
+    streamed = ask(app, secret, model="local-ollama:8b", stream=True)
+    events = [line[len("data: "):] for line in streamed.text.split("\n\n") if line.startswith("data: ")]
+    chunks = [json.loads(event) for event in events[:-1]]
+    assert chunks[-1]["choices"][0]["finish_reason"] == "length"
+    assert "".join(chunk["choices"][0]["delta"].get("content") or "" for chunk in chunks) == "The answer is"
+
+
+class SlowArty(FakeArty):
+
+    def __init__(self, seconds):
+        super().__init__()
+        self.seconds = seconds
+
+    async def __call__(self, method, path, json_body=None, **kwargs):
+        await asyncio.sleep(self.seconds)
+        return await super().__call__(method, path, json_body, **kwargs)
+
+
+@pytest.fixture
+def slow_arty(arty_rules, monkeypatch):
+    slow = SlowArty(0.3)
+    monkeypatch.setattr(remote_rules.arty_devices, "ask_brain", slow)
+    monkeypatch.setattr(routes, "CHECKS_GRACE_SECONDS", 0.05)
+    monkeypatch.setattr(routes, "HEARTBEAT_SECONDS", 0.05)
+    return slow
+
+
+def before_the_first_data(answered) -> str:
+    return answered.text[:answered.text.index("data:")]
+
+
+def test_a_streamed_key_reply_is_kept_alive_while_arty_s_rules_are_slow(app, admin, remote_a, servers, slow_arty):
+    secret = make_key(admin)["key"]
+    answered = ruled_ask(app, secret, stream=True)
+    assert answered.status_code == 200
+    waiting = before_the_first_data(answered)
+    assert waiting.count(": keep-alive\n\n") >= 2 and waiting.replace(": keep-alive\n\n", "") == ""
+    assert streamed_text(answered) == "It works, mostly." and answered.text.rstrip().endswith("data: [DONE]")
+
+
+def test_a_streamed_key_reply_whose_slow_rules_fail_ends_with_an_error_and_done(app, admin, remote_a, servers,
+                                                                                slow_arty):
+    slow_arty.down = True
+    secret = make_key(admin, daily_limit=1)["key"]
+    answered = ruled_ask(app, secret, stream=True)
+    events = [line[len("data: "):] for line in answered.text.split("\n\n") if line.startswith("data: ")]
+    assert answered.status_code == 200 and ": keep-alive" in answered.text
+    assert [json.loads(event)["error"]["code"] for event in events[:-1]] == ["upstream_error"] and events[-1] == "[DONE]"
+    assert all(set(json.loads(event)["error"]) == {"message", "type", "code"} for event in events[:-1])
+    assert servers.chats == []
+    slow_arty.down = False
+    assert ruled_ask(app, secret).status_code == 200
+
+
+def test_a_whole_key_reply_with_slow_rules_keeps_its_status_and_plain_json(app, admin, remote_a, servers, slow_arty):
+    secret = make_key(admin)["key"]
+    answered = ruled_ask(app, secret)
+    assert answered.status_code == 200 and answered.text.startswith("{")
+    slow_arty.down = True
+    assert ruled_ask(app, secret).status_code == 502

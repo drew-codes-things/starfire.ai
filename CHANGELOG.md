@@ -1,8 +1,24 @@
 # Changelog
 
-## Unreleased
+## 1.3.0 - 2026-11-27
+
+### Removed
+- `FALLBACK_MODEL`: no other model ever answers in the main model's place. When the main model fails before
+  writing anything, the reply says "The main model couldn't answer just now (reason). Try again in a moment, or pick a
+  different model in the model list." Helper jobs get the same error, and the next request asks the main model again.
+
+### Changed
+- Arty Auto never moves to another model by itself when a default model (or `TASK_MODEL`) is set: no first-listed
+  or leftover guess, the agent guess takes only an exact name such as `Arty` (never `arty/*`), and hidden models
+  are never guessed for pictures. When the default model isn't listed Auto says so; an account that may not use the
+  default model picks a model by hand. A blind model picked by hand still gets a hidden picture helper.
 
 ### Added
+- Naming a model in a chat message ("use the 14B to summarise this", "from now on use X") runs the reply on
+  that model with the account's own access rules; two matches get "Which one did you mean: A or B?" and hidden
+  models can't be named. Only the chat page opts in (`names_a_model`), only the typed text of the latest message
+  counts, a name must be a whole id, a label or a short form of a label, and "from now on" moves the picker
+  instead of being read back from the chat. A refusal never names the model.
 - **starfire Desktop update notice**: inside starfire Desktop the page shows "Version X is available" when a newer
   `desktop-v*` release is on GitHub, with a link that opens the release page in your browser; Dismiss hides it for
   that version only. The page checks shortly after it opens and then once a day through `GET /api/desktop/latest`
@@ -23,11 +39,22 @@
   scheduled tasks or any other run that cannot show a card.
 - When an admin chats in starfire Desktop and `control_my_pc` is not offered, the model gets a one-line note saying
   why and what to change (starfire Desktop not linked, Arty Desktop not running, screen control off in Arty, starfire
-  Desktop too old, a remote or friend model, or a model too small for the tool), so it says "I can't control your PC
+  Desktop too old, a remote model, or a model too small for the tool), so it says "I can't control your PC
   right now because ..." instead of claiming it can only take screenshots. Ruled connections, `/v1` and ordinary
   accounts get no note and hear nothing about the PC.
 
+### Changed
+- The README now follows the layout of the other projects: badges, a contents list, a screenshot, short sections, a
+  "What it can do" and a "Limitations" section, and a pointer to controlling your PC through starfire Desktop. The
+  documentation index no longer describes the local model servers by name. A new test checks every relative link and
+  heading anchor in the Markdown files and that the README and the docs index link every docs page.
+
 ### Fixed
+- A chat whose checks fail in an unexpected way after the keep-alive lines have started now ends with starfire's
+  error message instead of a broken connection; the details go to the server log.
+- starfire Desktop says "Your reply is ready." only when the page has a reply with text, not when a chat stream ends
+  with an error. The page tells Desktop through a call offered only to the starfire page in the main window; an older
+  Desktop keeps its old notice and an older page shows none.
 - Looking at your screen: when ArtyEngine says the chat model cannot see pictures, a vision model the engine confirms can see
   describes the screenshot, but only one on the chat's own connection or inside the home network (never a `remote/` model,
   an outside connection or one under Arty's rules); the step line names it, and with none nothing is captured and the
@@ -35,6 +62,30 @@
   rebuild the end marker, and the describe call runs without thinking.
 - A model error after a tool ran ends the reply with a saved note instead of losing the turn; the error detail stays in the
   log, and a collected answer raises even an error with no text.
+- Main model: a connect or pool timeout and the engine's "model busy" answers no longer hand the reply to the fallback or
+  start the 10 minute rest; a busy answer is waited out once (5 seconds) and the main asked again.
+- The Arty Auto "Default model" and "Coding model" count only when they are local models starfire can see; Arty, models
+  through Arty, remote, retired or unknown ids fall back to `TASK_MODEL` with a log line, and the Settings lists offer
+  local models only.
+- Helper jobs and plain chats on any qwen3 model (including `hf.co` ids such as Qwen3.6) are sent `think: false`
+  unless asked otherwise, and helper jobs on them get 1024 tokens.
+- An account without Arty starts on its first local model, and on a Remote model only when nothing local is allowed.
+- starfire waits for Arty's rules longer than Arty's 300 second safety check, and still refuses when the wait runs out.
+- An Arty reply its fallback wrote is saved, counted and labelled as the fallback model.
+- The length-limit note is never sent back to a model or read aloud; a reply that was all thinking says so; scheduled
+  and tool-run results get "(This result was cut off at the length limit.)" and helper jobs no note.
+- A `MODEL_RENAMES` target that brings its own tools goes to Arty's connection (`ARTY_BASE_URL`), and a model server
+  refuses it clearly when there is none. Scheduled tasks, email rules, saved choices and chats follow the renames.
+- Auto takes an admin-named model from the local connection when the same id is also listed remotely.
+- Only Arty's own connection (or a model that brings its own tools) may name the model that answered a reply.
+- A page chat whose checks with Arty take over 10 seconds starts its stream with keep-alive lines every 15 seconds, so a
+  proxy such as Cloudflare (125 s) does not cut it off; no reply text is sent until the checks pass, and a failure
+  ends the stream with starfire's own message.
+- App keys: a streamed `/v1/chat/completions` reply gets the same keep-alive lines while Arty's checks run, and a
+  failure ends it with an OpenAI-style error event and `data: [DONE]`. Whole (non-streamed) replies are unchanged.
+- The starting model counts a `remote/` model as remote, as the server does, and never picks an embedding model.
+- A saved Default model is no longer reported as missing before the first model listing.
+- An account with only remote models no longer sees the Arty tab or Arty Auto.
 
 ### starfire Desktop 1.1.0
 Changes since desktop-v1.0.0:
@@ -48,6 +99,12 @@ Changes since desktop-v1.0.0:
 - A **Set up starfire Desktop** guide in `desktop/README.md`.
 - Passes `control_my_pc` steps from the starfire page to Arty Desktop, and refuses before sending any step it would
   not show truthfully on its card, such as text Arty Desktop would type differently from how it is written.
+
+### starfire Desktop 1.2.0
+Changes since desktop-v1.1.0:
+- "Your reply is ready." is shown when the starfire page reports a reply with text, not when a chat stream simply
+  ends, so a stream that ends with an error no longer says a reply is ready. The page tells the app through a call
+  offered only to the starfire page in the main window, so an older page shows no notice with this app.
 
 ## 1.2.0 - 2026-11-26
 

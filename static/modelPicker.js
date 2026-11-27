@@ -60,7 +60,14 @@ function pickModel(model) {
 function modelPickerText(model) {
   if (!model) return models.length ? 'select a model' : 'no models';
   if (isAutoModel(model)) return AUTO_MODEL_NAME;
-  return isOfflineModel(model) ? `${model.id} (${OFFLINE_WORD})` : model.id;
+  const name = modelDisplayName(model);
+  return isOfflineModel(model) ? `${name} (${OFFLINE_WORD})` : name;
+}
+
+let pickerTab = null;
+
+function shownPickerTab(current) {
+  return pickerTab || pickerMode(current, models);
 }
 
 function onlineModels() {
@@ -143,7 +150,7 @@ function modelMenuOption(m, current) {
   li.className = 'model-option' + (isAutoModel(m) ? ' auto-option' : '') + (down ? ' offline' : '') + (current && modelKey(current) === modelKey(m) ? ' selected' : '');
   li.setAttribute('role', 'option');
   li.dataset.key = modelKey(m);
-  const shownName = down ? m.id : modelPickerText(m);
+  const shownName = down ? modelDisplayName(m) : modelPickerText(m);
   li.innerHTML = `<span class="model-option-name">${escapeHtml(shownName)}</span><span class="model-option-meta">${escapeHtml(modelOptionMeta(m))}</span>`;
   if (down) {
     li.setAttribute('aria-disabled', 'true');
@@ -166,19 +173,27 @@ function modelMenuHeading(text) {
 }
 
 function renderPickerMode(current) {
-  const mode = pickerMode(current);
-  for (const [id, shownMode] of [['modelModeAuto', PICKER_MODE_AUTO], ['modelModeChosen', PICKER_MODE_CHOSEN]]) {
+  const mode = shownPickerTab(current);
+  $('modelModeArty').hidden = !offersArty(models);
+  for (const [id, shownMode] of [['modelModeArty', PICKER_MODE_ARTY], ['modelModeChosen', PICKER_MODE_CHOSEN]]) {
     const pressed = mode === shownMode;
     $(id).classList.toggle('active', pressed);
     $(id).setAttribute('aria-pressed', String(pressed));
   }
 }
 
-function highlightFirstChosenModel() {
+function highlightFirstModel() {
   const options = [...$('modelMenuList').querySelectorAll('.model-option')];
-  const firstModel = options.find(o => !o.classList.contains('auto-option')) || options[0];
+  const firstModel = options[0];
   options.forEach(o => o.classList.toggle('highlight', o === firstModel));
   if (firstModel) firstModel.scrollIntoView({ block: 'nearest' });
+}
+
+function showPickerTab(mode) {
+  pickerTab = mode;
+  renderModelMenu();
+  highlightFirstModel();
+  $('modelSearch').focus();
 }
 
 function renderModelMenu() {
@@ -189,7 +204,7 @@ function renderModelMenu() {
   const highlightedKey = highlighted ? highlighted.dataset.key : '';
   renderPickerMode(current);
   list.innerHTML = '';
-  for (const m of modelMenuEntries(models, q)) list.appendChild(m.heading ? modelMenuHeading(m.heading) : modelMenuOption(m, current));
+  for (const m of modelMenuEntries(models, q, shownPickerTab(current))) list.appendChild(m.heading ? modelMenuHeading(m.heading) : modelMenuOption(m, current));
   if (!list.children.length) list.innerHTML = '<li class="model-menu-heading">no matches</li>';
   const options = [...list.querySelectorAll('.model-option')];
   const keep = options[highlightIndexAfterRender(options.map(o => o.dataset.key), highlightedKey)];
@@ -202,6 +217,7 @@ function openModelMenu() {
   menu.hidden = false;
   $('modelPickerBtn').setAttribute('aria-expanded', 'true');
   $('modelSearch').value = '';
+  pickerTab = pickerMode(currentModel(), models);
   renderModelMenu();
   refreshModelHealth();
   $('modelSearch').focus();
@@ -212,15 +228,8 @@ $('modelPickerBtn').onclick = () => {
   else closeAllMenus();
 };
 $('modelSearch').addEventListener('input', renderModelMenu);
-$('modelModeAuto').onclick = () => {
-  pickModel(autoModelEntry());
-  closeAllMenus();
-  $('modelPickerBtn').focus();
-};
-$('modelModeChosen').onclick = () => {
-  highlightFirstChosenModel();
-  $('modelSearch').focus();
-};
+$('modelModeArty').onclick = () => showPickerTab(PICKER_MODE_ARTY);
+$('modelModeChosen').onclick = () => showPickerTab(PICKER_MODE_CHOSEN);
 $('modelSearch').addEventListener('keydown', e => {
   const options = [...$('modelMenuList').querySelectorAll('.model-option')];
   const at = options.findIndex(o => o.classList.contains('highlight'));

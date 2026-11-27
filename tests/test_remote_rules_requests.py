@@ -16,7 +16,7 @@ clock = test_app_keys.clock
 servers = test_app_keys.servers
 app = test_app_keys.app
 admin = test_app_keys.admin
-friend = test_app_keys.friend
+remote_a = test_app_keys.remote_a
 arty_rules = test_app_keys.arty_rules
 
 HARMFUL = "the request Arty would decline"
@@ -79,7 +79,7 @@ def reached_the_model(servers) -> bool:
 
 
 @pytest.mark.parametrize("shape", CHECKED_SHAPES)
-def test_every_message_since_the_last_reply_goes_through_artys_check(app, admin, friend, servers, picky_arty, shape):
+def test_every_message_since_the_last_reply_goes_through_artys_check(app, admin, remote_a, servers, picky_arty, shape):
     answered = ruled_ask(app, make_key(admin)["key"], messages=CHECKED_SHAPES[shape])
     assert answered.status_code == 200, answered.text
     assert ARTY_DECLINE in answered.text
@@ -87,7 +87,7 @@ def test_every_message_since_the_last_reply_goes_through_artys_check(app, admin,
 
 
 @pytest.mark.parametrize("shape", CLOSED_SHAPES)
-def test_an_unanswered_request_before_the_newest_message_is_left_out_not_repeated(app, admin, friend, servers,
+def test_an_unanswered_request_before_the_newest_message_is_left_out_not_repeated(app, admin, remote_a, servers,
                                                                                   picky_arty, shape):
     answered = ruled_ask(app, make_key(admin)["key"], messages=CLOSED_SHAPES[shape])
     assert answered.status_code == 200, answered.text
@@ -98,7 +98,7 @@ def test_an_unanswered_request_before_the_newest_message_is_left_out_not_repeate
 
 
 @pytest.mark.parametrize("shape", REFUSED_SHAPES)
-def test_roles_and_parts_arty_cannot_read_are_refused_on_a_ruled_connection(app, admin, friend, servers, picky_arty,
+def test_roles_and_parts_arty_cannot_read_are_refused_on_a_ruled_connection(app, admin, remote_a, servers, picky_arty,
                                                                             shape):
     answered = ruled_ask(app, make_key(admin)["key"], messages=REFUSED_SHAPES[shape])
     assert answered.status_code == 400, answered.text
@@ -107,7 +107,7 @@ def test_roles_and_parts_arty_cannot_read_are_refused_on_a_ruled_connection(app,
     assert not reached_the_model(servers)
 
 
-def test_a_conversation_arty_accepts_still_reaches_the_model(app, admin, friend, servers, picky_arty):
+def test_a_conversation_arty_accepts_still_reaches_the_model(app, admin, remote_a, servers, picky_arty):
     answered = ruled_ask(app, make_key(admin)["key"], messages=[
         {"role": "developer", "content": "Answer briefly."}, {"role": "user", "content": "hello"},
         {"role": "assistant", "content": "Hi."}, {"role": "user", "content": [{"type": "text", "text": "and otters?"}]}])

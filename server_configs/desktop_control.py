@@ -61,7 +61,7 @@ UNOFFERED_REASONS = {
     "screen_control_off": ("screen control is turned off in Arty Desktop",
                            "turn on screen control and computer control in Arty Desktop's settings"),
     "desktop_outdated": ("this starfire Desktop is too old to control the PC", "update starfire Desktop"),
-    REMOTE_MODEL: ("the chosen model runs in the cloud or on a remote or friend's connection",
+    REMOTE_MODEL: ("the chosen model runs in the cloud or on a remote connection",
                    "pick a model that runs on this home network"),
     MODEL_TOO_SMALL: ("the chosen model is too small to control the PC", "pick a larger local model"),
 }

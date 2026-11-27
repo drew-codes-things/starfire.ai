@@ -167,7 +167,7 @@ logged.
 ## An outside model server behind starfire
 
 A model server on another machine, for example llama.cpp's `llama-server` started with
-`--api-key` and reached through a Cloudflare tunnel at `https://friend.example.com/v1`, is added
+`--api-key` and reached through a Cloudflare tunnel at `https://models.example.com/v1`, is added
 under **Settings → Connections → Add API provider → Other (OpenAI-compatible)** with that address
 and its API key. starfire lists its models from `<address>/models`, keeps the key encrypted like
 every provider key, and sends chats to `<address>/chat/completions` with the key as a bearer

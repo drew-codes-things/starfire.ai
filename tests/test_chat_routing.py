@@ -358,3 +358,20 @@ def test_the_reply_size_cap_counts_what_the_model_server_sent_after_unpacking():
                 return [line async for line in chat_stream._capped_lines(streamed, cap)]
 
     assert asyncio.run(lines()) == [None]
+
+
+def test_the_app_keeps_saved_settings_out_of_the_working_data_folder(app, tmp_path):
+    working = os.path.realpath(os.path.join(ROOT, "data"))
+    for folder in (config.data_dir, os.path.dirname(routes.auto_model_settings.path)):
+        assert os.path.realpath(folder) != working
+        assert os.path.realpath(folder).startswith(os.path.realpath(str(tmp_path)))
+
+
+def test_tests_never_write_the_working_connection_files(tmp_path):
+    import arty_devices
+    working = os.path.realpath(os.path.join(ROOT, "data"))
+    files = [routes.endpoints.path, arty_devices.endpoints.path, routes.api_keys.api_keys_file,
+             arty_devices.api_keys.api_keys_file, routes.connection_health._remembered_path]
+    for path in (path for path in files if path is not None):
+        folder = os.path.realpath(os.path.dirname(path))
+        assert folder != working and folder.startswith(os.path.realpath(str(tmp_path))), path

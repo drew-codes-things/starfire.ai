@@ -126,7 +126,7 @@ async function loadModels({ quiet = false } = {}) {
     try { localStorage.removeItem('sf_default_model'); } catch (_) {}
 
     els.modelList.innerHTML = '';
-    if (models.length) els.modelList.appendChild(modelOption(autoModelEntry()));
+    if (offersArty(models)) els.modelList.appendChild(modelOption(autoModelEntry()));
     for (const m of models) els.modelList.appendChild(modelOption(m));
 
     showModelChoice(shownBefore ? choiceOf(shownBefore) : null);
@@ -163,7 +163,7 @@ function assistantMessage(text, model, readUntrusted, record) {
 
 function apiMessages(list) {
   return list.map(m => {
-    const message = { role: m.role, content: m.content };
+    const message = { role: m.role, content: m.role === 'assistant' ? withoutCutOffNote(m.content) : m.content };
     if (m.attachments && m.attachments.length) message.attachments = m.attachments.map(a => a.id);
     return message;
   });
@@ -220,6 +220,7 @@ async function send(text, overrideModel, extra = {}) {
         enabled_mcp_servers: modelHasOwnTools(model) ? [] : [...enabledMcpServers],
         enabled_builtin_tools: modelHasOwnTools(model) ? [] : [...enabledBuiltinTools],
         earlier_untrusted_content: sideChatContext(sideChat, messages).some(m => m.untrustedRead === true),
+        names_a_model: true,
         ...(desktopScreen ? { desktop_screen: true } : {}),
         ...(desktopBrowser ? { desktop_browser: true } : {}),
         ...(desktopControl.offered ? { desktop_control: true } : {}),
@@ -297,7 +298,7 @@ function pickedModel(choice) {
 
 async function streamReply({ model, aiIdx, startsNewChat, open, giveBack }) {
   abortController = new AbortController();
-  const typing = showTypingIndicator(isAutoModel(model) ? AUTO_MODEL_NAME : model.id);
+  const typing = showTypingIndicator(modelDisplayName(model));
 
   let replyModel = model;
   let autoRole = null;
@@ -317,7 +318,7 @@ async function streamReply({ model, aiIdx, startsNewChat, open, giveBack }) {
     activeSpeaker = speaker;
   };
   if (!isAutoModel(model)) startSpeaker(model);
-  const replyLabel = () => autoPickLabel(replyModel.id, autoRole);
+  const replyLabel = () => autoPickLabel(modelDisplayName(replyModel), autoRole);
 
   setStatus('loading', 'waiting...');
   const replyMeter = createReplyMeter({ countsSteps: !modelHasOwnTools(model) });
@@ -333,6 +334,7 @@ async function streamReply({ model, aiIdx, startsNewChat, open, giveBack }) {
     } else if (obj.model_choice) {
       replyModel = pickedModel(obj.model_choice);
       autoRole = obj.model_choice.role || null;
+      if (persistedChoice(obj.model_choice)) pickModel(replyModel);
       replyMeter.countsSteps = !modelHasOwnTools(replyModel);
       if (!speaker) startSpeaker(replyModel);
       setStatus('loading', replyLabel());
@@ -348,7 +350,7 @@ async function streamReply({ model, aiIdx, startsNewChat, open, giveBack }) {
         renderer = createStreamRenderer(aiLine, { render: markdownRender });
       }
       renderer.push(obj.delta);
-      if (speaker) speaker.push(obj.delta);
+      if (speaker && !isCutOffNote(obj.delta)) speaker.push(obj.delta);
       els.output.scrollTop = els.output.scrollHeight;
       noteText(replyMeter, obj.delta.length, performance.now());
       liveChatStats.follow(replyMeter);
@@ -400,11 +402,12 @@ async function streamReply({ model, aiIdx, startsNewChat, open, giveBack }) {
       messages[aiIdx] = assistantMessage(fullText, replyModel, readUntrusted, replyRecordNow());
       if (aiActions) addActionButtons('ai', aiRow, aiActions, aiIdx);
       if (speaker) speaker.finish().then(() => { if (callModeActive() && activeSpeaker === speaker) setTimeout(listenForCallTurn, 250); });
-      else if (callModeActive()) speakThenListen(fullText);
-      else if (prefs.autoSpeak) speakText(fullText);
+      else if (callModeActive()) speakThenListen(withoutCutOffNote(fullText));
+      else if (prefs.autoSpeak) speakText(withoutCutOffNote(fullText));
       if (prefs.followUps && aiRow && !callModeActive()) showFollowUps(aiRow, replyModel);
     }
     await persistSession();
+    if (fullText) tellDesktopTheReplyIsReady(window);
     if (startsNewChat && fullText && currentSessionId) describeNewSession(currentSessionId, replyModel);
     if (aiLine && fullText) verifyCodeBlocks(aiLine, aiIdx, replyModel);
   } catch (e) {
@@ -475,7 +478,8 @@ async function continueResponse(idx) {
   contentEl.classList.add('streaming');
   setStatus('loading', 'continuing...');
   let streamError = null;
-  const separator = /\s$/.test(target.content) ? '' : ' ';
+  const kept = withoutCutOffNote(target.content);
+  const separator = /\s$/.test(kept) ? '' : ' ';
   let added = '';
   const continueMeter = createReplyMeter({ countsSteps: false });
   liveChatStats.follow(continueMeter);
@@ -485,7 +489,8 @@ async function continueResponse(idx) {
       signal: abortController.signal,
       body: JSON.stringify({
         endpoint_id: model.endpoint_id, model: model.id,
-        messages: [...apiMessages(sideChatContext(sideChat, messages.slice(0, idx + 1))), { role: 'user', content: CONTINUE_INSTRUCTION }],
+        messages: [...apiMessages(sideChatContext(sideChat, [...messages.slice(0, idx), { ...target, content: kept }])),
+          { role: 'user', content: CONTINUE_INSTRUCTION }],
         system: els.sysPrompt.value.trim() || undefined,
         options: chatOptions(),
       }),
@@ -501,21 +506,21 @@ async function continueResponse(idx) {
       noteText(continueMeter, obj.delta.length, performance.now());
       liveChatStats.follow(continueMeter);
       added += obj.delta;
-      contentEl.innerHTML = markdownRender(target.content + separator + added);
+      contentEl.innerHTML = markdownRender(kept + separator + added);
     });
     showInlineMedia(contentEl);
     if (streamError) throw new Error(streamError);
-    setStatus('ready', model.id);
+    setStatus('ready', modelDisplayName(model));
   } catch (e) {
     if (e.name !== 'AbortError') {
       setStatus('error', 'error');
       printLine('error: ' + e.message, 'err');
     } else {
-      setStatus('ready', model.id);
+      setStatus('ready', modelDisplayName(model));
     }
   } finally {
     if (added) {
-      target.content += separator + added;
+      target.content = kept + separator + added;
       delete target.code_checks;
       const { usage } = replyRecord(continueMeter);
       if (usage) target.usage = usage;

@@ -1268,6 +1268,8 @@ button.chip:hover { background: var(--hover); }
 .param-grid { display: grid; grid-template-columns: 1fr 104px; gap: var(--s-2) var(--s-3); align-items: center; font-size: var(--fs-sm); color: var(--muted); }
 .param-grid label { display: block; }
 .param-grid input { width: 100%; }
+.param-grid input:disabled { opacity: .7; cursor: not-allowed; }
+.param-grid .param-note { grid-column: 1 / -1; margin: calc(-1 * var(--s-1)) 0 0; }
 .controls-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-2); }
 
 .tag-cloud { display: flex; flex-wrap: wrap; gap: var(--s-2); }
